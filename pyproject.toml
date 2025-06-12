@@ -1,0 +1,78 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "recognizer-workshop"
+dynamic = ["version"]
+description = ''
+readme = "README.md"
+requires-python = "=3.11"
+license = "MIT"
+keywords = []
+authors = [
+  { name = "peichins", email = "peichins@users.noreply.github.com" },
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Programming Language :: Python :: Implementation :: PyPy",
+]
+dependencies = []
+
+[project.urls]
+Documentation = "https://github.com/peichins/recognizer-workshop#readme"
+Issues = "https://github.com/peichins/recognizer-workshop/issues"
+Source = "https://github.com/peichins/recognizer-workshop"
+
+[tool.hatch.version]
+path = "src/recognizer_workshop/__about__.py"
+
+[tool.hatch.envs.types]
+extra-dependencies = [
+  "mypy>=1.0.0",
+]
+[tool.hatch.envs.types.scripts]
+check = "mypy --install-types --non-interactive {args:src/recognizer_workshop tests}"
+
+[tool.coverage.run]
+source_pkgs = ["recognizer_workshop", "tests"]
+branch = true
+parallel = true
+omit = [
+  "src/recognizer_workshop/__about__.py",
+]
+
+[tool.coverage.paths]
+recognizer_workshop = ["src/recognizer_workshop", "*/recognizer-workshop/src/recognizer_workshop"]
+tests = ["tests", "*/recognizer-workshop/tests"]
+
+[tool.coverage.report]
+exclude_lines = [
+  "no cov",
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:",
+]
+
+[tool.hatch.envs.test]
+dependencies = [
+  "pytest>=7.0", 
+  "pytest-cov",  
+]
+
+[tool.pytest.ini_options]
+# Tell pytest to ONLY look for tests in the 'tests/' directory.
+# Any other directory at the root level (like 'perch-hoplite', 'src', etc.)
+# will be ignored for test discovery.
+testpaths = [
+    "tests",
+    # If you had any tests directly in 'src/recognizer_workshop/tests' for example,
+    # you might add "src/recognizer_workshop/tests" here too.
+    # Based on your structure, your tests are directly in the 'tests/' folder.
+]
