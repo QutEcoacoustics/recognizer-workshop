@@ -7,7 +7,18 @@ import requests
 class baw_api:
     """Generic wrapper for the BAW API"""
 
-    def __init__(self, token, base_url="https://api.ecosounds.org", debug=False):
+    def __init__(self, token=None, base_url=None, debug=False):
+
+        if not token:
+            token = os.environ.get("API_TOKEN")
+
+        if not token:
+            raise ValueError("API token must be provided either as an argument or through the 'API_TOKEN' environment variable.")
+        
+        if not base_url:
+            # If base_url is not provided, use the environment variable or default to ecosounds
+            base_url = os.environ.get("API_BASE_URL", "https://api.ecosounds.org")
+
         self.base_url = base_url
         self.debug = debug
         self.session = requests.Session() # Initialize requests.Session()
@@ -25,9 +36,24 @@ class baw_api:
         """Sends a GET request to the specified endpoint (expects JSON)."""
         return self.request("GET", endpoint, params=params)
 
+
     def post(self, endpoint, data=None):
         """Sends a POST request to the specified endpoint (expects JSON)."""
         return self.request("POST", endpoint, data=data)
+    
+
+    def baw_filter(self, model, filter_params):
+
+        # allow a full filter payload or only the filter portion
+        if 'filter' in filter_params:
+            filter_payload = filter_params
+        else:
+            filter_payload = {"filter": filter_params}
+
+        endpoint = f"/{model}/filter"
+
+        return self.post(endpoint, data=filter_payload)
+
 
     def download(self, endpoint, save_path, params=None):
         """

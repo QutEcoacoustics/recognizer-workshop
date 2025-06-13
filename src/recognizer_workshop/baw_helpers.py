@@ -3,7 +3,8 @@ Helpers for BAW API interactions for agile modelling
 """
 import random
 from . import baw_api
-
+import csv
+import os
 
 def simple_filter(
     project_id=None,
@@ -112,25 +113,29 @@ def get_embeddings(
 
 
 
-def get_events_for_sites(baw_api, site_ids=None, project_ids=None, region_ids=None):
+def get_events_for_sites(baw_api, filter_params):
     """Get any audio recordings that have events for a specific region.
     region_index is the index of the region in the regions list.
     @param num: maximum number of audio recordings to get.
+
+    This we can only use site_ids, so we need to get those if project or region ids are provided.
     """
 
-    if site_ids is None:
-        site_filter = {}
-        if project_ids is not None:
-            site_filter["projects.id"] = {"in": project_ids}
-        elif region_ids is not None:
-            site_filter["regions.id"] = {"in": region_ids}
-        sites = baw_api.post("/sites/filter?disable_paging=true", data={"filter": site_filter})
-        site_ids = [site["id"] for site in sites.get("data", [])]
-        
+    site_id = filter_params.get("site_id")
+    project_id = filter_params.get("project_id")
+    region_id = filter_params.get("region_id")
 
+    if site_id is None:
+        site_filter = {}
+        if project_id is not None:
+            site_filter["projects.id"] = {"in": project_id}
+        elif region_id is not None:
+            site_filter["regions.id"] = {"in": region_id}
+        sites = baw_api.post("/sites/filter?disable_paging=true", data={"filter": site_filter})
+        site_id = [site["id"] for site in sites.get("data", [])]
     
     ae_filter = {
-        "audio_recordings.site_id": {"in": site_ids}
+        "audio_recordings.site_id": {"in": site_id}
     }
 
     response = baw_api.post("/audio_events/filter?disable_paging=true", data={"filter": ae_filter})
@@ -139,4 +144,56 @@ def get_events_for_sites(baw_api, site_ids=None, project_ids=None, region_ids=No
 
 
 
+def get_verifications_for_sites(api, event_ids=None, filter_params=None):
+    """Gets any audio recordings that have verifications so that we can exclude non-verified machine-generated events.
+    """
 
+    if event_ids is None:
+
+        if filter_params is None:
+            raise ValueError("Either event_ids or filter_params must be provided.")
+        else:
+            # first get all audio events for the target
+            events = get_events_for_sites(api,filter_params)
+            event_ids = [event["id"] for event in events]
+
+    endpoint = f"/verifications/filter?disable_paging=true"
+    filter_params = {
+        "audio_event_id": {"in": event_ids}
+    }
+    response = api.post(endpoint, data={"filter": filter_params})
+
+    return response.get("data", [])
+
+
+
+def get_untagged_events(api, filter_params, save_path=None):
+
+    events = get_events_for_sites(api, filter_params)
+
+    # remove events that have no taggings
+    events_without_taggings = [event for event in events if 'taggings' not in event or len(event['taggings']) == 0]
+
+    # for each event dict in the events list of dicts, only keep the following keys: id, audio_recording_id, start_time_seconds, end_time_seconds
+    events_without_taggings = [{key: event[key] for key in ['id', 'audio_recording_id', 'start_time_seconds', 'end_time_seconds']} for event in events_without_taggings]
+
+    # for each item, add a link, which is https://www.ecosounds.org/listen/audio_recordings/{audio_recording_id}/events/{id}
+    for event in events_without_taggings:
+        # start is the start_time_seconds rounded down to the nearest 30 seconds
+        start = int(event['start_time_seconds'] - (event['start_time_seconds'] % 30))
+        end = start + 30
+        event['link'] = f"https://www.ecosounds.org/listen/{event['audio_recording_id']}?start={start}&end={end}"
+
+    # save as csv file
+    if save_path is not None:
+
+        with open(save_path, 'w', newline='') as csvfile:
+            fieldnames = ['id', 'audio_recording_id', 'start_time_seconds', 'end_time_seconds', 'link']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+            writer.writeheader()
+            for event in events_without_taggings:
+                writer.writerow(event)
+        print(f"Saved {len(events_without_taggings)} untagged events to {save_path}")
+    
+    return events_without_taggings

@@ -28,7 +28,7 @@ def convert_parquet(
     max_size: int = None,
     source_map_fn = lambda x: x,
     ):
-    """Convert a TFRecord embeddings dataset to a Hoplite DB."""
+    """Creates a hoplite database from a folder of parquet files"""
 
     # glob all parquet files in the embeddings path.
     if parquet_filepaths is None:

@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import pandas as pd
 
+
 def lookup_arid(api, original_filename, filter_params):
     """
     Look up the Audio Recording ID (arid) based on the project ID and original filename.
@@ -92,7 +93,10 @@ def get_original_filename_and_type(file_path, type=None, prefix=None):
 
 
 def process_files(api, file_paths, filter_params, extra_labels=None, prefix=None, csv_path=None, type=None):
-    """Process multiple files."""
+    """
+    Process multiple files.
+    For each file, determine the type, extract the original filename, and process the file accordingly.
+    """
     
     #map the hash of the concatenated basenames to get a hash that we can save the arid_map to for cacheing
     #file_paths = file_paths[1:3]
@@ -112,9 +116,9 @@ def process_files(api, file_paths, filter_params, extra_labels=None, prefix=None
         if item['type'] == 'avianz':
             df = process_avianz_file(item['file_path'], arid=arid, extra_labels=extra_labels)
         elif item['type'] == 'raven':
-            df = process_avianz_file(item['file_path'], arid=arid, extra_labels=extra_labels)
+            df = process_raven_file(item['file_path'], arid=arid, extra_labels=extra_labels)
         elif item['type'] == 'arbimon':
-            df = process_avianz_file(item['file_path'], arid=arid, extra_labels=extra_labels)
+            df = process_arbimon_file(item['file_path'], arid=arid, extra_labels=extra_labels)
         else:
             # warning for unknown file type
             print(f"Warning: Unknown file type '{item['type']}' for file {item['file_path']}. Skipping.")
@@ -197,5 +201,20 @@ def process_avianz_file(file_path,
 
 
 
+def process_raven_file(file_path, 
+                project_id=None,
+                arid=None,
+                extra_labels="RavenLite"):
+    """Prepare the file path for Raven."""
+    print(f"Processing Raven file not implemented yet: {file_path}")
+    return None
+
+def process_arbimon_file(file_path, 
+                project_id=None,
+                arid=None,
+                extra_labels="Arbimon"):
+    """Prepare the file path for Raven."""
+    print(f"Processing Raven file not implemented yet: {file_path}")
+    return None
 
 
