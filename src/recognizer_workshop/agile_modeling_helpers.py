@@ -1,7 +1,3 @@
-
-
-
-
 import dataclasses
 import numpy as np
 
@@ -12,7 +8,7 @@ from . import baw_helpers
 from collections import Counter
 
 
-
+# name of the baw provenance to attach to detection events 
 PROVENANCE_NAME = "perch-detection"
 
 
@@ -39,11 +35,6 @@ def upload_events_for_verification(events):
   """
   Use the event upload endpoint to upload a json file as a multipart mime type.
   Add provenance information
-  
-
-
-  
-  
   """
   pass
 
@@ -65,7 +56,8 @@ def labels_from_event_taggings(api, filter_params):
 
     for event in events:
         
-        if event['provenance_id'] is not None:
+        if event['provenance_id'] is None:
+            # no provenance: probably not machine generated (TODO: revisit this assumption)
             for tagging in event.get('taggings', []):
                 tagging['type'] = 'positive'
 
@@ -78,9 +70,29 @@ def labels_from_event_taggings(api, filter_params):
     for event in events:
         event['segments'] = get_event_segments(event)
 
-    # reshape into the format that is best for insterting into the hoplite database
+    # reshape into the format that is best for inserting into the hoplite database
+    items = {}
+    for event in events:
+        arid = event['audio_recording_id']
+        source = f"{api.base_url}/audio_recordings/{arid}/original/"
+        if arid not in items:
+            items[source] = {}
 
-    
+        for tagging in event.get('taggings', []):
+            label_str = tagging['tag']['name']
+            if label_str not in items[source]:
+                items[source][label_str] = {'pos': [], 'neg': []}
+
+            # add the offsets for the segments that the event covers
+            for segment in event['segments']:
+                if tagging['type'] == 'positive':
+                    items[source][label_str]['pos'].append(segment['start'])
+                elif tagging['type'] == 'negative':
+                    items[source][label_str]['neg'].append(segment['start'])
+                else:
+                    # skip because not verified 
+
+    return events
 
 
 
@@ -197,11 +209,6 @@ def get_consensus(verifications):
 
 
 
-
-
-
-import pprint
-
 def get_event_segments(event: dict, segment_duration: int = 5) -> list[dict]:
     """
     Analyzes a single event and breaks it down into non-overlapping segments.
@@ -274,13 +281,13 @@ def get_event_segments(event: dict, segment_duration: int = 5) -> list[dict]:
 def get_events_with_verifications_and_tags(api, filter_params):
 
     events = baw_helpers.get_events_for_sites(api, filter_params)
-
+    print(f"Found {len(events)} events for: {filter_params}")
     # remove events that have no taggings
     events_without_taggings = [event for event in events if 'taggings' not in event or len(event['taggings']) == 0]
     events = [event for event in events if 'taggings' in event and len(event['taggings']) > 0]
-
-    verifications = baw_helpers.get_verifications_for_sites(api, [event['id'] for event in events])
-
+    event_ids = [event['id'] for event in events]
+    verifications = baw_helpers.get_verifications_for_sites(api, event_ids)
+    
     tag_ids = list(set([tagging['tag_id'] for event in events for tagging in event.get('taggings', [])]))
 
     # all tags that are in the events. We need this later to know which are taxonomic tags and which are not.
@@ -301,15 +308,9 @@ def get_events_with_verifications_and_tags(api, filter_params):
         event_id = event['id']
         verifications_for_event = [v for v in verifications if v['audio_event_id'] == event_id]
 
-        event_verified = False
-
-        # if there are no verifications, skip this event
-        if not verifications_for_event:
-            continue
-
         # for each tagging on the event, check if it has a verification, and apply the verification to the tagging. 
         for tagging in event.get('taggings', []):
-            tagging.tag = tags_dict.get(tagging['tag_id'], None)
+            tagging['tag'] = tags_dict.get(tagging['tag_id'], None)
             tag_id = tagging['tag_id']
             verifications_for_tag_and_event = [v for v in verifications_for_event if v['tag_id'] == tag_id]
 
@@ -318,7 +319,10 @@ def get_events_with_verifications_and_tags(api, filter_params):
         # remove non-taxonomic tags
         event['taggings'] = [tagging for tagging in event.get('taggings', []) if tagging['tag'].get('is_taxonomic', False)]
         
-    # we now have 0 or more verifications for each tagging on each event, and one tag record for each tagging on each event.
+    # we now have 
+    # - 1 or more taxonomig taggings for each event
+    # - 0 or more verifications for each tagging on each event, 
+    # - 1 tag record for each tagging on each event.
     return events
 
 

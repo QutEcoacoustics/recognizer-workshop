@@ -131,14 +131,26 @@ def get_events_for_sites(baw_api, filter_params):
             site_filter["projects.id"] = {"in": project_id}
         elif region_id is not None:
             site_filter["regions.id"] = {"in": region_id}
+        else:
+            raise ValueError("Either site_id, project_id or region_id must be provided.")
         sites = baw_api.post("/sites/filter?disable_paging=true", data={"filter": site_filter})
         site_id = [site["id"] for site in sites.get("data", [])]
     
+
+    
+    # this is too slow and times out for lots of sites
     ae_filter = {
         "audio_recordings.site_id": {"in": site_id}
     }
-
     response = baw_api.post("/audio_events/filter?disable_paging=true", data={"filter": ae_filter})
+    # maybe site by site? or if not then paging, but that is complicated
+
+    # sites_data = []
+    # for sid in site_id:
+    #     event_filter = {"audio_recordings.site_id": {"eq": sid}}
+    #     response = baw_api.post("/audio_events/filter?disable_paging=true", data={"filter": event_filter})
+    #     if response and "data" in response:
+    #         sites_data.extend(response["data"])
 
     return response.get("data", [])
 
