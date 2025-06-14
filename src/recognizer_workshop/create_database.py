@@ -26,9 +26,12 @@ def convert_parquet(
     max_count: int = -1,
     db_path: str = './db',
     max_size: int = None,
-    source_map_fn = lambda x: x,
+    source_map_fn = None
     ):
     """Creates a hoplite database from a folder of parquet files"""
+
+    if source_map_fn is None:
+        source_map_fn = lambda x: x
 
     # glob all parquet files in the embeddings path.
     if parquet_filepaths is None:

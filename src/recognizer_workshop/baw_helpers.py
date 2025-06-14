@@ -5,6 +5,7 @@ import random
 from . import baw_api
 import csv
 import os
+from pathlib import Path
 
 def simple_filter(
     project_id=None,
@@ -209,3 +210,14 @@ def get_untagged_events(api, filter_params, save_path=None):
         print(f"Saved {len(events_without_taggings)} untagged events to {save_path}")
     
     return events_without_taggings
+
+
+def canonical_file_name_to_source(file_name: str, base_url="https://api.ecosounds.org") -> str:
+    """Convert a file name to a source URL."""
+    # Assuming the file name is in the format 'file_id_offset.parquet'
+    stem = Path(file_name).stem
+    parts = stem.split('_')
+    if len(parts) < 2:
+        raise ValueError(f"Invalid file name format: {file_name}")
+    arid = parts[-1]
+    return f"{base_url}/audio_recordings/{arid}/original/"

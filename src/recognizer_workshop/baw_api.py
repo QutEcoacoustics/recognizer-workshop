@@ -3,17 +3,16 @@
 import json
 import os
 import requests
+import getpass
+
+from dotenv import load_dotenv, find_dotenv, dotenv_values, set_key
 
 class baw_api:
     """Generic wrapper for the BAW API"""
 
     def __init__(self, token=None, base_url=None, debug=False):
 
-        if not token:
-            token = os.environ.get("API_TOKEN")
 
-        if not token:
-            raise ValueError("API token must be provided either as an argument or through the 'API_TOKEN' environment variable.")
         
         if not base_url:
             # If base_url is not provided, use the environment variable or default to ecosounds
@@ -22,10 +21,15 @@ class baw_api:
         self.base_url = base_url
         self.debug = debug
         self.session = requests.Session() # Initialize requests.Session()
-        self.session.headers.update({
-            "Authorization": f'Token token="{token}"',
-            "Content-Type": "application/json"
-        })
+
+        self.token = token
+        self.update_token()
+
+        if not token:
+            self.token = os.environ.get("API_TOKEN")
+
+
+        
 
     def url(self, endpoint):
         """Constructs a full URL for the given endpoint."""
@@ -215,6 +219,10 @@ class baw_api:
 
     def test_connection(self, silent=True):
         """Test the connection to the BAW API."""
+        if self.token is None or self.token == "":
+            if not silent:
+                print("No API token provided. Please set the BAW_AUTH_TOKEN environment variable or pass a token to the baw_api constructor.")
+            return None
         try:
             # This will use the request method, which has the debug logic
             response = self.get("/status")
@@ -229,6 +237,65 @@ class baw_api:
                 print(f"Error connecting to BAW API via test_connection: {e}")
             return None
         
+
+    def update_token(self, save_to_env=True):
+        """
+        looks for a token in the env. 
+        If found, tests it
+        if not prompts the user to enter a token
+        tests the resulting token
+        updates the environment variable if successful
+        """
+        
+        if not self.test_connection(silent=True)):
+
+            #TODO: specifically check for authentication errors
+            # so we are not prompting the user for a token if the error is not related to authentication
+            print("\nAuthentication token is missing or invalid.")
+            env_file = find_dotenv()
+            if not env_file:
+                env_file = os.path.join(os.getcwd(), '.env')
+                print("No .env file found. A new one will be created if a token is provided.")
+                config = {}
+            else:
+                print(f"Found .env file: {env_file}")
+                config = dotenv_values(env_file)
+
+            # Try to get the token from the dictionary
+            self.set_auth_header(config.get('BAW_AUTH_TOKEN', ""))
+
+            if not self.test_connection(silent=True):
+
+                # Loop until the user provides a valid token or quits
+                while True:
+                    print("\nPlease enter a valid token to proceed. (Type 'quit' to exit)")
+                    new_token = getpass.getpass("Enter your BAW_AUTH_TOKEN: ")
+                    
+                    if new_token.lower() == 'quit':
+                        break
+
+                    self.set_auth_header(new_token) # Set the auth header for the session
+                    if self.test_connection():
+                        if save_to_env:
+                            set_key(env_file, 'BAW_AUTH_TOKEN', new_token)
+                        break 
+        else:
+            print("\nExisting token from .env file is valid.")
+
+
+
+    def set_auth_header(self, token):
+        """Sets the Authorization header for the session."""
+        self.token = token
+        self.session.headers.update({
+            "Authorization": f'Token token="{self.token}"',
+            "Content-Type": "application/json"
+        })
+
+
+
+
+
     @staticmethod
     def print_response(response, file=None):
         """Prints the response in a formatted way."""

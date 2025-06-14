@@ -22,8 +22,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import random
-import requests
-import zipfile
+
 from tqdm import tqdm
 
 from matplotlib import pyplot as plt
@@ -43,6 +42,9 @@ from perch_hoplite.zoo import model_configs
 from recognizer_workshop.create_database import convert_parquet
 
 import recognizer_workshop.baw_utils as baw_utils
+from recognizer_workshop.perch_hoplite_custom_modifications import sqlite_usearch_impl as sqlite_usearch_impl_mod
+from recognizer_workshop.perch_hoplite_custom_modifications import classifier as classifier_mod
+from recognizer_workshop.agile_modeling_helpers import list_audio_files
 
 import ipywidgets as widgets
 from IPython.display import display
@@ -199,7 +201,7 @@ class agile_state:
 
         # if the query is an integer it's an index into the list of audio files in the labeled_examples_folder
         elif str(query_uri).isdigit():
-            file_list =  Helpers.list_audio_files(self.config.labeled_examples_folder, quiet=True)
+            file_list =  list_audio_files(self.config.labeled_examples_folder, quiet=True)
             if int(query_uri) < len(file_list):
                 query_uri = file_list[int(query_uri)]
             else:
@@ -227,7 +229,7 @@ class agile_state:
         window_size_s = 5.0
 
         labeled_examples_folder = Path(labeled_examples_folder)
-        labeled_examples = Helpers.list_audio_files(labeled_examples_folder)
+        labeled_examples = list_audio_files(labeled_examples_folder)
 
         for example_source in labeled_examples:
 
@@ -316,9 +318,15 @@ class agile_state:
         if dataset is not None and dataset not in all_datasets:
             print(f'Dataset {dataset} not found in DB. Available datasets are {all_datasets}')
             return
+        # results, all_scores = brutalism.threaded_brute_search(
+        #     self.db, query, num_results, score_fn=score_fn,
+        #     sample_size=sample_size, dataset=dataset, exclude_labeled=exclude_labeled)
+
+        # TODO: exclude labelled, specifiy dataset
         results, all_scores = brutalism.threaded_brute_search(
             self.db, query, num_results, score_fn=score_fn,
-            sample_size=sample_size, dataset=dataset, exclude_labeled=exclude_labeled)
+            sample_size=sample_size)
+
         self.search_results = results
         self.all_search_scores = all_scores
 
@@ -550,260 +558,43 @@ class agile_state:
         
         # I think i originally edited the db implementation to add the dataaset. 
         # TODO: copy this function to our own package and implement it there
-        embedding_ids = self.db.get_embedding_ids(dataset=dataset)
+        #embedding_ids = self.db.get_embedding_ids(dataset=dataset)
+        embedding_ids = sqlite_usearch_impl_mod.get_embedding_ids(self.db, dataset=dataset)
 
         if subset < 1:
-          n_samples = int(subset * len(embedding_ids))
-          indices = np.arange(len(embedding_ids))
-          np.random.shuffle(indices)
-          selected_indices = sorted(indices[:n_samples])
-          embedding_ids = embedding_ids[selected_indices]
+            n_samples = int(subset * len(embedding_ids))
+            indices = np.arange(len(embedding_ids))
+            np.random.shuffle(indices)
+            selected_indices = sorted(indices[:n_samples])
+            embedding_ids = embedding_ids[selected_indices]
 
         if output_filepath is None:
-          output_filepath = Path(self.config.predictions_folder) / 'inference.csv'
+            output_filepath = Path(self.config.predictions_folder) / 'inference.csv'
         Path(output_filepath).parent.mkdir(parents=True, exist_ok=True)
 
         filelist_path = Path(self.config.embeddings_folder) / 'filelist.json'
         site_lookup = {}
         if filelist_path.exists():
-          filelist = json.load(open(filelist_path))
-          site_lookup = {int(f['id']): f['site_id'] for f in filelist}
+            filelist = json.load(open(filelist_path))
+            site_lookup = {int(f['id']): f['site_id'] for f in filelist}
         else:
-          print('filelist not found. site_id will not be included in the output.')
+            print('filelist not found. site_id will not be included in the output.')
 
         def row_func(row=None):
-          if row is None:
-            return ['link', 'site_id']
-          baw_domain, arid  = baw_utils.extract_arid_and_domain(row[2])
-          link = baw_utils.make_baw_listen_link_from_arid(arid, row[3], 5.0, baw_domain)
-          site_id = site_lookup.get(int(arid), '')
-          return [link, site_id]
+            if row is None:
+                return ['link', 'site_id']
+            baw_domain, arid  = baw_utils.extract_arid_and_domain(row[2])
+            link = baw_utils.make_baw_listen_link_from_arid(arid, row[3], 5.0, baw_domain)
+            site_id = site_lookup.get(int(arid), '')
+            return [link, site_id]
             
-        classifier.write_inference_csv(embedding_ids, self.classifier, self.db, output_filepath, threshold, labels, row_func=row_func)
+        classifier_mod.write_inference_csv(self.classifier,
+                                       self.db,
+                                       output_filepath,
+                                       threshold,
+                                       labels,
+                                       embedding_ids,
+                                       row_func=row_func)
         
       
 
-def download_embeddings(dataset_name, embeddings_dir, download_from_gcp: bool = False):
-    """
-    Downloads a zip file from a url based on the dataset_name and extracts it to the embeddings_dir
-    Shows progress for both download and extraction
-    """
-
-    def has_embeddings(directory):
-        directory = Path(directory)
-        # Return True as soon as we find any .pt file
-        try:
-            next(directory.glob('**/*.parquet'))
-            return True
-        except StopIteration:
-            return False
-     
-    def do_download():
-        
-        embeddings_dir.mkdir(parents=True, exist_ok=True)
-
-        base_url = (
-            'https://storage.googleapis.com/chirp-public-bucket/esa-2024'
-            if download_from_gcp
-            else 'https://api.ecosounds.org/system/esa2024'
-        )
-
-        #dowload config.json
-        url = f'{base_url}/embedding_config.json'
-        config_path = Path(embeddings_dir) / "config.json"
-        response = requests.get(url)
-        with open(config_path, 'wb') as file:
-            file.write(response.content)
-        
-        url = f'{base_url}/{dataset_name}/embeddings.zip'
-        
-        download_file(url, zip_path, description=f'Downloading {dataset_name} to {embeddings_dir}')
-
-    def do_unzip():
-
-        # Extract with progress bar
-        with zipfile.ZipFile(zip_path) as zf:
-            for member in tqdm(zf.infolist(), desc=f'Extracting {dataset_name}'):
-                zf.extract(member, embeddings_dir)
-        
-        # Optionally remove zip after extraction
-        zip_path.unlink()
-
-    def do_download_and_unzip():
-        do_download()
-        do_unzip()
-
-    def download_again_button():
-        button1 = widgets.Button(description="Download again and overwrite existing embeddings?",
-                                 layout=widgets.Layout(width='auto'))
-        button1.on_click(lambda b: do_download_and_unzip())
-        display(button1)
-
-    def unzip_again_button(description="Unzip existing downloaded file and overwrite embeddings?"):
-        button2 = widgets.Button(description=description,
-                                 layout=widgets.Layout(width='auto'))
-        button2.on_click(lambda b: do_unzip())
-        display(button2)
-        
-    embeddings_dir = Path(embeddings_dir)
-    zip_path = Path(embeddings_dir) / f"{dataset_name}.zip"
-
-    already_unzipped = has_embeddings(embeddings_dir)
-    already_downloaded = zip_path.exists()
-
-    if already_unzipped:
-
-      print(f"Embeddings already downloaded and extracted at {embeddings_dir.resolve()}.")
-      download_again_button()
-
-      if already_downloaded:
-        # might happen if they unterrupt during unzip 
-        # or if they interrupt during download after already downloadin and unzipping
-        # (in this 2nd case thy probably don't want to unzip without downloading again)
-        unzip_again_button()
-
-    elif already_downloaded:
-      # This can happen if they interrupt during download. 
-      # (in this case they probably don't want to unzip without downloading)
-      # TODO: (phil) check if the zip is complete, e.g. comparing file size to the response headers
-      print(f"Embeddings already downloaded to {zip_path} but not unzipped.")
-      download_again_button()
-      unzip_again_button("Unzip existing downloaded file?")
-
-    else:
-      do_download()
-      do_unzip()
-
-
-def download_file(url: str, dest: str | Path, max_retries: int = 5, description: str = None) -> bool:
-    """
-    Download a file from a URL to a destination path with progress bar and resume capability.
-    
-    Args:
-        url: URL to download from
-        dest: Destination path (string or Path object)
-        max_retries: Maximum number of retry attempts (default: 5)
-        description: Optional description for the progress bar. If None, uses filename
-    
-    Returns:
-        bool: True if download was successful
-    
-    Raises:
-        Exception: If download fails after all retries
-    """
-
-    import requests
-    from requests.adapters import HTTPAdapter
-    from urllib3.util.retry import Retry
-    from tqdm import tqdm
-    import time
-
-    dest = Path(dest)
-    description = description or dest.name
-    
-    # Set up retry strategy
-    retry_strategy = Retry(
-        total=max_retries,
-        backoff_factor=1,
-        status_forcelist=[429, 500, 502, 503, 504],
-    )
-    
-    # Configure session
-    session = requests.Session()
-    adapter = HTTPAdapter(max_retries=retry_strategy)
-    session.mount("https://", adapter)
-    session.mount("http://", adapter)
-    
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': '*/*',
-        'Accept-Encoding': 'gzip, deflate'
-    }
-    
-    for attempt in range(max_retries):
-        try:
-            # Check file size and resume support
-            head = session.head(url, headers=headers)
-            total_size = int(head.headers.get('content-length', 0))
-            supports_resume = 'accept-ranges' in head.headers
-            
-            existing_size = 0
-            if dest.exists():
-                existing_size = dest.stat().st_size
-                if existing_size == total_size:
-                    print(f"File already completely downloaded ({existing_size} bytes)")
-                    return True
-                elif supports_resume and existing_size < total_size:
-                    print(f"Resuming download from byte {existing_size}")
-                    headers['Range'] = f'bytes={existing_size}-'
-                else:
-                    print("Cannot resume download - starting from beginning")
-                    existing_size = 0
-            
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            
-            response = session.get(
-                url,
-                stream=True,
-                headers=headers,
-                timeout=30
-            )
-            response.raise_for_status()
-            
-            mode = 'ab' if existing_size else 'wb'
-            chunk_size = 8 * 1024 * 1024  # 8MB chunks
-            
-            with open(dest, mode) as file, tqdm(
-                desc=description,
-                total=total_size,
-                unit='iB',
-                unit_scale=True,
-                unit_divisor=1024,
-                initial=existing_size
-            ) as pbar:
-                for data in response.iter_content(chunk_size=chunk_size):
-                    size = file.write(data)
-                    pbar.update(size)
-            
-            # Verify complete download
-            if dest.stat().st_size == total_size:
-                print("Download completed successfully")
-                return True
-            else:
-                print(f"Download incomplete, retrying... (Attempt {attempt + 1}/{max_retries})")
-                time.sleep(2)
-                continue
-                
-        except (requests.exceptions.ChunkedEncodingError,
-                requests.exceptions.ConnectionError,
-                requests.exceptions.ReadTimeout) as e:
-            if attempt < max_retries - 1:
-                wait_time = 2 ** attempt
-                print(f"Download failed, retrying in {wait_time} seconds... (Attempt {attempt + 1}/{max_retries})")
-                print(f"Error: {str(e)}")
-                time.sleep(wait_time)
-                continue
-            else:
-                raise Exception(f"Failed to download after {max_retries} attempts: {str(e)}")
-    
-    raise Exception("Download failed after all retry attempts")
-
-
-class Helpers:
-
-  @staticmethod
-  def list_audio_files(path, recursive=True, quiet=False, extensions=(".wav", ".flac", ".mp3")):
-      path = Path(path)
-      files = path.rglob("*") if recursive else path.glob("*")
-      audio_files = [
-          f for f in files 
-          if f.is_file()
-          and f.suffix.lower() in extensions
-          and not f.name.startswith(".")
-      ]
-
-      if not quiet:
-          print(f"Found {len(audio_files)} audio files in {str(path)}")
-          print("\n".join([f"{i}: {f}" for i, f in enumerate(audio_files)]))
-      return audio_files
-  

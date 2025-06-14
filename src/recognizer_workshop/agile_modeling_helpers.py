@@ -1,5 +1,6 @@
 import dataclasses
 import numpy as np
+from pathlib import Path
 
 from perch_hoplite.db import interface as hoplite_interface
 
@@ -28,6 +29,25 @@ class SearchResultEvent:
 #   provenance
 
 
+
+def list_audio_files(path, recursive=True, quiet=False, extensions=(".wav", ".flac", ".mp3")):
+    """
+    Prints a numbered list of audio files in a folder (and optionally subfolders)
+    And returns a the list
+    """
+    path = Path(path)
+    files = path.rglob("*") if recursive else path.glob("*")
+    audio_files = [
+        f for f in files 
+        if f.is_file()
+        and f.suffix.lower() in extensions
+        and not f.name.startswith(".")
+    ]
+
+    if not quiet:
+        print(f"Found {len(audio_files)} audio files in {str(path)}")
+        print("\n".join([f"{i}: {f}" for i, f in enumerate(audio_files)]))
+    return audio_files
 
 
 
@@ -74,12 +94,12 @@ def labels_from_event_taggings(api, filter_params):
     items = {}
     for event in events:
         arid = event['audio_recording_id']
-        source = f"{api.base_url}/audio_recordings/{arid}/original/"
+        source = f"{api.base_url}/audio_recordings/{arid}/original"
         if arid not in items:
             items[source] = {}
 
         for tagging in event.get('taggings', []):
-            label_str = tagging['tag']['name']
+            label_str = tagging['tag']['text']
             if label_str not in items[source]:
                 items[source][label_str] = {'pos': [], 'neg': []}
 
@@ -91,8 +111,9 @@ def labels_from_event_taggings(api, filter_params):
                     items[source][label_str]['neg'].append(segment['start'])
                 else:
                     # skip because not verified 
+                    pass
 
-    return events
+    return items
 
 
 
@@ -108,6 +129,9 @@ def add_labels_to_db(agile, config, items):
                 "neg": [offsets]
     }
     """
+
+    embedding_count = 0
+    source_count = 0
 
     for source in items:
         for label_str in items[source]:
@@ -129,6 +153,12 @@ def add_labels_to_db(agile, config, items):
                     label = hoplite_interface.Label(embedding_id, label_str, type = label_type, provenance=config.annotator_id)
                     agile.db.insert_label(label, skip_duplicates=True)
                     agile.db.commit()
+                    
+                if len(embeddings) > 0:
+                    source_count += 1
+                    embedding_count += len(embeddings)
+        
+        print(f"Added {len(embedding_count)} embeddings from {source_count}/{len(items)} sources to the database.")
 
 
 round_to_nearest_5 = lambda x: np.round(x / 5) * 5
@@ -299,6 +329,9 @@ def get_events_with_verifications_and_tags(api, filter_params):
         }
     }).get('data', [])
 
+    if len(tags) != len(tag_ids):
+        print(f"Warning: {len(tags)} tags found for {len(tag_ids)} tag ids. Some tags may not exist in the database.")
+
     # convert tags to a dictionary for easy lookup
     tags_dict = {tag['id']: tag for tag in tags}
 
@@ -318,6 +351,14 @@ def get_events_with_verifications_and_tags(api, filter_params):
 
         # remove non-taxonomic tags
         event['taggings'] = [tagging for tagging in event.get('taggings', []) if tagging['tag'].get('is_taxonomic', False)]
+
+    # remove events that have no taggings
+    events_without_taxonomic_taggings = [event for event in events if len(event['taggings']) == 0]
+    events = [event for event in events if len(event['taggings']) > 0]
+
+    print(f"Found {len(events)} events with taxonomic taggings after filtering.")
+    print(f"Found {len(events_without_taxonomic_taggings)} events with only non-taxonomic taggings.")
+    print(f"Found {len(events_without_taggings)} events without taggings.")
         
     # we now have 
     # - 1 or more taxonomig taggings for each event
@@ -326,8 +367,6 @@ def get_events_with_verifications_and_tags(api, filter_params):
     return events
 
 
-
-         
 
 
 
