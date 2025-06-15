@@ -10,10 +10,14 @@ from dotenv import load_dotenv, find_dotenv, dotenv_values, set_key
 class baw_api:
     """Generic wrapper for the BAW API"""
 
+    base_url = "https://api.ecosounds.org"
+    debug = False
+    token = None
+
+
     def __init__(self, token=None, base_url=None, debug=False):
 
-
-        
+       
         if not base_url:
             # If base_url is not provided, use the environment variable or default to ecosounds
             base_url = os.environ.get("API_BASE_URL", "https://api.ecosounds.org")
@@ -22,11 +26,7 @@ class baw_api:
         self.debug = debug
         self.session = requests.Session() # Initialize requests.Session()
 
-        self.token = token
-        self.update_token()
-
-        if not token:
-            self.token = os.environ.get("API_TOKEN")
+        self.update_token(token)
 
 
         
@@ -46,7 +46,14 @@ class baw_api:
         return self.request("POST", endpoint, data=data)
     
 
-    def baw_filter(self, model, filter_params):
+    def format_qsp(self, qsp):
+        if qsp is None:
+            return ""
+        if not isinstance(qsp, (list, tuple, set)):
+            qsp = [qsp]
+        return "?" + "&".join(qsp)
+
+    def baw_filter(self, model, filter_params, qsp=None):
 
         # allow a full filter payload or only the filter portion
         if 'filter' in filter_params:
@@ -54,7 +61,7 @@ class baw_api:
         else:
             filter_payload = {"filter": filter_params}
 
-        endpoint = f"/{model}/filter"
+        endpoint = f"/{model}/filter/{self.format_qsp(qsp)}"
 
         return self.post(endpoint, data=filter_payload)
 
@@ -164,6 +171,7 @@ class baw_api:
             self._print_request_details(prepared_request, response_obj=None, error_context=True)
             return None 
 
+
     def _print_request_details(self, request_obj, response_obj=None, error_context=False):
         """
         Helper method to print details of the HTTP request and (optionally) response.
@@ -238,16 +246,23 @@ class baw_api:
             return None
         
 
-    def update_token(self, save_to_env=True):
+    def update_token(self, token=None, save_to_env=True):
         """
-        looks for a token in the env. 
+        sets the token to the supplied value
+        tests the connection. 
+        if can't connect, looks for a token in the env. 
         If found, tests it
         if not prompts the user to enter a token
         tests the resulting token
         updates the environment variable if successful
         """
+
+        print("\nUpdating BAW API token...")
+
+        if token is not None:
+            self.set_auth_header(token)
         
-        if not self.test_connection(silent=True)):
+        if not self.test_connection(silent=True):
 
             #TODO: specifically check for authentication errors
             # so we are not prompting the user for a token if the error is not related to authentication
@@ -286,11 +301,24 @@ class baw_api:
 
     def set_auth_header(self, token):
         """Sets the Authorization header for the session."""
+
+        print("\nSetting Authorization header for the BAW API...")
+        # print the first and last 3 characters with some asterisks in between
+        if token is not None and len(token) > 6:
+            print(f"Token set to: {token[:3]}***{token[-3:]}")
+        else:
+            print("Token set to: [None or empty]")
+
         self.token = token
-        self.session.headers.update({
-            "Authorization": f'Token token="{self.token}"',
-            "Content-Type": "application/json"
-        })
+        if token is None or token == "":
+            self.session.headers.update({
+                "Content-Type": "application/json"
+            })
+        else:
+            self.session.headers.update({
+                "Authorization": f'Token token="{self.token}"',
+                "Content-Type": "application/json"
+            })
 
 
 

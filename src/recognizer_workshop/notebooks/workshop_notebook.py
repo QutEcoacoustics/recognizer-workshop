@@ -4,25 +4,21 @@
 
 
 # CELL ONE
-from recognizer_workshop.agile_modeling_state import agile_config, agile_state
 
-from recognizer_workshop.agile_modeling_helpers import list_audio_files, labels_from_event_taggings, add_labels_to_db
-
-import ast
 import os
-from pathlib import Path
-import sys
-
 import dotenv
+from pathlib import Path
+
+from recognizer_workshop.agile_modeling_state import agile_config, agile_state
+from recognizer_workshop.agile_modeling_helpers import list_audio_files, labels_from_event_taggings, add_labels_to_db
 
 find_dotenv = dotenv.find_dotenv
 load_dotenv = dotenv.load_dotenv
 
-
 # shortcuts to the state variables
 #agile_config = agile.agile_config
 #agile_state = agile.agile_state
-import dotenv
+
 
 # CELL TWO (colab import - not needed)
 
@@ -38,14 +34,13 @@ config = agile_config(
     # "search_set", however if you manage multiple search datasets you will have
     # to assign each a unique name via this configuration.
     search_dataset_name="search_set",
-    embeddings_folder=working_folder / 'embeddings',
+    embeddings_folder=None,
     labeled_examples_folder=working_folder / 'labeled_examples',
     models_folder=working_folder / 'models',
     predictions_folder=working_folder / 'predictions',
 )
 
 Path(config.labeled_examples_folder).mkdir(exist_ok=True, parents=True)
-Path(config.embeddings_folder).mkdir(exist_ok=True, parents=True)
 
 config.baw_config['domain'] = 'api.ecosounds.org'
 
@@ -56,49 +51,27 @@ agile = agile_state(config)
 
 # CELL THREE
 
-env_file = find_dotenv()
-if not env_file:
-    print(f"No .env file found in the working directory {os.getcwd()}. \nFollow the local Jupyter instructions above to create one.")
-else:
-    load_dotenv(override=True)
-    auth_token = os.getenv('BAW_AUTH_TOKEN')
-    if auth_token:
-        print(f"Got auth token from .env file {env_file}")
-    else:
-        print("BAW_AUTH_TOKEN env variable not found in your .env file. Follow the local Jupyter instructions above to set it")
-        import getpass
-        auth_token = getpass.getpass("Enter your BAW_AUTH_TOKEN: ")
-        print("Token entered.")
-
-
-if auth_token:
-    if config.baw_config.get('auth_token'):
-        print("Overwriting config auth token with new value")
-    config.baw_config['auth_token'] = auth_token
-elif config.baw_config.get('auth_token'):
-    print("Auth token not loaded, but already in config")
-else:
-    print("No auth token set")
+agile.init_workbench()
 
 # CELL FOUR (download embeddings - not needed)
 
 
-dataset_name = "yellow_bellied_glider"
+
 
 # CELL FIVE (create database - not needed)
 
 # CELL SIX (initialize agile)
 agile.initialize()
 
-
+agile.show_label_selector()
 
 # BONUS CELL - pull all labels from the website and insert into the database
-from recognizer_workshop.agile_modeling_helpers import labels_from_event_taggings
-from recognizer_workshop.baw_api import baw_api
+# from recognizer_workshop.agile_modeling_helpers import labels_from_event_taggings
+# from recognizer_workshop.baw_api import baw_api
 
-api = baw_api()
-labels = labels_from_event_taggings(api, filter_params={"region_id": [85]})
-add_labels_to_db(agile, config, labels)
+
+# labels = labels_from_event_taggings(agile.baw_api, filter_params={"region_id": [85]})
+# add_labels_to_db(agile, config, labels)
 
 
 # CELL SEVEN 
@@ -131,8 +104,8 @@ agile.search_with_query(
 # CELL NINE (display results)
 # to be replaced with verification page on ecosounds 
 
-query_label = 'ybg' 
-agile.display_search_results(query_label)
+agile.show_label_selector()
+agile.display_search_results()
 
 # CELL TEN (save labels to the database)
 
@@ -151,3 +124,67 @@ train_ratio = 0.9  #@param
 weak_neg_weight = 0.05
 weak_negatives_batch_size = 16
 agile.train_classifier(target_labels, learning_rate, weak_neg_weight, num_steps, train_ratio, batch_size, weak_negatives_batch_size)
+
+
+
+# CELL TWELVE search with classifier
+
+num_results = 10  #@param
+target_score = None  #@param
+
+agile.search_with_classifier(
+    num_results=num_results,
+    # When working with really large datasets it may be necessary for
+    # performance reasons to look at a smaller (random) subset of the database
+    # entries to perform the search. Replacing None with an integer argument
+    # would limit the search to a random subset of that size.
+    sample_size=None,
+    target_score=target_score,
+)
+
+# CELL THIRTEEN display classifier results
+
+agile.display_search_results()
+
+# CELL FOURTEEN save classifier labels
+#agile.save_labels()
+
+
+# CEL FIFTEEN save classifier model
+
+classifier_name = 'ybg_01'  #@param {type:'string'}
+
+classifier_path = config.models_folder / f'{classifier_name}.json'
+
+classifier_path.parent.mkdir(exist_ok=True, parents=True)
+
+agile.classifier.save(classifier_path)
+
+
+output_filename = 'ybg_output.csv'  #@param {type:'string'}
+#@markdown The `threshold` determines what constitutes a detection. The classifier
+#@markdown outputs a score for every embedding in the search set; anything above
+#@markdown the threshold is considered a detection. A higher threshold value
+#@markdown results in fewer but more confident detections, at the cost of missing
+#@markdown out on relevant events in the search set. Conversely, a lower threshold
+#@markdown value results in more but less confident detections, at the cost of
+#@markdown producing more false positive detections.
+threshold = 0.0 # @param {"type":"number"}
+#@markdown You can also specify a random subset of the dataset to run inference
+#@markdown on, e.g. 0.5 for 50%.
+subset = 1 #@param {type:'string'}
+
+# Which labels to include in the output file. If None, all labels in your database are included.
+labels = None
+
+output_filepath = config.predictions_folder / output_filename
+output_filepath.parent.mkdir(parents=True, exist_ok=True)
+agile.run_inference(
+    output_filepath,
+    threshold=threshold,
+    dataset=config.search_dataset_name,
+    subset=subset,
+)
+
+
+

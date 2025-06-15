@@ -33,7 +33,9 @@ from perch_hoplite.agile import audio_loader
 from perch_hoplite.agile import classifier
 from perch_hoplite.agile import classifier_data
 from perch_hoplite.agile import embedding_display
-from perch_hoplite.db  import brutalism
+from recognizer_workshop.perch_hoplite_custom_modifications import embedding_display as embedding_display_mod
+from perch_hoplite.agile import source_info
+from recognizer_workshop.perch_hoplite_custom_modifications import brutalism
 from perch_hoplite.db import score_functions
 from perch_hoplite.db import sqlite_usearch_impl
 from perch_hoplite.db import interface as hoplite_interface
@@ -45,6 +47,9 @@ import recognizer_workshop.baw_utils as baw_utils
 from recognizer_workshop.perch_hoplite_custom_modifications import sqlite_usearch_impl as sqlite_usearch_impl_mod
 from recognizer_workshop.perch_hoplite_custom_modifications import classifier as classifier_mod
 from recognizer_workshop.agile_modeling_helpers import list_audio_files
+from recognizer_workshop.baw_api import baw_api
+
+from recognizer_workshop import agile_widgets
 
 import ipywidgets as widgets
 from IPython.display import display
@@ -137,6 +142,8 @@ class agile_state:
     model_class = None
     embedding_model = None
     audio_filepath_loader = None
+    baw_api = None
+    label = {"value": None}  # this is used to store the label selected by the user in the label selector widget
 
     # search results from the last search, whether it's a single example query
     # or a classifier-based search.
@@ -153,6 +160,8 @@ class agile_state:
 
     def initialize(self):
         self.init_db()
+
+
 
     def init_db(self):
         print('Initializing DB...')
@@ -171,14 +180,9 @@ class agile_state:
         # In the case of ecosounds recordings, this filepath loader is not really used, but
         # it needs to exist to pass to the display_group object.
 
-        try:
-            embed_config = self.db.get_metadata('embed_config')
-        except KeyError:
-            embed_config = config_dict.ConfigDict()
-            embed_config.audio_globs = ['**/*.wav']
-
+        embed_config = self.db.get_metadata('audio_sources')
         self.audio_filepath_loader = audio_loader.make_filepath_loader(
-          audio_sources=embed_config.audio_globs,
+          audio_sources=source_info.AudioSources.from_config_dict(embed_config),
           window_size_s=self.embedding_model.window_size_s,
           sample_rate_hz=self.embedding_model.sample_rate,
         )
@@ -338,13 +342,19 @@ class agile_state:
         plt.show()
 
 
-    def display_search_results(self, query_label):
+    def display_search_results(self):
         """
         Displays the results in self.search_results (which come from either classifier or single query searching)
         """
+
+        query_label = self.label['value']
+
+        if not query_label:
+            print('No label set. Please select a label before displaying search results.')
+            return
         
         plt.figure() 
-        self.display_group = embedding_display.EmbeddingDisplayGroup.from_search_results(
+        self.display_group = embedding_display_mod.EmbeddingDisplayGroup.from_search_results(
             self.search_results, self.db, sample_rate_hz=32000, frame_rate=100,
             audio_loader=self.audio_filepath_loader)
         
@@ -354,6 +364,9 @@ class agile_state:
 
     def save_labels(self):
         prev_lbls, new_lbls = 0, 0
+        if not self.display_group:
+            print('No display group found. Please run display_search_results() first.')
+            return
         for lbl in self.display_group.harvest_labels(self.config.annotator_id):
             check = self.db.insert_label(lbl, skip_duplicates=True)
             new_lbls += check
@@ -446,11 +459,20 @@ class agile_state:
 
 
     def search_with_classifier(self,
-          target_label, num_results=50, sample_size=1_000_000, target_score=None, dataset=None):
+          num_results=50, sample_size=1_000_000, target_score=None, dataset=None):
         """Prepares the query and bias from the classifier params and searches with these"""
+
+        target_label= self.label['value']
+        if not target_label:
+            print('No label set. Please select a label before searching with classifier.')
+            return
+
         target_labels = self.classifier.classes
         print('target_labels: ', target_labels)
         target_label_idx = target_labels.index(target_label)
+        if target_label_idx < 0:
+            print(f'Label {target_label} not found in classifier. Available labels: {target_labels}')
+            return
         class_query = self.classifier.beta[:, target_label_idx]
         bias = self.classifier.beta_bias[target_label_idx]
         
@@ -553,6 +575,9 @@ class agile_state:
         injecting the site_id and link columns via a row_func that uses baw_utils and 
         """
 
+        if subset is None:
+            subset = 1.0
+
         if subset <= 0 or subset > 1:
           raise ValueError('Subset must be between 0 and 1')
         
@@ -572,13 +597,7 @@ class agile_state:
             output_filepath = Path(self.config.predictions_folder) / 'inference.csv'
         Path(output_filepath).parent.mkdir(parents=True, exist_ok=True)
 
-        filelist_path = Path(self.config.embeddings_folder) / 'filelist.json'
-        site_lookup = {}
-        if filelist_path.exists():
-            filelist = json.load(open(filelist_path))
-            site_lookup = {int(f['id']): f['site_id'] for f in filelist}
-        else:
-            print('filelist not found. site_id will not be included in the output.')
+        site_lookup = self.make_site_map()
 
         def row_func(row=None):
             if row is None:
@@ -595,6 +614,74 @@ class agile_state:
                                        labels,
                                        embedding_ids,
                                        row_func=row_func)
+    
+    def make_site_map(self):
+        """
+        Creates a mapping source_id from the hoplite db to sites on ecoeounds
+        """
+
+        all_sources = sqlite_usearch_impl_mod.get_all_sources(self.db)
+        # initialize empty site map
+        site_map = {baw_utils.extract_arid_and_domain(src.source_id)[1]: {
+            'arid': src.source_id,
+            'site_id': None,
+            'site_name': None,
+        } for src in all_sources}
+
+        arids = [arid for arid in site_map.keys()]
+
+        response = self.baw_api.post(
+            '/audio_recordings/filter/?disable_paging=true',
+            data={
+                'filter': {
+                    'id': {
+                        'in': arids
+                    }
+                },
+                'projection': ['id', 'site_id', 'sites.name']
+            }
+        )
+
+        recording_records = response.get('data', [])
+        recording_records = {str(r['id']): r for r in recording_records}
+        for arid, src in site_map.items():
+            if str(arid) in recording_records:
+                rec = recording_records[str(arid)]
+                src['site_id'] = rec['site_id']
+                src['site_name'] = rec['sites.name']
+            else:
+                print(f'No recording found for arid {arid} in the BAW API')
+
+        return site_map
+
         
-      
+
+        
+        
+
+
+
+    def init_workbench(self, token=None):
+        
+        
+        # this will prompt for a token if not set
+        self.baw_api = baw_api(token=token, debug=True)
+
+        if self.baw_api.token is not None:
+            if self.config.baw_config.get('auth_token'):
+                print("Overwriting config auth token with new value")
+            self.config.baw_config['auth_token'] = self.baw_api.token
+        elif self.config.baw_config.get('auth_token'):
+            print("Auth token not loaded, but already in config")
+        else:
+            print("No auth token set")
+
+    def show_label_selector(self, initial_value=None):
+        """
+        Displays a label selector widget that allows the user to select a label from the list of available labels.
+        If a label is provided, it will be used to initialize the widget (if it is valid)"""
+
+        agile_widgets.label_selector(
+            baw_api=self.baw_api, binding=self.label, initial_value=initial_value
+        )
 

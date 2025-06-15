@@ -161,7 +161,7 @@ def load_baw_audio(
     session = requests
   headers={}
   if auth_token:
-    headers["Authorization"] = f"Token token={auth_token}"
+    headers["Authorization"] = f'Token token="{auth_token}"'
       
   audio_response = session.get(
       url=audio_url,

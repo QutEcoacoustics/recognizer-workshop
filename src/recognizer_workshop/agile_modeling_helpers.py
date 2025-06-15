@@ -157,8 +157,9 @@ def add_labels_to_db(agile, config, items):
                 if len(embeddings) > 0:
                     source_count += 1
                     embedding_count += len(embeddings)
-        
-        print(f"Added {len(embedding_count)} embeddings from {source_count}/{len(items)} sources to the database.")
+                    
+    # sources on ecosounds might not have been added to the database.      
+    print(f"Added {embedding_count} embeddings from {source_count} of {len(items.keys())} sources to the database.")
 
 
 round_to_nearest_5 = lambda x: np.round(x / 5) * 5
