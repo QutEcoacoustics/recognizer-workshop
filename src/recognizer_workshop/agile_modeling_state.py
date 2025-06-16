@@ -166,6 +166,12 @@ class agile_state:
 
     def init_db(self):
         print('Initializing DB...')
+
+        if not self.config.db_path:
+            raise ValueError('DB path not set in config. Please set it before initializing the DB.')
+        if not Path(self.config.db_path).exists():
+            raise ValueError(f'DB path {self.config.db_path} does not exist.')
+        
         self.db = sqlite_usearch_impl.SQLiteUsearchDB.create(self.config.db_path)
         self.db_model_config = self.db.get_metadata('model_config')
         
