@@ -601,11 +601,11 @@ class agile_state:
 
         def row_func(row=None):
             if row is None:
-                return ['link', 'site_id']
+                return ['link', 'site_id', 'site_name']
             baw_domain, arid  = baw_utils.extract_arid_and_domain(row[2])
             link = baw_utils.make_baw_listen_link_from_arid(arid, row[3], 5.0, baw_domain)
-            site_id = site_lookup.get(int(arid), '')
-            return [link, site_id]
+            site_info = site_lookup.get(int(arid), '')
+            return [link, site_info['site_id'], site_info['site_name']]
             
         classifier_mod.write_inference_csv(self.classifier,
                                        self.db,
@@ -623,7 +623,7 @@ class agile_state:
         all_sources = sqlite_usearch_impl_mod.get_all_sources(self.db)
         # initialize empty site map
         site_map = {baw_utils.extract_arid_and_domain(src.source_id)[1]: {
-            'arid': src.source_id,
+            'source': src.source_id,
             'site_id': None,
             'site_name': None,
         } for src in all_sources}
@@ -638,15 +638,15 @@ class agile_state:
                         'in': arids
                     }
                 },
-                'projection': ['id', 'site_id', 'sites.name']
+                'projection': { "include":['id', 'site_id', 'sites.name'] }
             }
         )
 
         recording_records = response.get('data', [])
-        recording_records = {str(r['id']): r for r in recording_records}
+        recording_records = {r['id']: r for r in recording_records}
         for arid, src in site_map.items():
-            if str(arid) in recording_records:
-                rec = recording_records[str(arid)]
+            if arid in recording_records:
+                rec = recording_records[arid]
                 src['site_id'] = rec['site_id']
                 src['site_name'] = rec['sites.name']
             else:

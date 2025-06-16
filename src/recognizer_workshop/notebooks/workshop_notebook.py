@@ -63,7 +63,8 @@ agile.init_workbench()
 # CELL SIX (initialize agile)
 agile.initialize()
 
-agile.show_label_selector()
+# query_label = 'Yellow-bellied Glider' 
+# agile.show_label_selector(query_label)
 
 # BONUS CELL - pull all labels from the website and insert into the database
 # from recognizer_workshop.agile_modeling_helpers import labels_from_event_taggings
@@ -81,35 +82,35 @@ audio_files = list_audio_files(config.labeled_examples_folder)
 
 # TODO: display labelled embeddings from the database to use as search examples
 
-query = '0'
-agile.display_query(query)
+# query = '0'
+# agile.display_query(query)
 
 
 # CELL EIGHT (search with query)
 
-num_results = 10
-target_score = None
-agile.embed_query()
-agile.search_with_query(
-    num_results=num_results,
-    # When working with really large datasets it may be necessary for
-    # performance reasons to look at a smaller (random) subset of the database
-    # entries to perform the search. Replacing None with an integer argument
-    # would limit the search to a random subset of that size.
-    sample_size=None,
-    target_score=target_score,
-)
+# num_results = 10
+# target_score = None
+# agile.embed_query()
+# agile.search_with_query(
+#     num_results=num_results,
+#     # When working with really large datasets it may be necessary for
+#     # performance reasons to look at a smaller (random) subset of the database
+#     # entries to perform the search. Replacing None with an integer argument
+#     # would limit the search to a random subset of that size.
+#     sample_size=None,
+#     target_score=target_score,
+# )
 
 
 # CELL NINE (display results)
 # to be replaced with verification page on ecosounds 
 
-agile.show_label_selector()
-agile.display_search_results()
+#agile.show_label_selector()
+#agile.display_search_results()
 
 # CELL TEN (save labels to the database)
 
-agile.save_labels()
+#agile.save_labels()
 
 
 # TODO: update labels in the db from the website
@@ -144,7 +145,7 @@ agile.search_with_classifier(
 
 # CELL THIRTEEN display classifier results
 
-agile.display_search_results()
+#agile.display_search_results()
 
 # CELL FOURTEEN save classifier labels
 #agile.save_labels()

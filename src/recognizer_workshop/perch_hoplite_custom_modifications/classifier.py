@@ -33,8 +33,8 @@ def csv_worker_fn(
             lbl,
             logit[a][0],
         ]
-        if state['row_func'] is not None:
-          row += state['row_func'](row)
+        if state.row_func is not None:
+          row += state.row_func(row)
         f.write(','.join(map(str, row)) + '\n')
 
 

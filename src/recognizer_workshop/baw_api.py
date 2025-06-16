@@ -25,6 +25,7 @@ class baw_api:
         self.base_url = base_url
         self.debug = debug
         self.session = requests.Session() # Initialize requests.Session()
+        self.last_response = None
 
         self.update_token(token)
 
@@ -133,8 +134,9 @@ class baw_api:
         try:
             # Send the prepared request
             response = self.session.send(prepared_request)
+            self.last_response = response
             response.raise_for_status() # Raises HTTPError for 4xx/5xx responses
-
+            
             if self.debug:
                 print("Request was successful!") # Print this first so it's clear
                 self._print_request_details(prepared_request, response_obj=response, error_context=False)
@@ -146,7 +148,7 @@ class baw_api:
                 # If the status was 2xx but the response body wasn't valid JSON (e.g., a 204 No Content)
                 if self.debug: # Only print warning if in debug mode
                     print("Warning: Successful request returned non-JSON content (expected JSON).")
-                return None 
+                return None
 
         except requests.exceptions.HTTPError as e:
             print("--- HTTP ERROR OCCURRED ---")
@@ -159,17 +161,17 @@ class baw_api:
                 # If the error response itself is not JSON
                 if self.debug: # Only print this warning if in debug mode
                     print("Error response was not JSON.")
-                return None 
+                return None  
 
         except requests.exceptions.ConnectionError as e:
             print(f"--- CONNECTION ERROR OCCURRED: {e} ---")
             self._print_request_details(prepared_request, response_obj=None, error_context=True)
-            return None 
+            return None
 
         except requests.exceptions.RequestException as e:
             print(f"--- UNEXPECTED REQUESTS ERROR OCCURRED: {e} ---")
             self._print_request_details(prepared_request, response_obj=None, error_context=True)
-            return None 
+            return None
 
 
     def _print_request_details(self, request_obj, response_obj=None, error_context=False):
@@ -227,10 +229,6 @@ class baw_api:
 
     def test_connection(self, silent=True):
         """Test the connection to the BAW API."""
-        if self.token is None or self.token == "":
-            if not silent:
-                print("No API token provided. Please set the BAW_AUTH_TOKEN environment variable or pass a token to the baw_api constructor.")
-            return None
         try:
             # This will use the request method, which has the debug logic
             response = self.get("/status")
@@ -244,6 +242,47 @@ class baw_api:
             if self.debug: # Only print this generic message if debug is on
                 print(f"Error connecting to BAW API via test_connection: {e}")
             return None
+        
+    def test_token(self, default=True):
+        if not self.token:
+            if self.debug:
+                print("No API token provided. Please set the BAW_AUTH_TOKEN environment variable or pass a token to the baw_api constructor.")
+            return False
+
+        self.test_connection(silent=True)
+        r = self.last_response
+
+        if r is not None and r.status_code == 401:
+            is_valid, message = False, "Token is invalid or expired."
+        elif r is not None and 200 <= r.status_code < 300:
+            is_valid, message = True, "Token is valid."
+        elif r is not None and r.status_code >= 500:
+            is_valid, message = default, "Token can't be verified, due to server or connection issues."
+        else:
+            is_valid, message = default, "Token can't be verified, something went wrong."
+        
+        if self.debug:
+            print(message)
+        
+        return is_valid
+
+
+
+        if self.last_response is None or self.last_response.status_code >= 500:
+            print("Unable to verify token: No response from the server or server error.")
+            return default
+        elif self.last_response.status_code in [401]:
+            if self.debug:
+                print("Token is invalid valid.")
+            return False
+        elif self.last_response.status_code >=200 and self.last_response.status_code < 300:
+            if self.debug:
+                print("Token is valid.")
+            return True
+        elif self.last_response.status_code >=200 and self.last_response.status_code < 300:
+            if self.debug:
+                print("Token is valid.")
+            return True
         
 
     def update_token(self, token=None, save_to_env=True):
@@ -262,7 +301,7 @@ class baw_api:
         if token is not None:
             self.set_auth_header(token)
         
-        if not self.test_connection(silent=True):
+        if not self.test_token():
 
             #TODO: specifically check for authentication errors
             # so we are not prompting the user for a token if the error is not related to authentication
@@ -279,7 +318,7 @@ class baw_api:
             # Try to get the token from the dictionary
             self.set_auth_header(config.get('BAW_AUTH_TOKEN', ""))
 
-            if not self.test_connection(silent=True):
+            if not self.test_token():
 
                 # Loop until the user provides a valid token or quits
                 while True:
@@ -290,7 +329,7 @@ class baw_api:
                         break
 
                     self.set_auth_header(new_token) # Set the auth header for the session
-                    if self.test_connection():
+                    if self.test_token():
                         if save_to_env:
                             set_key(env_file, 'BAW_AUTH_TOKEN', new_token)
                         break 
