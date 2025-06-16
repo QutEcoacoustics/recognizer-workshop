@@ -32,8 +32,9 @@ from perch_hoplite import audio_io
 from perch_hoplite.agile import audio_loader
 from perch_hoplite.agile import classifier
 from perch_hoplite.agile import classifier_data
-from perch_hoplite.agile import embedding_display
-from recognizer_workshop.perch_hoplite_custom_modifications import embedding_display as embedding_display_mod
+#from perch_hoplite.agile import embedding_display
+from recognizer_workshop.perch_hoplite_custom_modifications import embedding_display
+#from recognizer_workshop.perch_hoplite_custom_modifications import embedding_display_group as embedding_display_mod
 from perch_hoplite.agile import source_info
 from recognizer_workshop.perch_hoplite_custom_modifications import brutalism
 from perch_hoplite.db import score_functions
@@ -354,10 +355,11 @@ class agile_state:
             return
         
         plt.figure() 
-        self.display_group = embedding_display_mod.EmbeddingDisplayGroup.from_search_results(
+        self.display_group = embedding_display.EmbeddingDisplayGroup.from_search_results(
             self.search_results, self.db, sample_rate_hz=32000, frame_rate=100,
             audio_loader=self.audio_filepath_loader)
         
+        # injecting this into the embedding_display_group causes it to load audio from baw
         self.display_group.baw_config = self.config.baw_config
         self.display_group.display(positive_labels=[query_label])
 
