@@ -28,7 +28,7 @@ annotator_id = "phil"
 working_folder = Path('/Users/eichinsp/Documents/github/peichins/recognizer-workshop/local_scripts/test_folder')
 
 config = agile_config(
-    db_path=Path('/Users/eichinsp/Documents/github/peichins/recognizer-workshop/local_scripts/dbs/116'),
+    db_path=Path('/Users/eichinsp/Documents/github/peichins/recognizer-workshop/local_scripts/test_folder/db/116'),
     annotator_id=annotator_id,
     # For this tutorial we arbitrarily choose to name our search dataset
     # "search_set", however if you manage multiple search datasets you will have
@@ -70,9 +70,12 @@ agile.initialize()
 # from recognizer_workshop.agile_modeling_helpers import labels_from_event_taggings
 # from recognizer_workshop.baw_api import baw_api
 
+#from recognizer_workshop.agile_modeling_helpers import fix_source_format
+#fix_source_format(agile.db)
 
-# labels = labels_from_event_taggings(agile.baw_api, filter_params={"region_id": [85]})
-# add_labels_to_db(agile, config, labels)
+
+labels = labels_from_event_taggings(agile.baw_api, filter_params={"region_id": [116]})
+add_labels_to_db(agile, config, labels)
 
 
 # CELL SEVEN 

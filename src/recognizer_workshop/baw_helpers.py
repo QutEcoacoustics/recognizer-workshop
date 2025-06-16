@@ -220,4 +220,5 @@ def canonical_file_name_to_source(file_name: str, base_url="https://api.ecosound
     if len(parts) < 2:
         raise ValueError(f"Invalid file name format: {file_name}")
     arid = parts[-1]
-    return f"{base_url}/audio_recordings/{arid}/original/"
+    # no trailing slash!!
+    return f"{base_url}/audio_recordings/{arid}/original"

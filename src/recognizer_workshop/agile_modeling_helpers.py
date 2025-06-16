@@ -130,8 +130,17 @@ def add_labels_to_db(agile, config, items):
     }
     """
 
+    # from recognizer_workshop.debug_missing_2 import debug_missing
+
     embedding_count = 0
     source_count = 0
+
+
+    # debug_missing(
+    #     db_path='/Users/eichinsp/Documents/github/peichins/recognizer-workshop/local_scripts/test_folder/db/116',
+    #     db=agile.db,
+    #     region_id=116,
+    #     source_ids=list(items.keys()))
 
     for source in items:
         for label_str in items[source]:
@@ -139,13 +148,13 @@ def add_labels_to_db(agile, config, items):
                 # the source has this label at these offsets
                 offsets = np.array(items[source][label_str][label_type_str])
 
-                # gets the embedding indexes for the source and offsets
+                # gets the embedding indexes for the source and offsets (we are doing 2 queries that each get all offsets for the source then filter. We could maybe 
+                # refactor to 1  query then do pos and neg at the same time, but this is easier to read and understand)
                 embeddings = get_embeddings_by_source(agile, dataset_name = config.search_dataset_name,  
                                                             source_id = source,  
                                                             offsets = offsets)
 
-                print(embeddings)
-
+          
                 label_type = hoplite_interface.LabelType.POSITIVE if label_type_str == 'pos' else hoplite_interface.LabelType.NEGATIVE
 
                 for embedding_id in embeddings:
@@ -193,12 +202,13 @@ def get_embeddings_by_source(
     result_pairs = cursor.fetchall()
 
     metadata = agile.db.get_metadata('legacy_config')
-    embedding_dtype = metadata['embed_fn_config']['tensor_dtype']
+    #embedding_dtype = metadata['embed_fn_config']['tensor_dtype']
+    offset_dtype = np.float32
 
     # HACK! there was a bug where offsets greater than 2049 came with floating point precision errors.
     # we need to convert them to multiples of 5, since we know this to be the case for the FSP data.
     # deserialize and round the offsets in the result pairs
-    result_pairs_rounded = [(embedding_id, round_to_nearest_5(deserialize_embedding(offset_bytes, embedding_dtype)[0])) for embedding_id, offset_bytes in result_pairs]
+    result_pairs_rounded = [(embedding_id, round_to_nearest_5(deserialize_embedding(offset_bytes, offset_dtype)[0])) for embedding_id, offset_bytes in result_pairs]
 
 
     matching_embedding_ids = [embedding_id for embedding_id, offset_rounded 
@@ -322,7 +332,7 @@ def get_events_with_verifications_and_tags(api, filter_params):
     tag_ids = list(set([tagging['tag_id'] for event in events for tagging in event.get('taggings', [])]))
 
     # all tags that are in the events. We need this later to know which are taxonomic tags and which are not.
-    tags = api.post("/tags/filter", data={
+    tags = api.post("/tags/filter?disable_paging=true", data={
         "filter": {
             "id": {
                 "in": tag_ids
@@ -332,6 +342,10 @@ def get_events_with_verifications_and_tags(api, filter_params):
 
     if len(tags) != len(tag_ids):
         print(f"Warning: {len(tags)} tags found for {len(tag_ids)} tag ids. Some tags may not exist in the database.")
+        tags_with_invalid_ids = [tag for tag in tags if tag['id'] not in tag_ids]
+        print(f"Invalid tags: {tags_with_invalid_ids}")
+
+
 
     # convert tags to a dictionary for easy lookup
     tags_dict = {tag['id']: tag for tag in tags}
@@ -369,9 +383,21 @@ def get_events_with_verifications_and_tags(api, filter_params):
 
 
 
+def fix_source_format(db):
+    """
+    Fix the source format in the hoplite_sources table.
+    This is a workaround for the issue where sources end with a slash (e.g. 'https://api.ecosounds.org/audio_recordings/123/original/').
+    This will remove the trailing slash from the source.
+    """
 
-
-
+    sql = """
+            UPDATE hoplite_sources
+            SET source = RTRIM(source, '/')
+            WHERE source LIKE '%/';
+            """
+    cursor = db.db.cursor()
+    cursor.execute(sql)
+    db.db.commit()
 
 
 
