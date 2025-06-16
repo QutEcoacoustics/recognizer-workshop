@@ -673,7 +673,7 @@ class agile_state:
         
         
         # this will prompt for a token if not set
-        self.baw_api = baw_api(token=token, debug=True)
+        self.baw_api = baw_api(token=token)
 
         if self.baw_api.token is not None:
             if self.config.baw_config.get('auth_token'):

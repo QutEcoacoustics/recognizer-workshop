@@ -22,6 +22,9 @@ class baw_api:
             # If base_url is not provided, use the environment variable or default to ecosounds
             base_url = os.environ.get("API_BASE_URL", "https://api.ecosounds.org")
 
+        debug_level = int(os.environ.get("DEBUG_LEVEL", "0"))
+        debug = debug_level > 0
+
         self.base_url = base_url
         self.debug = debug
         self.session = requests.Session() # Initialize requests.Session()
