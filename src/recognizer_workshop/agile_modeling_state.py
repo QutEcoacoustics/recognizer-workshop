@@ -394,6 +394,9 @@ class agile_state:
                         train_ratio = 0.9,
                         batch_size = 128,
                         weak_negatives_batch_size = 128):
+        
+        if type(target_labels) is str:
+            target_labels = [target_labels]
 
         data_manager = classifier_data.AgileDataManager(
             target_labels=target_labels,

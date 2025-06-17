@@ -120,7 +120,7 @@ audio_files = list_audio_files(config.labeled_examples_folder)
 
 # CELL ELEVEN train classifier
 
-target_labels = None
+target_labels = "Rose Robin"
 learning_rate = 1e-3
 num_steps = 101
 batch_size = 32  #@param
