@@ -15,6 +15,7 @@ def label_selector(baw_api, binding, initial_value=None):
     
     def on_value_change(change):
         binding['value'] = change['new']
+        print(f"Label is now: {binding['value']}")
 
     # initial value is set to these in order of priority
     # initial_value if valid

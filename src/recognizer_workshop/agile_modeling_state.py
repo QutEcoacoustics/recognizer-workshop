@@ -661,17 +661,10 @@ class agile_state:
                 print(f'No recording found for arid {arid} in the BAW API')
 
         return site_map
-
-        
-
-        
-        
-
-
+    
 
     def init_workbench(self, token=None):
-        
-        
+                
         # this will prompt for a token if not set
         self.baw_api = baw_api(token=token)
 
@@ -683,6 +676,7 @@ class agile_state:
             print("Auth token not loaded, but already in config")
         else:
             print("No auth token set")
+
 
     def show_label_selector(self, initial_value=None):
         """
