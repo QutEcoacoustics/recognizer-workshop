@@ -47,8 +47,9 @@ from recognizer_workshop.create_database import convert_parquet
 import recognizer_workshop.baw_utils as baw_utils
 from recognizer_workshop.perch_hoplite_custom_modifications import sqlite_usearch_impl as sqlite_usearch_impl_mod
 from recognizer_workshop.perch_hoplite_custom_modifications import classifier as classifier_mod
-from recognizer_workshop.agile_modeling_helpers import list_audio_files
+from recognizer_workshop.agile_modeling_helpers import list_audio_files, get_or_create_workshop_provenance
 from recognizer_workshop.baw_api import baw_api
+from recognizer_workshop.baw_helpers import annotation_upload_csv
 
 from recognizer_workshop import agile_widgets
 
@@ -161,7 +162,6 @@ class agile_state:
 
     def initialize(self):
         self.init_db()
-
 
 
     def init_db(self):
@@ -612,11 +612,12 @@ class agile_state:
 
         def row_func(row=None):
             if row is None:
-                return ['link', 'site_id', 'site_name']
+                return ['end_offset', 'audio_recording_id', 'link', 'site_id', 'site_name']
             baw_domain, arid  = baw_utils.extract_arid_and_domain(row[2])
             link = baw_utils.make_baw_listen_link_from_arid(arid, row[3], 5.0, baw_domain)
             site_info = site_lookup.get(int(arid), '')
-            return [link, site_info['site_id'], site_info['site_name']]
+            end_offset = row[3] + 5.0  # assuming the window size is 5 seconds
+            return [end_offset, arid, link, site_info['site_id'], site_info['site_name']]
             
         classifier_mod.write_inference_csv(self.classifier,
                                        self.db,
@@ -665,6 +666,48 @@ class agile_state:
 
         return site_map
     
+    
+    def upload_detections(self, csv_path, project_id=None):
+        """
+        Uploads the detections from a csv file to the BAW API.
+        cvs_path: path to the csv file containing the detections
+        project_id: the ID of the project. This is only used for the verify URL.
+                    if not provided, it will just show a link with a placeholder. 
+
+        """
+
+        if not Path(csv_path).exists():
+            print(f'CSV file {csv_path} does not exist. Please provide a valid path.')
+            return
+        
+
+
+
+
+        provenance_id = get_or_create_workshop_provenance(self.baw_api)
+        response = annotation_upload_csv(self.baw_api, csv_path, 
+                                         provenance_id=provenance_id, commit='true')
+        data = response.get('data', {})
+        if not data:
+            print('Something went wrong with the upload. No data returned from the API.')
+            return
+        file_upload_id = data.get('id', None)
+
+
+        if project_id is None:
+            project_id = 'placeholder_project_id'
+
+        verification_url = f"{self.baw_api.base_url}/verify/{project_id}/annotations/?importFiles={file_upload_id}"
+
+        print(f"Annotations uploaded successfully. You can view and verify them at the link below:")
+
+        if project_id == 'placeholder_project_id':
+            print("You will need to replace the project_id in the URL with a valid one")
+        
+        print("")
+        print(verification_url)
+        print("")
+
 
     def init_workbench(self, token=None):
                 

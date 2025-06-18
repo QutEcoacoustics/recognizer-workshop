@@ -70,6 +70,81 @@ class baw_api:
         return self.post(endpoint, data=filter_payload)
 
 
+    def post_files(self, endpoint, files=None, data=None, params=None):
+        """
+        Sends a POST request with a multipart/form-data payload.
+
+        Ideal for file uploads. The 'requests' library will automatically set the
+        correct Content-Type header.
+
+        Args:
+            endpoint (str): The API endpoint to send the request to.
+            files (dict): A dictionary for file uploads. The format should be:
+                          {'form_field_name': ('filename.ext', file_object, 'mime/type')}
+                          Example: {'audio_file': ('my_sound.wav', open('my_sound.wav', 'rb'), 'audio/wav')}
+            data (dict): A dictionary for any other form fields to send along with the files.
+        
+        Returns:
+            The JSON response from the server, or None on failure.
+        """
+        url = self.url(endpoint)
+        original_content_type = self.session.headers.pop('Content-Type', None)
+        
+        # NOTE: We do not pass `json` here. Instead, `data` and `files` are used,
+        # and requests will build the multipart payload.
+        # req = requests.Request("POST", url, files=files, data=data, params=params)
+        # prepared_request = self.session.prepare_request(req)
+
+        response = None
+        try:
+            # Send the prepared request
+            response = self.session.post(url, files=files, data=data, params=params)
+            self.last_response = response
+            response.raise_for_status() # Raises HTTPError for 4xx/5xx responses
+            
+            if self.debug:
+                print("Multipart request was successful!")
+                self._print_request_details(response.request, response_obj=response, error_context=False)
+
+            try:
+                json_response = response.json()
+                return json_response
+            except requests.exceptions.JSONDecodeError:
+                if self.debug:
+                    print("Warning: Successful multipart request returned non-JSON content.")
+                return None
+
+        except requests.exceptions.HTTPError as e:
+            print("--- HTTP ERROR OCCURRED (MULTIPART) ---")
+            print(f"Error: {e}")
+            self._print_request_details(e.response.request, response_obj=e.response, error_context=True)
+            try:
+                return e.response.json()
+            except requests.exceptions.JSONDecodeError:
+                if self.debug:
+                    print("Error response was not JSON.")
+                return None
+
+        except requests.exceptions.ConnectionError as e:
+            print(f"--- CONNECTION ERROR OCCURRED (MULTIPART): {e} ---")
+            self._print_request_details(response.request, response_obj=None, error_context=True)
+            return None
+
+        except requests.exceptions.RequestException as e:
+            print(f"--- UNEXPECTED REQUESTS ERROR OCCURRED (MULTIPART): {e} ---")
+            self._print_request_details(response.request, response_obj=None, error_context=True)
+            return None
+        
+        finally:
+            # --- Restore the original Content-Type header ---
+            # This ensures other API calls that rely on the default header
+            # (e.g., normal JSON posts) will continue to work correctly.
+            if original_content_type:
+                self.session.headers['Content-Type'] = original_content_type
+
+
+
+
     def download(self, endpoint, save_path, params=None):
         """
         Downloads a file from the specified endpoint and saves it to the given path.

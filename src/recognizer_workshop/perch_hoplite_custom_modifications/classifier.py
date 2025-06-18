@@ -2,11 +2,27 @@ import numpy as np
 import tqdm
 from etils import epath
 
-from perch_hoplite.agile.classifier import LinearClassifier, CsvWorkerState, batched_embedding_iterator, csv_worker_initializer
+from perch_hoplite.agile.classifier import LinearClassifier, CsvWorkerState, batched_embedding_iterator
 from perch_hoplite.db import interface as db_interface
 from typing import Any, Iterator, Sequence
 from concurrent import futures
 
+
+def csv_worker_initializer_factory(row_func: Any = None) -> None:
+  """
+  Initialize the CSV worker.
+  row_func: optional function. will return extra column headings if called with no arguments.
+  """
+  csv_header = 'idx,dataset_name,source_id,offset,label,logits'
+  extras = row_func() if row_func is not None else []
+  csv_header = ','.join([csv_header] + extras)
+
+  def csv_worker_initializer(state: CsvWorkerState) -> None:
+    state.get_thread_db()
+    with epath.Path(state.csv_filepath).open('w') as f:
+      f.write(f'{csv_header}\n')
+  
+  return csv_worker_initializer
 
 
 def csv_worker_fn(
@@ -73,7 +89,7 @@ def write_inference_csv(
   emb_iter = batched_embedding_iterator(db, embedding_ids, batch_size=1024)
   with futures.ThreadPoolExecutor(
       max_workers=1,
-      initializer=csv_worker_initializer,
+      initializer=csv_worker_initializer_factory(row_func),
       initargs=(state,),
   ) as executor:
     for batch_idxes, batch_embs in tqdm.tqdm(emb_iter):

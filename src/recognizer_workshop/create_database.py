@@ -49,8 +49,6 @@ def create_db(
     ):
     """Creates a hoplite database from a folder of parquet files"""
 
-    # temp while dev
-    return None
 
     if source_map_fn is None:
         source_map_fn = lambda x: x
@@ -182,6 +180,8 @@ def add_parquet_to_existing_db(
         source_map_fn=source_map_fn,
         hop_size_s=hop_size_s
     )
+    print("adding to existing db disabled for now as it is buggy")
+    exit()
     return db
 
 
@@ -232,11 +232,12 @@ def add_parquet_to_db(
                 if max_count > 0 and db.count_embeddings() >= max_count:
                   break
 
-
-
         except Exception as e:
             print(f"Unexpected error on {fragment}: {e}")
             continue
+
+        if max_count > 0 and db.count_embeddings() >= max_count:
+            break
         
     db.commit()
     num_embeddings = db.count_embeddings()

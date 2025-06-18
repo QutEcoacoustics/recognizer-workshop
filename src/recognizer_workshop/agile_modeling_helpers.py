@@ -401,7 +401,7 @@ def fix_source_format(db):
 
 
 
-def create_workshop_provenance(api):
+def get_or_create_workshop_provenance(api):
     """
     Create a provenance object for the workshop.
     This will be used to track the source of the events.
@@ -455,7 +455,9 @@ def create_workshop_provenance(api):
         response = api.post("/provenances", data=provenance_data)
         baw_api.baw_api.print_response(response)
 
-    #response = api.post("/provenances/create", data=provenance_data)
+    return response.get("data", {})
+
+    
 
     
     

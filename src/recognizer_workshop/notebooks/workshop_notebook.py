@@ -28,7 +28,7 @@ annotator_id = "phil"
 working_folder = Path('/Users/eichinsp/Documents/github/peichins/recognizer-workshop/local_scripts/test_folder')
 
 config = agile_config(
-    db_path=Path('/Users/eichinsp/Documents/github/peichins/recognizer-workshop/local_scripts/test_folder/db/116'),
+    db_path=Path('/Users/eichinsp/Documents/github/peichins/recognizer-workshop/local_scripts/test_folder/db/85_bak'),
     annotator_id=annotator_id,
     # For this tutorial we arbitrarily choose to name our search dataset
     # "search_set", however if you manage multiple search datasets you will have
@@ -74,8 +74,8 @@ agile.initialize()
 #fix_source_format(agile.db)
 
 
-labels = labels_from_event_taggings(agile.baw_api, filter_params={"region_id": [116]})
-add_labels_to_db(agile, config, labels)
+# labels = labels_from_event_taggings(agile.baw_api, filter_params={"region_id": [116]})
+# add_labels_to_db(agile, config, labels)
 
 
 # CELL SEVEN 
@@ -120,7 +120,7 @@ audio_files = list_audio_files(config.labeled_examples_folder)
 
 # CELL ELEVEN train classifier
 
-target_labels = "Rose Robin"
+target_labels = "Yellow-bellied glider"  #@param {type:'string'}
 learning_rate = 1e-3
 num_steps = 101
 batch_size = 32  #@param
@@ -133,18 +133,18 @@ agile.train_classifier(target_labels, learning_rate, weak_neg_weight, num_steps,
 
 # CELL TWELVE search with classifier
 
-num_results = 10  #@param
-target_score = None  #@param
+# num_results = 10  #@param
+# target_score = None  #@param
 
-agile.search_with_classifier(
-    num_results=num_results,
-    # When working with really large datasets it may be necessary for
-    # performance reasons to look at a smaller (random) subset of the database
-    # entries to perform the search. Replacing None with an integer argument
-    # would limit the search to a random subset of that size.
-    sample_size=None,
-    target_score=target_score,
-)
+# agile.search_with_classifier(
+#     num_results=num_results,
+#     # When working with really large datasets it may be necessary for
+#     # performance reasons to look at a smaller (random) subset of the database
+#     # entries to perform the search. Replacing None with an integer argument
+#     # would limit the search to a random subset of that size.
+#     sample_size=None,
+#     target_score=target_score,
+# )
 
 # CELL THIRTEEN display classifier results
 
@@ -162,10 +162,10 @@ classifier_path = config.models_folder / f'{classifier_name}.json'
 
 classifier_path.parent.mkdir(exist_ok=True, parents=True)
 
-agile.classifier.save(classifier_path)
+#agile.classifier.save(classifier_path)
 
 
-output_filename = 'ybg_output.csv'  #@param {type:'string'}
+output_filename = 'recognizer_output_01.csv'  #@param {type:'string'}
 #@markdown The `threshold` determines what constitutes a detection. The classifier
 #@markdown outputs a score for every embedding in the search set; anything above
 #@markdown the threshold is considered a detection. A higher threshold value
@@ -173,10 +173,10 @@ output_filename = 'ybg_output.csv'  #@param {type:'string'}
 #@markdown out on relevant events in the search set. Conversely, a lower threshold
 #@markdown value results in more but less confident detections, at the cost of
 #@markdown producing more false positive detections.
-threshold = 0.0 # @param {"type":"number"}
+threshold = 1 # @param {"type":"number"}
 #@markdown You can also specify a random subset of the dataset to run inference
 #@markdown on, e.g. 0.5 for 50%.
-subset = 1 #@param {type:'string'}
+subset = 0.0003 #@param {type:'string'}
 
 # Which labels to include in the output file. If None, all labels in your database are included.
 labels = None
@@ -189,6 +189,7 @@ agile.run_inference(
     dataset=config.search_dataset_name,
     subset=subset,
 )
+
 
 
 

@@ -1,0 +1,7 @@
+idx,dataset_name,source_id,offset,label,logits,end_offset,audio_recording_id,link,site_id,site_name
+000001,search_set,https://api.staging.ecosounds.org/audio_recordings/704096/original,20.0,Yellow-bellied glider,1.2338299,25.0,704096,https://staging.ecosounds.org/listen/704096/?start=20&end=25,3606,S-Block
+540027,search_set,https://api.staging.ecosounds.org/audio_recordings/704096/original,30.0,Yellow-bellied glider,1.3255914,35.0,704096,https://staging.ecosounds.org/listen/704096/?start=30&end=35,3606,S-Block
+466555,search_set,https://api.staging.ecosounds.org/audio_recordings/704096/original,40.0,Yellow-bellied glider,1.3753086,45.0,704096,https://staging.ecosounds.org/listen/704096/?start=40&end=45,3606,S-Block
+470071,search_set,https://api.staging.ecosounds.org/audio_recordings/704096/original,50.0,Yellow-bellied glider,1.4268078,55.0,704096,https://staging.ecosounds.org/listen/704096/?start=50&end=55,3606,S-Block
+467250,search_set,https://api.staging.ecosounds.org/audio_recordings/704096/original,60.0,Yellow-bellied glider,1.2846159,65.0,704096,https://staging.ecosounds.org/listen/704096/?start=60&end=65,3606,S-Block
+467325,search_set,https://api.staging.ecosounds.org/audio_recordings/704096/original,70.0,Yellow-bellied glider,1.359259,75.0,704096,https://staging.ecosounds.org/listen/704096/?start=70&end=75,3606,S-Block

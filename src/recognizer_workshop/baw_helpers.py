@@ -222,3 +222,70 @@ def canonical_file_name_to_source(file_name: str, base_url="https://api.ecosound
     arid = parts[-1]
     # no trailing slash!!
     return f"{base_url}/audio_recordings/{arid}/original"
+
+
+
+
+def annotation_upload_csv(api, filepath_to_csv, provenance_id, commit='true'):
+
+    event_import_endpoint = "/audio_event_imports"
+    # check if they have a event_import we can use
+
+    IMPORT_NAME = "Recognizer Workshop"
+
+    # todo sort by created_at desc
+    existing_imports = api.baw_filter('audio_event_imports', filter_params={'name': {'eq': IMPORT_NAME}})
+    existing_imports = existing_imports.get('data', [])
+    if existing_imports and len(existing_imports) > 0:
+        import_id = existing_imports[0]['id']
+    else:
+        # create a new import
+        data = {
+            "name": IMPORT_NAME,
+            "description": "Import for recognizer workshop",
+        }
+        response = api.post(event_import_endpoint, data=data)
+        if response and 'data' in response:
+            import_id = response['data']['id']
+        else:
+            print("Failed to create a new audio_event_import record.")
+            return
+
+
+    # https://api.ecosounds.org/audio_event_imports/12/files/
+
+    event_file_upload_endpoint = f"/audio_event_imports/{import_id}/files"
+
+    filepath_to_csv = Path(filepath_to_csv)  
+
+    try:
+        with open(filepath_to_csv, 'rb') as f:
+            files_payload = {
+                "audio_event_import_file[file]": (filepath_to_csv.name, f, 'text/csv')
+            }
+            params = {
+                'provenance_id': provenance_id,
+                'commit': commit
+            }
+
+            print(f"Uploading '{filepath_to_csv.name}' to the '{event_file_upload_endpoint}' endpoint...")
+            
+            # 5. Call the post_multipart method
+            response = api.post_files(  
+                endpoint=event_file_upload_endpoint,
+                files=files_payload,
+                params=params
+            )
+
+            print("\n--- API Response ---")
+            if response:
+                api.print_response(response)
+            else:
+                print("Upload failed. Check the error messages above.")
+
+            return response
+
+    except FileNotFoundError:
+        print(f"ERROR: The file was not found at the path: {filepath_to_csv}")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
