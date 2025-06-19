@@ -684,7 +684,8 @@ class agile_state:
 
 
 
-        provenance_id = get_or_create_workshop_provenance(self.baw_api)
+        provenance_data = get_or_create_workshop_provenance(self.baw_api)
+        provenance_id = provenance_data['id']
         response = annotation_upload_csv(self.baw_api, csv_path, 
                                          provenance_id=provenance_id, commit='true')
         data = response.get('data', {})

@@ -191,5 +191,7 @@ agile.run_inference(
 )
 
 
+agile.upload_detections(output_filepath, 1147)
+
 
 
