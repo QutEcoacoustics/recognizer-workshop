@@ -698,7 +698,7 @@ class agile_state:
         if project_id is None:
             project_id = 'placeholder_project_id'
         
-        verification_url=f"https://www.ecosounds.org/projects/1135/annotations/verify?importFiles={file_upload_id}"
+        verification_url=f"https://www.ecosounds.org/projects/{project_id}/annotations/verify?importFiles={file_upload_id}"
 
 
         print(f"Annotations uploaded successfully. You can view and verify them at the link below:")
