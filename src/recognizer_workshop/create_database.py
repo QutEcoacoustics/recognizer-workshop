@@ -27,7 +27,7 @@ def convert_parquet(db_path: str,
     max_size: int = None,
     source_map_fn = None):
    
-    if Path(db_path).exists():
+    if Path(db_path).exists() and any(Path(db_path).iterdir()):
         db = add_parquet_to_existing_db(db_path, parquet_folder,
                                          dataset_name, parquet_filepaths, 
                                          max_count, max_size, source_map_fn)
