@@ -114,7 +114,7 @@ def get_embeddings(
 
 
 
-def get_events_for_sites(baw_api, filter_params):
+def get_events_for_sites(baw_api, filter_params, tags=None):
     """Get any audio recordings that have events for a specific region.
     region_index is the index of the region in the regions list.
     @param num: maximum number of audio recordings to get.
@@ -143,15 +143,15 @@ def get_events_for_sites(baw_api, filter_params):
     ae_filter = {
         "audio_recordings.site_id": {"in": site_id}
     }
+
+    if tags is not None:
+        if isinstance(tags, str):
+            tags = [tags]
+        ae_filter['tags.text'] = { "in": tags }
+
     response = baw_api.post("/audio_events/filter?disable_paging=true", data={"filter": ae_filter})
     # maybe site by site? or if not then paging, but that is complicated
 
-    # sites_data = []
-    # for sid in site_id:
-    #     event_filter = {"audio_recordings.site_id": {"eq": sid}}
-    #     response = baw_api.post("/audio_events/filter?disable_paging=true", data={"filter": event_filter})
-    #     if response and "data" in response:
-    #         sites_data.extend(response["data"])
 
     return response.get("data", [])
 
@@ -226,22 +226,20 @@ def canonical_file_name_to_source(file_name: str, base_url="https://api.ecosound
 
 
 
-def annotation_upload_csv(api, filepath_to_csv, provenance_id, commit='true'):
+def annotation_upload_csv(api, filepath_to_csv, provenance_id, import_name, commit='true'):
 
     event_import_endpoint = "/audio_event_imports"
     # check if they have a event_import we can use
 
-    IMPORT_NAME = "Recognizer Workshop"
-
     # todo sort by created_at desc
-    existing_imports = api.baw_filter('audio_event_imports', filter_params={'name': {'eq': IMPORT_NAME}})
+    existing_imports = api.baw_filter('audio_event_imports', filter_params={'name': {'eq': import_name}})
     existing_imports = existing_imports.get('data', [])
     if existing_imports and len(existing_imports) > 0:
         import_id = existing_imports[0]['id']
     else:
         # create a new import
         data = {
-            "name": IMPORT_NAME,
+            "name": import_name,
             "description": "Import for recognizer workshop",
         }
         response = api.post(event_import_endpoint, data=data)

@@ -1,11 +1,13 @@
 import dataclasses
 import numpy as np
+import pandas as pd
 from pathlib import Path
 
 from perch_hoplite.db import interface as hoplite_interface
 
 from . import baw_api as baw_api
 from . import baw_helpers
+from . import sample_for_verification
 from collections import Counter
 
 
@@ -60,17 +62,21 @@ def upload_events_for_verification(events):
 
 
 
-def labels_from_event_taggings(api, filter_params):
+def labels_from_event_taggings(api, filter_params, target_labels):
     """
     For the given audio recording filter params
-    - gets all events for the recordings
+    - gets all events for the target label 
     - determines if verification is requires for each event, based on provenance
     - for any that do require verifications, get verifications
     - determine the 5-second segments that each event covers
     - insert them into the hoplite database
+    - gets events that are tagged with the negative_tags_for_target tags, inserts them
+    into the hoplite database as negative label for the target label.
     """
 
-    events = get_events_with_verifications_and_tags(api, filter_params)
+    events = get_events_with_verifications_and_tags(api, filter_params, target_labels)
+
+
 
     # for each event, determine if it is trusted and its type (positive or negative)
 
@@ -90,32 +96,57 @@ def labels_from_event_taggings(api, filter_params):
     for event in events:
         event['segments'] = get_event_segments(event)
 
-    # reshape into the format that is best for inserting into the hoplite database
+    # reshape into a format so we can determine negative labels in a multi-class setting
+
     items = {}
     for event in events:
         arid = event['audio_recording_id']
         source = f"{api.base_url}/audio_recordings/{arid}/original"
-        if arid not in items:
+        if source not in items:
             items[source] = {}
+        
+        for segment in event['segments']:
+            if segment['start'] not in items[source]:
+                items[source][segment['start']] = {}
 
-        for tagging in event.get('taggings', []):
-            label_str = tagging['tag']['text']
-            if label_str not in items[source]:
-                items[source][label_str] = {'pos': [], 'neg': []}
+            for label_str in target_labels:
+                if label_str not in items[source][segment['start']]:
+                    items[source][segment['start']][label_str] = None
 
-            # add the offsets for the segments that the event covers
-            for segment in event['segments']:
-                if tagging['type'] == 'positive':
-                    items[source][label_str]['pos'].append(segment['start'])
-                elif tagging['type'] == 'negative':
-                    items[source][label_str]['neg'].append(segment['start'])
-                else:
-                    # skip because not verified 
-                    pass
+                for tagging in event.get('taggings', []):
+                    if items[source][segment['start']][label_str] == 'pos':
+                        # this label for this source:offset is already positive, so we don't need to do anything
+                        continue
 
-    return items
+                    if tagging['tag']['text'] == label_str and tagging['type'] == 'positive':
+                        items[source][segment['start']][label_str] = 'pos'
+                    elif tagging['tag']['text'] == label_str and tagging['type'] == 'negative':
+                        items[source][segment['start']][label_str] = 'neg'
+                    elif tagging['tag']['text'] != label_str and tagging['type'] == 'positive':
+                        items[source][segment['start']][label_str] = 'neg'
+                    
+                    # Note: unverified taggings which require verification will not have a tagging['type'], so are ignored
+                    # Note: we don't add a positive label for the true class where a tagging has been verified as FP (negative)
+                    #       because we don't have that information. 
+    
+    # reshape into the format that is best for inserting into the hoplite database
+    items_for_insert = {}
+    for source in items:
+        for offset in items[source]:
+            for label_str in items[source][offset]:
+                if items[source][offset][label_str] is not None:
+                    if source not in items_for_insert:
+                        items_for_insert[source] = {}
+                    if label_str not in items_for_insert[source]:
+                        items_for_insert[source][label_str] = {'pos': [], 'neg': []}
+                    
+                    if items[source][offset][label_str] == 'pos':
+                        items_for_insert[source][label_str]['pos'].append(offset)
+                    elif items[source][offset][label_str] == 'neg':
+                        items_for_insert[source][label_str]['neg'].append(offset)
 
 
+    return items_for_insert
 
 
 def add_labels_to_db(agile, config, items):
@@ -190,14 +221,14 @@ def get_embeddings_by_source(
     )
     
     # debug query, just get anything
-    # query = (
+    # query2 = (
     #     'SELECT hoplite_embeddings.id, offsets FROM hoplite_embeddings '
     #     'JOIN hoplite_sources ON hoplite_embeddings.source_idx = hoplite_sources.id '
     #     'LIMIT 20;'
     # )
 
     cursor.execute(query, (source_id,))
-    #cursor.execute(query)
+    #cursor.execute(query2)
 
     result_pairs = cursor.fetchall()
 
@@ -241,9 +272,9 @@ def get_consensus(verifications):
         return None
 
     counts = Counter([v['confirmed'] for v in verifications])
-    if counts['positive'] > counts['negative']:
+    if counts['correct'] > counts['incorrect']:
         return 'positive'
-    elif counts['negative'] > counts['positive']:
+    elif counts['incorrect'] > counts['correct']:
         return 'negative'
     else:
         return None
@@ -319,11 +350,26 @@ def get_event_segments(event: dict, segment_duration: int = 5) -> list[dict]:
 
 
 
-def get_events_with_verifications_and_tags(api, filter_params):
+def get_events_with_verifications_and_tags(api, filter_params, target_labels=None):
+    """
+    For the target label, get all events that have that tag.
+    Then get all verifications for those events, and attach them to the taggings. 
+    """
+
+    if target_labels is None:
+        target_labels = []
+    elif isinstance(target_labels, str):
+        target_labels = [target_labels]
+
+    # these are non-taxonomic tags that have been used to describe something
+    # which should be included as a negative example for the targets
+    special_tags = ["bird", "frog", "insect", "mammal", "fish", "reptile", "amphibian"]
+
 
     events = baw_helpers.get_events_for_sites(api, filter_params)
     print(f"Found {len(events)} events for: {filter_params}")
     # remove events that have no taggings
+    # this is only applicable if target_label is None
     events_without_taggings = [event for event in events if 'taggings' not in event or len(event['taggings']) == 0]
     events = [event for event in events if 'taggings' in event and len(event['taggings']) > 0]
     event_ids = [event['id'] for event in events]
@@ -345,8 +391,6 @@ def get_events_with_verifications_and_tags(api, filter_params):
         tags_with_invalid_ids = [tag for tag in tags if tag['id'] not in tag_ids]
         print(f"Invalid tags: {tags_with_invalid_ids}")
 
-
-
     # convert tags to a dictionary for easy lookup
     tags_dict = {tag['id']: tag for tag in tags}
 
@@ -364,8 +408,12 @@ def get_events_with_verifications_and_tags(api, filter_params):
 
             tagging['verifications'] = verifications_for_tag_and_event
 
-        # remove non-taxonomic tags
-        event['taggings'] = [tagging for tagging in event.get('taggings', []) if tagging['tag'].get('is_taxonomic', False)]
+        # remove non-taxonomic taggings except for the target labels
+        event['taggings'] = [tagging 
+                            for tagging in event.get('taggings', []) 
+                            if tagging['tag']['text'] in target_labels + special_tags or tagging['tag'].get('is_taxonomic', False)]
+        
+        print(f"Event {event_id} has {len(event.get('taggings', []))} taggings after filtering.")
 
     # remove events that have no taggings
     events_without_taxonomic_taggings = [event for event in events if len(event['taggings']) == 0]
@@ -458,6 +506,39 @@ def get_or_create_workshop_provenance(api):
     return response.get("data", {})
 
     
+def make_inference_subset(inference_csv, subset_csv, limit=100):
+    """
+    Creates a random subset of a CSV file, preserving the original relative order of the selected rows.
 
-    
-    
+    Args:
+        inference_csv (str): The path to the input CSV file.
+        subset_csv (str): The path where the output subset CSV file will be saved.
+        limit (int): The number of random rows to include in the subset.
+    """
+
+    df = pd.read_csv(inference_csv)
+
+    # for each unique label in the 'label' column:
+    all_indices = []
+    labels = df['label'].unique()
+    for label in labels:
+
+        # subset of the dataframe with that label
+        label_df = df[df['label'] == label]
+        sampled_indices, _, _, _ = sample_for_verification.sample_for_validation(
+            label_df['logits'].values,
+            pos_target_y=0.05,
+            neg_target_y=0.05,
+            sample_size=limit
+        )
+
+        # add the sampled indices to the all_indices list
+        all_indices.extend(label_df.index[sampled_indices].tolist())
+        
+
+    subset_df = df.loc[all_indices].reset_index(drop=True)
+    subset_df.to_csv(subset_csv, index=False)
+
+    print(f"Successfully created a random subset of {len(subset_df)} rows ({limit} for each of {len(labels)} labels) from '{inference_csv}'.")
+    print(f"Output saved to '{subset_csv}'")
+

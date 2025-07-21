@@ -24,6 +24,7 @@ import pandas as pd
 import random
 
 from tqdm import tqdm
+from typing import Union
 
 from matplotlib import pyplot as plt
 from ml_collections import config_dict
@@ -60,7 +61,7 @@ from IPython.display import display
 class agile_config:
 
     # path to the sqlite db containing the embeddings
-    db_path: str = None
+    db_path: Union[str, Path] = None
 
     # annotator id to attach to labels
     annotator_id: str = None
@@ -269,11 +270,25 @@ class agile_state:
         self.db.commit()
 
 
-    def search_with_query(self, num_results=50, sample_size=1_000_000, target_score=None, dataset='from_config'):
+    def search_with_query(self, num_results=50, sample_size=1_000_000, target_score=None, target_label=None, dataset='from_config'):
         if dataset == 'from_config':
           dataset = self.config.search_dataset_name
+
+        if target_label is None:
+            labels = self.get_target_labels()
+            if len(labels) == 1:
+                target_label = labels[0]
+                print(f'No target label specified. Using the only available label: {target_label}')
+            elif len(labels) > 1:
+                print(f'No target label specified. Available labels: {labels}')
+                return
+            else:
+                print('No labels set for the classifier. Please set a label first.')
+                return
+            
         self.search(
             query=self.query_embedding,
+            target_label=target_label,
             num_results=num_results,
             sample_size=sample_size,
             target_score=target_score,
@@ -316,8 +331,8 @@ class agile_state:
             edg.display(positive_labels=[])
 
 
-    def search(self, query, bias=0.0, num_results=50, sample_size=1_000_000, 
-              target_score=None, dataset=None, exclude_labeled=True):
+    def search(self, query, target_label, bias=0.0, num_results=50, sample_size=1_000_000, 
+              target_score=None,  dataset=None, exclude_labeled=True):
         """
         Searches the db using a query or model
         query: np.array of shape (embedding_dim,) (the result of self.embedding_model.embed())
@@ -336,12 +351,14 @@ class agile_state:
         # TODO: exclude labelled, specifiy dataset
         results, all_scores = brutalism.threaded_brute_search(
             self.db, query, num_results, score_fn=score_fn,
-            sample_size=sample_size)
+            sample_size=sample_size, exclude_labeled=exclude_labeled)
 
-        self.search_results = results
-        self.all_search_scores = all_scores
+        if self.search_results is None:
+            self.search_results = {} # dict for each target label
 
-        # TODO(tomdenton): Better histogram when target sampling.
+        self.search_results[target_label] = results
+        #self.all_search_scores = all_scores
+
         _ = plt.hist(all_scores, bins=100)
         hit_scores = [r.sort_score for r in results.search_results]
         plt.scatter(hit_scores, np.zeros_like(hit_scores), marker='|',
@@ -354,20 +371,22 @@ class agile_state:
         Displays the results in self.search_results (which come from either classifier or single query searching)
         """
 
-        query_label = self.label['value']
+        #query_label = self.label['value']
 
-        if not query_label:
-            print('No label set. Please select a label before displaying search results.')
-            return
+        # if not query_label:
+        #     print('No label set. Please select a label before displaying search results.')
+        #     return
         
-        plt.figure() 
-        self.display_group = embedding_display.EmbeddingDisplayGroup.from_search_results(
-            self.search_results, self.db, sample_rate_hz=32000, frame_rate=100,
-            audio_loader=self.audio_filepath_loader)
-        
-        # injecting this into the embedding_display_group causes it to load audio from baw
-        self.display_group.baw_config = self.config.baw_config
-        self.display_group.display(positive_labels=[query_label])
+        plt.figure()
+
+        for query_label, results in self.search_results.items():
+            self.display_group = embedding_display.EmbeddingDisplayGroup.from_search_results(
+                results, self.db, sample_rate_hz=32000, frame_rate=100,
+                audio_loader=self.audio_filepath_loader)
+            
+            # injecting this into the embedding_display_group causes it to load audio from baw
+            self.display_group.baw_config = self.config.baw_config
+            self.display_group.display(positive_labels=[query_label])
 
 
     def save_labels(self):
@@ -387,7 +406,6 @@ class agile_state:
     
     
     def train_classifier(self, 
-                        target_labels=None,
                         learning_rate = 1e-3,
                         weak_neg_weight = 0.05,
                         num_steps = 128,
@@ -395,8 +413,7 @@ class agile_state:
                         batch_size = 128,
                         weak_negatives_batch_size = 128):
         
-        if type(target_labels) is str:
-            target_labels = [target_labels]
+        target_labels = self.get_target_labels()
 
         data_manager = classifier_data.AgileDataManager(
             target_labels=target_labels,
@@ -471,30 +488,30 @@ class agile_state:
 
     def search_with_classifier(self,
           num_results=50, sample_size=1_000_000, target_score=None, dataset=None):
-        """Prepares the query and bias from the classifier params and searches with these"""
-
-        target_label= self.label['value']
-        if not target_label:
-            print('No label set. Please select a label before searching with classifier.')
-            return
+        """
+        For each class in the classifier, 
+        Prepares the query and bias from the classifier params and searches with these
+        """
 
         target_labels = self.classifier.classes
         print('target_labels: ', target_labels)
-        target_label_idx = target_labels.index(target_label)
-        if target_label_idx < 0:
-            print(f'Label {target_label} not found in classifier. Available labels: {target_labels}')
-            return
-        class_query = self.classifier.beta[:, target_label_idx]
-        bias = self.classifier.beta_bias[target_label_idx]
         
-        self.search(
-            query=class_query,
-            bias=bias,
-            num_results=num_results,
-            sample_size=sample_size,
-            target_score=target_score, 
-            dataset=dataset,
-            exclude_labeled=True)
+        for target_label_idx, target_label in enumerate(target_labels):
+
+            print(f'Searching for {target_label}...')
+
+            class_query = self.classifier.beta[:, target_label_idx]
+            bias = self.classifier.beta_bias[target_label_idx]
+                
+            self.search(
+                query=class_query,
+                target_label=target_label,
+                bias=bias,
+                num_results=num_results,
+                sample_size=sample_size,
+                target_score=target_score, 
+                dataset=dataset,
+                exclude_labeled=True)
       
   
     def create_database(self, embeddings_files, overwrite=False):
@@ -580,7 +597,7 @@ class agile_state:
         self.classifier.save(path)
       
 
-    def run_inference(self, output_filepath=None, threshold=0.0, labels=None, dataset=None, subset=1):
+    def run_inference(self, output_filepath=None, threshold=0.0, labels=None, dataset=None, subset=1, exclude_labeled=False):
         """
         Calls the classifier.write_inference_csv() function to write the inference results to a csv file
         injecting the site_id and link columns via a row_func that uses baw_utils and 
@@ -592,17 +609,18 @@ class agile_state:
         if subset <= 0 or subset > 1:
           raise ValueError('Subset must be between 0 and 1')
         
-        # I think i originally edited the db implementation to add the dataaset. 
-        # TODO: copy this function to our own package and implement it there
-        #embedding_ids = self.db.get_embedding_ids(dataset=dataset)
-        embedding_ids = sqlite_usearch_impl_mod.get_embedding_ids(self.db, dataset=dataset)
+        embedding_ids = brutalism.get_brute_search_ids(self.db, subset, exclude_labeled = exclude_labeled)
 
-        if subset < 1:
-            n_samples = int(subset * len(embedding_ids))
-            indices = np.arange(len(embedding_ids))
-            np.random.shuffle(indices)
-            selected_indices = sorted(indices[:n_samples])
-            embedding_ids = embedding_ids[selected_indices]
+        # if subset < 1:
+        #     n_samples = int(subset * len(all_embedding_ids))
+        #     indices = np.arange(len(all_embedding_ids))
+        #     np.random.shuffle(indices)
+        #     selected_indices = sorted(indices[:n_samples])
+        #     embedding_ids = all_embedding_ids[selected_indices]
+        # else:
+        #     embedding_ids = all_embedding_ids
+
+        print(f'classifying {len(embedding_ids)} ({round(subset*100,0)}%) embeddings from dataset {dataset} ({round(len(embedding_ids) / 12 / 60, 2)} hours) with threshold {threshold}')
 
         if output_filepath is None:
             output_filepath = Path(self.config.predictions_folder) / 'inference.csv'
@@ -667,7 +685,7 @@ class agile_state:
         return site_map
     
     
-    def upload_detections(self, csv_path, project_id=None):
+    def upload_detections(self, csv_path, project_id=None, limit=None):
         """
         Uploads the detections from a csv file to the BAW API.
         cvs_path: path to the csv file containing the detections
@@ -680,14 +698,14 @@ class agile_state:
             print(f'CSV file {csv_path} does not exist. Please provide a valid path.')
             return
         
-
-
-
+        upload_name = f"Recognizer Workshop: {self.get_target_label_description()}"
 
         provenance_data = get_or_create_workshop_provenance(self.baw_api)
         provenance_id = provenance_data['id']
         response = annotation_upload_csv(self.baw_api, csv_path, 
-                                         provenance_id=provenance_id, commit='true')
+                                         provenance_id=provenance_id,
+                                         import_name=upload_name,
+                                         commit='true')
         data = response.get('data', {})
         if not data:
             print('Something went wrong with the upload. No data returned from the API.')
@@ -726,12 +744,42 @@ class agile_state:
             print("No auth token set")
 
 
-    def show_label_selector(self, initial_value=None):
+    def show_label_selector(self, initial_species=None, initial_call_types: Union[None, str, list]=None):
         """
         Displays a label selector widget that allows the user to select a label from the list of available labels.
         If a label is provided, it will be used to initialize the widget (if it is valid)"""
 
+        if initial_call_types is None:
+            initial_call_types = []
+        elif type(initial_call_types) is str:
+            initial_call_types = [initial_call_types]
         agile_widgets.label_selector(
-            baw_api=self.baw_api, binding=self.label, initial_value=initial_value
+            baw_api=self.baw_api, binding=self.label, initial_species=initial_species, initial_call_types=initial_call_types
         )
+
+    def get_target_labels(self):
+        """
+        """
+        species = self.label.get('species', '')
+        call_types = self.label.get('call_types') or []
+
+        if not call_types:
+            return [species]
+        else:
+            return [f"{species} {ct}" for ct in call_types]
+        
+
+    def get_target_label_description(self):
+        """
+        Returns a string describing the target label, e.g. "species (call_type1, call_type2)"
+        """
+        species = self.label.get('species', '')
+        call_types = self.label.get('call_types') or []
+
+        if not call_types:
+            return species
+        else:
+            return f"{species} ({', '.join(call_types)})"
+
+
 
