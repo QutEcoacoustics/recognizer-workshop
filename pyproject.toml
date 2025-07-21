@@ -25,22 +25,21 @@ classifiers = [
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dependencies = [
-  "etils==1.13.0",
-  "ipython==8.12.3",
-  "ipywidgets==8.1.5",
-  "librosa==0.11.0",
-  "matplotlib==3.10.3",
-  "ml_collections==0.1.1",
-  "numpy==2.3.1",
-  "pandas==2.3.1",
-  "perch_hoplite==0.1.0",
-  "pyarrow==18.1.0",
-  "python-dotenv==1.1.1",
-  "Requests==2.32.4",
-  "soundfile==0.13.0",
-  "tensorflow==2.19.0",
-  "tqdm==4.67.1",
-  "urllib3==2.5.0"
+  "etils>=1.13.0",
+  "ipython>=8.12.0",
+  "ipywidgets>=8.1.0",
+  "librosa>=0.11.0",
+  "matplotlib>=3.10.0",
+  "ml_collections>=0.1.0",
+  "numpy>=2.3.0",
+  "pandas>=2.3.0",
+  "perch_hoplite>=0.1.0",
+  "pyarrow>=18.1.0",
+  "python-dotenv>=1.1.0",
+  "Requests>=2.32.0",
+  "soundfile>=0.13.0",
+  "tqdm>=4.67.0",
+  "urllib3>=2.5.0"
 ]
 
 [project.urls]
