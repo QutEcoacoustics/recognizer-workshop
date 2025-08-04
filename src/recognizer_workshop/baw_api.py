@@ -384,7 +384,7 @@ class baw_api:
             #TODO: specifically check for authentication errors
             # so we are not prompting the user for a token if the error is not related to authentication
             print("\nAuthentication token is missing or invalid.")
-            env_file = find_dotenv()
+            env_file = find_dotenv(usecwd=True)
             if not env_file:
                 env_file = os.path.join(os.getcwd(), '.env')
                 print("No .env file found. A new one will be created if a token is provided.")
