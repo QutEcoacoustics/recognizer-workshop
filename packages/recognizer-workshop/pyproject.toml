@@ -4,11 +4,12 @@ build-backend = "hatchling.build"
 
 [project]
 name = "recognizer-workshop"
+version = "3.0.0"
 dynamic = ["version"]
-description = ''
-readme = "README.md"
+description = 'Tools for developing recognizers with perch-hoplite and Ecosounds'
+readme = "../../README.md"
 requires-python = ">=3.11"
-license = "Apache-2.0"
+license = { file = "../../../LICENSE" } 
 keywords = []
 authors = [
   { name = "peichins", email = "peichins@users.noreply.github.com" },
@@ -25,22 +26,16 @@ classifiers = [
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dependencies = [
-#  "etils>=1.13.0",
-#  "ipython>=8.12.0",
-    "ipywidgets>=8.1.0",
+  "baw-helpers",
+  "perch-hoplite",
+  "ipywidgets>=8.1.0",
 #  "librosa>=0.11.0",
-#  "matplotlib>=3.10.0",
-#  "ml_collections>=0.1.0",
 #  "numpy>=2.3.0",
 #  "pandas>=2.3.0",
 #  "perch_hoplite>=0.1.0",
 #  "pyarrow>=18.1.0",
-#  "python-dotenv>=1.1.0",
-    "Requests>=2.32.0",
 #  "soundfile>=0.13.0",
 #  "tqdm>=4.67.0",
-    "urllib3>=2.5.0",
-    "dotenv>=0.0.4"
 ]
 
 [project.urls]
@@ -59,16 +54,12 @@ extra-dependencies = [
 check = "mypy --install-types --non-interactive {args:src/recognizer_workshop tests}"
 
 [tool.coverage.run]
-source_pkgs = ["recognizer_workshop", "tests"]
+source = ["src"]
 branch = true
 parallel = true
 omit = [
   "src/recognizer_workshop/__about__.py",
 ]
-
-[tool.coverage.paths]
-recognizer_workshop = ["src/recognizer_workshop", "*/recognizer-workshop/src/recognizer_workshop"]
-tests = ["tests", "*/recognizer-workshop/tests"]
 
 [tool.coverage.report]
 exclude_lines = [
@@ -84,12 +75,6 @@ dependencies = [
 ]
 
 [tool.pytest.ini_options]
-# Tell pytest to ONLY look for tests in the 'tests/' directory.
-# Any other directory at the root level (like 'perch-hoplite', 'src', etc.)
-# will be ignored for test discovery.
 testpaths = [
     "tests",
-    # If you had any tests directly in 'src/recognizer_workshop/tests' for example,
-    # you might add "src/recognizer_workshop/tests" here too.
-    # Based on your structure, your tests are directly in the 'tests/' folder.
 ]

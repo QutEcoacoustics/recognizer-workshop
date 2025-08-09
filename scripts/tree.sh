@@ -1,0 +1,1 @@
+tree -I 'cache/*|__pycache__|.git|*.pyc|*.pyo|.pytest_cache|*.parquet|venv|dist|build|local_scripts|perch-hoplite' --prune

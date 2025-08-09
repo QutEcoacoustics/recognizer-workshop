@@ -1,0 +1,22 @@
+# packages/baw-helpers/pyproject.toml
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "baw-helpers"
+version = "1.0.0" 
+description = "A core library for interacting with the Bioacoustics Workbench (BAW) API."
+readme = "../../../README.md"
+requires-python = ">=3.10"
+license = { file = "../../../LICENSE" }
+
+dependencies = [
+  "Requests>=2.32.0",
+  "urllib3>=2.5.0",
+  "dotenv>=0.0.4"
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
