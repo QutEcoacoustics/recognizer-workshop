@@ -5,8 +5,9 @@ from pathlib import Path
 
 from perch_hoplite.db import interface as hoplite_interface
 
-from . import baw_api as baw_api
-from . import baw_helpers
+from baw_helpers import baw_api as baw_api
+from baw_helpers import baw_helpers
+
 from . import sample_for_verification
 from collections import Counter
 

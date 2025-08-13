@@ -8,9 +8,9 @@ build-backend = "hatchling.build"
 name = "baw-helpers"
 version = "1.0.0" 
 description = "A core library for interacting with the Bioacoustics Workbench (BAW) API."
-readme = "../../../README.md"
+readme = "../../README.md"
 requires-python = ">=3.10"
-license = { file = "../../../LICENSE" }
+license = { file = "../../LICENSE" } 
 
 dependencies = [
   "Requests>=2.32.0",

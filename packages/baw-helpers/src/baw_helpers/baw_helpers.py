@@ -16,19 +16,20 @@ def simple_filter(
     filter_params = {}
 
     def add_filter_param(param_name, param_value):
-        # if type(param_value) is int:
-        #     filter_params[param_name] = {
-        #         "eq": param_value
-        #     }
-        # elif isinstance(param_value, (list, set, tuple)) and len(param_value) > 0:
-        #     filter_params[param_name] = {
-        #         "in": param_value
-        #     }
         if type(param_value) is int:
-            param_value = [param_value]
+            filter_params[param_name] = {
+                "eq": param_value
+            }
+        elif isinstance(param_value, (list, set, tuple)) and len(param_value) > 0:
             filter_params[param_name] = {
                 "in": param_value
             }
+            
+        # if type(param_value) is int:
+        #     param_value = [param_value]
+        #     filter_params[param_name] = {
+        #         "in": param_value
+        #     }
 
 
     add_filter_param("projects.id", project_id)

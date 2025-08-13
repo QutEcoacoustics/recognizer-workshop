@@ -2,6 +2,7 @@
 
 import json
 import os
+import sys
 import requests
 import getpass
 
@@ -15,7 +16,7 @@ class baw_api:
     token = None
 
 
-    def __init__(self, token=None, base_url=None, debug=False):
+    def __init__(self, token=None, base_url=None, debug=False, allow_prompt=None):
 
        
         if not base_url:
@@ -30,7 +31,17 @@ class baw_api:
         self.session = requests.Session() # Initialize requests.Session()
         self.last_response = None
 
-        self.update_token(token)
+        # we don't always want to prompt for a token, e.g. non interactive tests
+        # if allow_prompt is not specified in either an arg or env var, default to True, 
+        # but only if we detect an interactive terminal
+        if allow_prompt is None:
+            env = os.getenv("BAW_ALLOW_PROMPT")
+            if env is not None:
+                allow_prompt = env.strip().lower() in {"1","true","yes","on"}
+            else:
+                allow_prompt = bool(sys.stdin) and sys.stdin.isatty()
+                
+        self.update_token(token, allow_prompt=allow_prompt)
 
 
         
@@ -363,7 +374,7 @@ class baw_api:
             return True
         
 
-    def update_token(self, token=None, save_to_env=True):
+    def update_token(self, token=None, save_to_env=True, allow_prompt=True):
         """
         sets the token to the supplied value
         tests the connection. 
@@ -398,10 +409,14 @@ class baw_api:
 
             if not self.test_token():
 
+                if not allow_prompt:
+                    print("No valid token found and prompting is disabled. Please provide a valid token or set one in the environment.")
+                    return
+
                 # Loop until the user provides a valid token or quits
-                while True:
+                while allow_prompt:
                     print("\nPlease enter a valid token to proceed. (Type 'quit' to exit)")
-                    new_token = getpass.getpass("Enter your BAW_AUTH_TOKEN: ")
+                    new_token = getpass.getpass(f"Enter your BAW_AUTH_TOKEN for {self.base_url}: ")
                     
                     if new_token.lower() == 'quit':
                         break

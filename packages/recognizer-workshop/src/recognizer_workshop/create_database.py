@@ -166,6 +166,8 @@ def add_parquet_to_existing_db(
     source_map_fn = None, 
     hop_size_s: float = 5.0
 ):
+    
+    raise NotImplementedError("Adding to existing db is not implemented yet. To create a new database, delete the old one")
     # load the db 
     db = sqlite_usearch_impl.SQLiteUsearchDB.create(db_path)
     db_model_config = db.get_metadata('model_config')

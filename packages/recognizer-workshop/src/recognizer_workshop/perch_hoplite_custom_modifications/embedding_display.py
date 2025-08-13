@@ -31,7 +31,7 @@ from perch_hoplite import audio_io
 from perch_hoplite.db import interface
 from perch_hoplite.db import search_results
 
-from recognizer_workshop import baw_utils
+from baw_helpers import baw_utils
 
 
 @dataclasses.dataclass

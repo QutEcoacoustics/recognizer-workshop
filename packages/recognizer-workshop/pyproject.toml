@@ -4,12 +4,11 @@ build-backend = "hatchling.build"
 
 [project]
 name = "recognizer-workshop"
-version = "3.0.0"
 dynamic = ["version"]
 description = 'Tools for developing recognizers with perch-hoplite and Ecosounds'
 readme = "../../README.md"
 requires-python = ">=3.11"
-license = { file = "../../../LICENSE" } 
+license = { file = "../../LICENSE" } 
 keywords = []
 authors = [
   { name = "peichins", email = "peichins@users.noreply.github.com" },
@@ -17,34 +16,55 @@ authors = [
 classifiers = [
   "Development Status :: 4 - Beta",
   "Programming Language :: Python",
-  "Programming Language :: Python :: 3.8",
-  "Programming Language :: Python :: 3.9",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: Implementation :: CPython",
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
+# dependencies = [
+#   "baw-helpers @ {root:parent:uri}/baw-helpers",
+#   "perch-hoplite @ {root:parent:parent:uri}/libs/perch-hoplite",
+#   "ipywidgets>=8.1.0"
+# ]
+
+# dependencies = [
+#   "baw-helpers = { path = \"../baw-helpers\", editable = true }",
+#   "perch-hoplite @ git+https://github.com/google-research/perch-hoplite.git@c151c7b8be0f829973a1213555aefe732225a089",
+#   "ipywidgets>=8.1.0"
+# ]
+
+
 dependencies = [
-  "baw-helpers",
-  "perch-hoplite",
-  "ipywidgets>=8.1.0",
-#  "librosa>=0.11.0",
-#  "numpy>=2.3.0",
-#  "pandas>=2.3.0",
-#  "perch_hoplite>=0.1.0",
-#  "pyarrow>=18.1.0",
-#  "soundfile>=0.13.0",
-#  "tqdm>=4.67.0",
+  "ipywidgets>=8.1.0"
 ]
+
 
 [project.urls]
 Documentation = "https://github.com/QutEcoacoustics/recognizer-workshop#readme"
 Issues = "https://github.com/QutEcoacoustics/recognizer-workshop/issues"
 Source = "https://github.com/QutEcoacoustics/recognizer-workshop"
 
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.hatch.version]
 path = "src/recognizer_workshop/__about__.py"
+
+[tool.hatch.envs.default]
+
+# [tool.hatch.envs.default.overrides]
+# path = { "baw-helpers" = "../baw-helpers", "perch-hoplite" = "../../libs/perch-hoplite" }
+
+
+[tool.hatch.envs.test]
+template = "default"
+dev-mode = true
+dependencies = ["pytest>=7.0", "pytest-cov"]
+pre-install-commands = [
+  "python -m pip install -e {root:parent}/baw-helpers",
+  "python -m pip install -e {root:parent:parent}/libs/perch-hoplite",
+]
 
 [tool.hatch.envs.types]
 extra-dependencies = [
@@ -68,11 +88,7 @@ exclude_lines = [
   "if TYPE_CHECKING:",
 ]
 
-[tool.hatch.envs.test]
-dependencies = [
-  "pytest>=7.0", 
-  "pytest-cov",
-]
+
 
 [tool.pytest.ini_options]
 testpaths = [

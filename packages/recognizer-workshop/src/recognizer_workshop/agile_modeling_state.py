@@ -45,12 +45,12 @@ from perch_hoplite.db import interface as hoplite_interface
 from perch_hoplite.zoo import model_configs
 from recognizer_workshop.create_database import convert_parquet
 
-import recognizer_workshop.baw_utils as baw_utils
+import baw_helpers.baw_utils as baw_utils
 from recognizer_workshop.perch_hoplite_custom_modifications import sqlite_usearch_impl as sqlite_usearch_impl_mod
 from recognizer_workshop.perch_hoplite_custom_modifications import classifier as classifier_mod
 from recognizer_workshop.agile_modeling_helpers import list_audio_files, get_or_create_workshop_provenance
-from recognizer_workshop.baw_api import baw_api
-from recognizer_workshop.baw_helpers import annotation_upload_csv
+from baw_helpers.baw_api import baw_api
+from baw_helpers.baw_helpers import annotation_upload_csv
 
 from recognizer_workshop import agile_widgets
 

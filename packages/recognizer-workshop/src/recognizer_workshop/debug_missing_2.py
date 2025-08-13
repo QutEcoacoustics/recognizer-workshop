@@ -1,7 +1,7 @@
 from perch_hoplite.db import sqlite_usearch_impl
 from pathlib import Path
 
-from recognizer_workshop import baw_helpers, baw_api
+from baw_helpers import baw_helpers, baw_api
 from recognizer_workshop.perch_hoplite_custom_modifications import sqlite_usearch_impl as sqlite_usearch_impl_custom
 
 def debug_missing(db_path, 
