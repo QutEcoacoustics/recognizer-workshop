@@ -1,12 +1,33 @@
 "Genereric wrapper for the BAW API"
-
+from __future__ import annotations 
+from fileinput import filename
 import json
 import os
+import io
 import sys
+import pytest
 import requests
+import re
+from pathlib import Path
+from dataclasses import dataclass, field
+
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import getpass
+import threading
+from typing import Any, Optional
+
 
 from dotenv import load_dotenv, find_dotenv, dotenv_values, set_key
+
+from baw_helpers import utils
+
+
+# regex to determine default analysis results filenames based on analysis_name patterns
+ANALYSIS_FILENAME_MAP = {
+    re.compile(r"embeddings", re.I): "embeddings.parquet",   # substring match
+}
+
 
 class baw_api:
     """Generic wrapper for the BAW API"""
@@ -14,6 +35,7 @@ class baw_api:
     base_url = "https://api.ecosounds.org"
     debug = False
     token = None
+
 
 
     def __init__(self, token=None, base_url=None, debug=False, allow_prompt=None):
@@ -28,8 +50,9 @@ class baw_api:
 
         self.base_url = base_url
         self.debug = debug
-        self.session = requests.Session() # Initialize requests.Session()
-        self.last_response = None
+
+        self._tls = threading.local()
+        self._lr_lock = threading.Lock()
 
         # we don't always want to prompt for a token, e.g. non interactive tests
         # if allow_prompt is not specified in either an arg or env var, default to True, 
@@ -44,31 +67,64 @@ class baw_api:
         self.update_token(token, allow_prompt=allow_prompt)
 
 
-        
+    def _get_session(self) -> requests.Session:
+        """Returns the session for the current thread, creating it if necessary."""
+        s = getattr(self._tls, "session", None)
+        if s is None:
+            s = requests.Session()
+
+
+            retry = Retry(
+                total=3, 
+                connect=3, read=3,  
+                backoff_factor=0.3,    
+                status_forcelist=[429, 500, 502, 503, 504],
+                allowed_methods={"GET", "HEAD"} 
+            )
+            adapter = HTTPAdapter(pool_connections=20, pool_maxsize=20, max_retries=retry)
+            s.mount("https://", adapter)
+            s.mount("http://", adapter)
+            self._tls.session = s
+        return s
+
+
+
+    def _auth_headers(self, content_type: str | None = "application/json") -> dict:
+        """
+        Build headers per request from current token.
+        If content_type is None, we omit Content-Type (needed for multipart/form-data).
+        """
+        h = {}
+        if content_type is not None:
+            h["Content-Type"] = content_type
+        if self.token:
+            h["Authorization"] = f'Token token="{self.token}"'
+        return h
+
 
     def url(self, endpoint):
         """Constructs a full URL for the given endpoint."""
-        # Ensure proper URL joining, handling leading/trailing slashes
         return f"{self.base_url.rstrip('/')}/{endpoint.lstrip('/')}"
 
-    def get(self, endpoint, params=None):
-        """Sends a GET request to the specified endpoint (expects JSON)."""
-        return self.request("GET", endpoint, params=params)
+
+    def get(self, endpoint, params=None, *, timeout: float | tuple | None = None):
+        return self.request("GET", endpoint, params=params, timeout=timeout)
 
 
-    def post(self, endpoint, data=None):
-        """Sends a POST request to the specified endpoint (expects JSON)."""
-        return self.request("POST", endpoint, data=data)
-    
+    def post(self, endpoint, data=None, params=None, *, timeout: float | tuple | None = None):
+        return self.request("POST", endpoint, json=data, params=params, timeout=timeout)
 
-    def format_qsp(self, qsp):
-        if qsp is None:
-            return ""
-        if not isinstance(qsp, (list, tuple, set)):
-            qsp = [qsp]
-        return "?" + "&".join(qsp)
 
-    def baw_filter(self, model, filter_params, qsp=None):
+    def baw_filter(self, model: str, 
+                   filter_params: dict, 
+                   qsp: dict | None = None,
+                   ):
+        """
+        Wrapper for filter endpoints of baw api models. 
+        Allows 'slim' filter definition, with no projection or sorting specified, or full filter json. 
+        TODO: manual retries. post requests are not retried, however this one should be 
+              retried as if it's a get request, since it is idempotent.
+        """
 
         # allow a full filter payload or only the filter portion
         if 'filter' in filter_params:
@@ -76,191 +132,253 @@ class baw_api:
         else:
             filter_payload = {"filter": filter_params}
 
-        endpoint = f"/{model}/filter/{self.format_qsp(qsp)}"
+        response = self.post(f"/{model}/filter/", data=filter_payload, params=qsp)
+        return response
 
-        return self.post(endpoint, data=filter_payload)
+            
 
-
-    def post_files(self, endpoint, files=None, data=None, params=None):
+    def analysis_result_file(
+        self,
+        arid: int,
+        analysis_job_id: int,
+        analysis_name: str,
+        filename: str = None,
+        *,
+        params: dict | None = None,
+        save_path: str | None = None,
+        timeout: float | tuple | None = None,
+        to_memory: bool | None = None,
+    ):
         """
-        Sends a POST request with a multipart/form-data payload.
+        Fetch a an analysis result file.  Same mode rules as download(): exactly one of
+        save_path or to_memory=True must be provided.
+        """
 
-        Ideal for file uploads. The 'requests' library will automatically set the
-        correct Content-Type header.
+        if filename is None:
 
-        Args:
-            endpoint (str): The API endpoint to send the request to.
-            files (dict): A dictionary for file uploads. The format should be:
-                          {'form_field_name': ('filename.ext', file_object, 'mime/type')}
-                          Example: {'audio_file': ('my_sound.wav', open('my_sound.wav', 'rb'), 'audio/wav')}
-            data (dict): A dictionary for any other form fields to send along with the files.
-        
+            # if the analysis_name matches the regex in the key of the filename map, set filename to the value of that key
+            for key, value in ANALYSIS_FILENAME_MAP.items():
+                if re.search(key, analysis_name):
+                    filename = value
+                    break
+
+            if filename is None:
+                raise ValueError("Unable to determine filename from analysis_name")
+
+        ep = f"/analysis_jobs/{analysis_job_id}/results/{arid}/{analysis_name}/{filename}"
+        return self.download(ep, save_path, params=params, timeout=timeout, to_memory=to_memory)
+
+
+    def _send_prepared(
+        self,
+        method: str,
+        url: str,
+        *,
+        json: dict | list | None = None,
+        data: dict | list | bytes | None = None,
+        files: dict | None = None,
+        params: dict | list[tuple[str, str]] | None = None,
+        stream: bool = False,
+        timeout: float | tuple | None = None,
+        content_type: str | None = None,  # CHANGED: allow override; None for multipart
+    ):
+        """
+        Prepare and send an HTTP request using the thread-local Session.
+
         Returns:
-            The JSON response from the server, or None on failure.
+            (response, prepared_request): On success, a Response and its PreparedRequest.
+            On transport errors, returns (None, prepared_request).
+
+        Notes:
+            - Does NOT call raise_for_status(); caller decides how to treat 4xx/5xx.
+            - If 'files' is provided, we omit Content-Type so requests can set multipart boundary.
+            - 'stream' and 'timeout' are passed to send(); mirrors Session.request behavior.
         """
-        url = self.url(endpoint)
-        original_content_type = self.session.headers.pop('Content-Type', None)
-        
-        # NOTE: We do not pass `json` here. Instead, `data` and `files` are used,
-        # and requests will build the multipart payload.
-        # req = requests.Request("POST", url, files=files, data=data, params=params)
-        # prepared_request = self.session.prepare_request(req)
+        sess = self._get_session()
 
-        response = None
+        # If 'files' is present, omit Content-Type; requests will set multipart/form-data.
+        ct = content_type
+        if files is not None:
+            ct = None
+
+        headers = self._auth_headers(content_type=ct)
+        req = requests.Request(
+            method, url, json=json, data=data, files=files, params=params, headers=headers
+        )
+        prepared_request = sess.prepare_request(req)
+
+        settings = sess.merge_environment_settings(
+            prepared_request.url,
+            proxies=None,
+            stream=stream,
+            verify=None,
+            cert=None,
+        )
+
+        # thread-local "last prepared" for this thread
+        self._tls.last_prepared_request = prepared_request
+
         try:
-            # Send the prepared request
-            response = self.session.post(url, files=files, data=data, params=params)
-            self.last_response = response
-            response.raise_for_status() # Raises HTTPError for 4xx/5xx responses
-            
-            if self.debug:
-                print("Multipart request was successful!")
-                self._print_request_details(response.request, response_obj=response, error_context=False)
-
-            try:
-                json_response = response.json()
-                return json_response
-            except requests.exceptions.JSONDecodeError:
-                if self.debug:
-                    print("Warning: Successful multipart request returned non-JSON content.")
-                return None
-
-        except requests.exceptions.HTTPError as e:
-            print("--- HTTP ERROR OCCURRED (MULTIPART) ---")
-            print(f"Error: {e}")
-            self._print_request_details(e.response.request, response_obj=e.response, error_context=True)
-            try:
-                return e.response.json()
-            except requests.exceptions.JSONDecodeError:
-                if self.debug:
-                    print("Error response was not JSON.")
-                return None
-
-        except requests.exceptions.ConnectionError as e:
-            print(f"--- CONNECTION ERROR OCCURRED (MULTIPART): {e} ---")
-            self._print_request_details(response.request, response_obj=None, error_context=True)
-            return None
-
-        except requests.exceptions.RequestException as e:
-            print(f"--- UNEXPECTED REQUESTS ERROR OCCURRED (MULTIPART): {e} ---")
-            self._print_request_details(response.request, response_obj=None, error_context=True)
-            return None
-        
-        finally:
-            # --- Restore the original Content-Type header ---
-            # This ensures other API calls that rely on the default header
-            # (e.g., normal JSON posts) will continue to work correctly.
-            if original_content_type:
-                self.session.headers['Content-Type'] = original_content_type
-
-
-
-
-    def download(self, endpoint, save_path, params=None):
-        """
-        Downloads a file from the specified endpoint and saves it to the given path.
-        Returns the save_path on success, None on failure.
-        """
-        url = self.url(endpoint)
-
-        req = requests.Request("GET", url, params=params)
-        prepared_request = self.session.prepare_request(req)
-
-        response = None # Initialize response to None
-        try:
-            # Use stream=True to download large files without loading them entirely into memory
-            response = self.session.send(prepared_request, stream=True)
-            response.raise_for_status() # Check for HTTP errors (4xx, 5xx)
-
-            if self.debug:
-                print("File download successful!")
-                self._print_request_details(prepared_request, response_obj=response, error_context=False)
-
-            # Ensure the directory for saving exists
-            os.makedirs(os.path.dirname(save_path), exist_ok=True)
-
-            # Save the file in chunks
-            with open(save_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
-            
-            # Explicitly close the stream response
-            response.close()
-
-            print(f"File successfully downloaded to: {save_path}")
-            return save_path
-
-        except requests.exceptions.HTTPError as e:
-            print("--- HTTP ERROR DURING FILE DOWNLOAD ---")
-            print(f"Error: {e}")
-            self._print_request_details(e.response.request, response_obj=e.response, error_context=True)
-            return None
-        except requests.exceptions.ConnectionError as e:
-            print(f"--- CONNECTION ERROR DURING FILE DOWNLOAD: {e} ---")
-            self._print_request_details(prepared_request, response_obj=None, error_context=True)
-            return None
-        except requests.exceptions.RequestException as e:
-            print(f"--- UNEXPECTED REQUESTS ERROR DURING FILE DOWNLOAD: {e} ---")
-            self._print_request_details(prepared_request, response_obj=None, error_context=True)
-            return None
-        except IOError as io_e:
-            print(f"--- FILE SAVE ERROR: {io_e} ---")
-            self._print_request_details(prepared_request, response_obj=response, error_context=True)
-            return None
-        finally:
-            # Ensure the response stream is closed even on success or failure
-            if response:
-                response.close()
-
-    def request(self, method, endpoint, data=None, params=None):
-        url = self.url(endpoint)
-        
-        # Prepare the request: This ensures session-level headers (like Auth) are included
-        req = requests.Request(method, url, json=data, params=params)
-        prepared_request = self.session.prepare_request(req)
-
-        response = None # Initialize response to None
-        try:
-            # Send the prepared request
-            response = self.session.send(prepared_request)
-            self.last_response = response
-            response.raise_for_status() # Raises HTTPError for 4xx/5xx responses
-            
-            if self.debug:
-                print("Request was successful!") # Print this first so it's clear
-                self._print_request_details(prepared_request, response_obj=response, error_context=False)
-
-            try:
-                json_response = response.json()
-                return json_response
-            except requests.exceptions.JSONDecodeError:
-                # If the status was 2xx but the response body wasn't valid JSON (e.g., a 204 No Content)
-                if self.debug: # Only print warning if in debug mode
-                    print("Warning: Successful request returned non-JSON content (expected JSON).")
-                return None
-
-        except requests.exceptions.HTTPError as e:
-            print("--- HTTP ERROR OCCURRED ---")
-            print(f"Error: {e}") 
-            self._print_request_details(e.response.request, response_obj=e.response, error_context=True)
-            try:
-                # Attempt to return JSON from error response if available and valid
-                return e.response.json()
-            except requests.exceptions.JSONDecodeError:
-                # If the error response itself is not JSON
-                if self.debug: # Only print this warning if in debug mode
-                    print("Error response was not JSON.")
-                return None  
-
+            response = sess.send(prepared_request, timeout=timeout, **settings)
+            return response, prepared_request
         except requests.exceptions.ConnectionError as e:
             print(f"--- CONNECTION ERROR OCCURRED: {e} ---")
             self._print_request_details(prepared_request, response_obj=None, error_context=True)
-            return None
-
+            return None, prepared_request
         except requests.exceptions.RequestException as e:
             print(f"--- UNEXPECTED REQUESTS ERROR OCCURRED: {e} ---")
             self._print_request_details(prepared_request, response_obj=None, error_context=True)
+            return None, prepared_request
+        
+
+    def request(        
+            self,
+            method: str,
+            endpoint: str,
+            *,
+            json: dict | list | None = None,
+            data: dict | list | bytes | None = None,
+            files: dict | None = None,
+            params: dict | list[tuple[str, str]] | None = None,
+            stream: bool = False,
+            timeout: float | tuple | None = None,
+            content_type: str | None = None,
+            return_json: bool = True,
+
+        ):
+        """
+        Wraps the _send_prepared method for easier usage:
+        - parses json response if appropriate
+        - handles https and json errors and exceptions
+        """
+        
+        url = self.url(endpoint)
+
+        response, prepared_request = self._send_prepared(
+            method, url,json=json, data=data, files=files,
+            params=params, stream=stream, timeout=timeout,
+            content_type=content_type,
+        )
+
+        if response is None:
+            print("No response received.")
             return None
+        
+        self._tls.last_response = response
+        with self._lr_lock:
+            self.last_response = response
+
+        try:
+            response.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            print("--- HTTP ERROR OCCURRED ---")
+            print(f"Error: {e}")
+            # Prefer the failing response.request; fallback to prepared_request if missing
+            req_for_log = getattr(getattr(e, "response", None), "request", None) or prepared_request
+            self._print_request_details(req_for_log, response_obj=getattr(e, "response", None), error_context=True)
+            try:
+                return e.response.json() if e.response is not None else None
+            except (requests.exceptions.JSONDecodeError, ValueError):
+                if self.debug:
+                    print("Error response was not JSON.")
+                return None
+            
+        if self.debug:
+            print("Request was successful!") 
+            self._print_request_details(response.request, response_obj=response, error_context=False)
+
+        if stream or not return_json:
+            return response
+
+        try:
+            return response.json()
+        except (requests.exceptions.JSONDecodeError, ValueError):
+            if self.debug:
+                print("Warning: Successful request returned non-JSON content (expected JSON).")
+            return None
+
+
+    def post_files(self, endpoint, files=None, data=None, params=None, *, timeout: float | tuple | None = None):
+        """
+        Upload files using multipart/form-data.
+        Reuses request(); we deliberately omit Content-Type so requests sets the boundary.
+        """
+        return self.request(
+            "POST",
+            endpoint,
+            data=data,
+            files=files,
+            params=params,
+            timeout=timeout,
+            content_type=None,   # IMPORTANT: let requests set multipart boundary
+            return_json=True,    # keep old behavior: return parsed JSON if possible
+        )
+
+
+    def download(self, endpoint, 
+                 save_path: str | None = None, 
+                 params=None, 
+                 *, 
+                 chunk_size: int = 8192, 
+                 timeout: float | tuple | None = None, 
+                 to_memory: bool | None = None):
+        """
+        Download a file to disk by streaming the response body.
+        Reuses request() with stream=True so we don't load the file into memory.
+        Creates directories if they don't exist.
+        """
+
+        file_mode = save_path is not None
+        mem_mode  = (to_memory is True)
+        if file_mode == mem_mode:   # both True or both False
+            raise ValueError("Provide 'save_path' where to save file OR set to_memory=True to return a buffer")
+
+
+        resp = self.request(
+            "GET",
+            endpoint,
+            params=params,
+            stream=True,         # stream the body
+            timeout=timeout,
+            return_json=False,   # we want the raw Response object
+        )
+        if resp is None:
+            return None
+
+        if self.debug:
+            print("File download started (streaming).")
+            self._print_request_details(resp.request, response_obj=resp, error_context=False)
+
+        try:
+
+            if mem_mode:
+                buf = io.BytesIO()
+                for chunk in resp.iter_content(chunk_size=chunk_size):
+                    if chunk:
+                        buf.write(chunk)
+                buf.seek(0)
+                return buf
+            else:
+                dirpath = os.path.dirname(save_path)
+                if dirpath:                   
+                    os.makedirs(dirpath, exist_ok=True)
+                with open(save_path, "wb") as f:
+                    for chunk in resp.iter_content(chunk_size=chunk_size):
+                        if chunk: 
+                            f.write(chunk)
+                if self.debug:
+                    print(f"File successfully downloaded to: {save_path}")
+                return save_path
+        except IOError as io_e:
+            print(f"--- FILE SAVE ERROR: {io_e} ---")
+            # We still have resp.request for details
+            self._print_request_details(resp.request, response_obj=resp, error_context=True)
+            return None
+        finally:
+            try:
+                resp.close()
+            except Exception:
+                pass
 
 
     def _print_request_details(self, request_obj, response_obj=None, error_context=False):
@@ -325,18 +443,21 @@ class baw_api:
                 print("Connection successful:", response)
             return response
         except requests.RequestException as e:
-            # The .request method already handles detailed error printing,
-            # so this block just needs to catch and return None
-            # or you can add a simple message if you prefer.
             if self.debug: # Only print this generic message if debug is on
                 print(f"Error connecting to BAW API via test_connection: {e}")
             return None
         
+
     def test_token(self, default=True):
+        """Test the API token on the server for validity."""
         if not self.token:
             if self.debug:
                 print("No API token provided. Please set the BAW_AUTH_TOKEN environment variable or pass a token to the baw_api constructor.")
             return False
+        
+        if self.token[:1] in {"'", '"'} and self.token[-1:] != self.token[:1]:
+            # because I keep pasting into env incorrectly somehow
+            print("Possibly unclosed quote in your token string")
 
         self.test_connection(silent=True)
         r = self.last_response
@@ -354,24 +475,6 @@ class baw_api:
             print(message)
         
         return is_valid
-
-
-
-        if self.last_response is None or self.last_response.status_code >= 500:
-            print("Unable to verify token: No response from the server or server error.")
-            return default
-        elif self.last_response.status_code in [401]:
-            if self.debug:
-                print("Token is invalid valid.")
-            return False
-        elif self.last_response.status_code >=200 and self.last_response.status_code < 300:
-            if self.debug:
-                print("Token is valid.")
-            return True
-        elif self.last_response.status_code >=200 and self.last_response.status_code < 300:
-            if self.debug:
-                print("Token is valid.")
-            return True
         
 
     def update_token(self, token=None, save_to_env=True, allow_prompt=True):
@@ -387,13 +490,10 @@ class baw_api:
 
         print("\nUpdating BAW API token...")
 
-        if token is not None:
-            self.set_auth_header(token)
-        
+        self.token = token
+
         if not self.test_token():
 
-            #TODO: specifically check for authentication errors
-            # so we are not prompting the user for a token if the error is not related to authentication
             print("\nAuthentication token is missing or invalid.")
             env_file = find_dotenv(usecwd=True)
             if not env_file:
@@ -404,8 +504,8 @@ class baw_api:
                 print(f"Found .env file: {env_file}")
                 config = dotenv_values(env_file)
 
-            # Try to get the token from the dictionary
-            self.set_auth_header(config.get('BAW_AUTH_TOKEN', ""))
+            
+            self.token = config.get('BAW_AUTH_TOKEN', None)
 
             if not self.test_token():
 
@@ -418,42 +518,16 @@ class baw_api:
                     print("\nPlease enter a valid token to proceed. (Type 'quit' to exit)")
                     new_token = getpass.getpass(f"Enter your BAW_AUTH_TOKEN for {self.base_url}: ")
                     
-                    if new_token.lower() == 'quit':
+                    if new_token.lower() in ['quit', 'q']:
                         break
 
-                    self.set_auth_header(new_token) # Set the auth header for the session
+                    self.token = new_token 
                     if self.test_token():
                         if save_to_env:
                             set_key(env_file, 'BAW_AUTH_TOKEN', new_token)
                         break 
         else:
             print("\nExisting token from .env file is valid.")
-
-
-
-    def set_auth_header(self, token):
-        """Sets the Authorization header for the session."""
-
-        print("\nSetting Authorization header for the BAW API...")
-        # print the first and last 3 characters with some asterisks in between
-        if token is not None and len(token) > 6:
-            print(f"Token set to: {token[:3]}***{token[-3:]}")
-        else:
-            print("Token set to: [None or empty]")
-
-        self.token = token
-        if token is None or token == "":
-            self.session.headers.update({
-                "Content-Type": "application/json"
-            })
-        else:
-            self.session.headers.update({
-                "Authorization": f'Token token="{self.token}"',
-                "Content-Type": "application/json"
-            })
-
-
-
 
 
     @staticmethod
@@ -472,27 +546,3 @@ class baw_api:
 
         print(formatted_response)
 
-
-class baw_utils:
-    def __init__(self, token):
-        self.api = baw_api(token)
-
-    
-
-class VerificationManager:
-    def __init__(self, token):
-        self.baw = baw_utils(token)
-        self.verifications = []
-
-    def get_verifications(self, source_id):
-        """Fetch verifications for a given source ID."""
-        endpoint = f"/sources/{source_id}/verifications"
-        response = self.baw.api.get(endpoint)
-        self.verifications = response.get('verifications', [])
-        return self.verifications
-
-    def add_verification(self, source_id, verification_data):
-        """Add a new verification for a given source ID."""
-        endpoint = f"/sources/{source_id}/verifications"
-        response = self.baw.api.post(endpoint, data=verification_data)
-        return response

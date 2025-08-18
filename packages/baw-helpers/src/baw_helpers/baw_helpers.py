@@ -6,14 +6,21 @@ from . import baw_api
 import csv
 import os
 from pathlib import Path
+import json
+from typing import Any, Union
+
+from baw_helpers.utils import stable_hash
+
 
 def simple_filter(
-    project_id=None,
-    region_id=None,
-    site_id=None,
-    arid=None):
+    project_ids: int | list | None = None,
+    region_ids: int | list | None = None,
+    site_ids: int | list | None = None,
+    arids: int | list | None = None,
+    filter_params: dict | None = None):
     """Helper to create a simple filter for BAW API queries."""
-    filter_params = {}
+    if filter_params is None:
+        filter_params = {}
 
     def add_filter_param(param_name, param_value):
         if type(param_value) is int:
@@ -25,63 +32,137 @@ def simple_filter(
                 "in": param_value
             }
             
-        # if type(param_value) is int:
-        #     param_value = [param_value]
-        #     filter_params[param_name] = {
-        #         "in": param_value
-        #     }
 
-
-    add_filter_param("projects.id", project_id)
-    add_filter_param("regions.id", region_id)
-    add_filter_param("sites.id", site_id)
-    add_filter_param("id", arid)
+    add_filter_param("projects.id", project_ids)
+    add_filter_param("regions.id", region_ids)
+    add_filter_param("sites.id", site_ids)
+    add_filter_param("id", arids)
     if len(filter_params) == 0:
         return None
-    return filter_params
+    
+    return {
+        "filter": filter_params
+    }
+
+def wrap_filter(filter_params: dict) -> dict:
+    """Accept bare dict or {'filter': {...}}; return full payload."""
+    return filter_params if "filter" in filter_params else {"filter": filter_params}
+
+
+def get_filter_result(
+    api,                       
+    model: str,
+    filter_params: dict,
+    save_path: str | Path,        
+    qsp: dict | None = None,
+    use_cache: bool = True,
+    *,
+    include_qsp_in_hash: bool = True,
+    pretty: bool = True,
+) -> tuple[Any | None, Path]:
+    """
+    Get filter result with simple file cache.
+
+    Returns:
+        (data, path) where:
+          - data is parsed JSON (dict/list) or None on failure
+          - path is the full cache file path (even if not written due to failure)
+
+    Notes:
+      - Hash is computed over the *complete* 'filter' dict.
+      - If include_qsp_in_hash=True, the qsp is included in the hash basis.
+    """
+    payload = wrap_filter(filter_params)
+    basis = {"filter_payload": payload}
+    if include_qsp_in_hash and qsp:
+        basis["qsp"] = qsp
+    # 3 bytes = 6 hex chars for ~16m possible values. 
+    h = stable_hash(basis, digest_size=3)  # deterministic across key order/types
+    out_dir = Path(save_path)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_file = out_dir / f"{model}_{h}.json"
+
+    if use_cache and out_file.exists():
+        try:
+            data = json.loads(out_file.read_text(encoding="utf-8"))
+        except Exception:
+            data = None  # corrupted cache; caller can decide what to do
+        return data, out_file
+
+    # Miss or bypass: call API
+    data = api.baw_filter(model, payload, qsp=qsp)
+    if data is None:
+        # API layer already handled/logged; return path so caller knows where it would be
+        return None, out_file
+
+    with out_file.open("w", encoding="utf-8") as f:
+        if pretty:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        else:
+            json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
+
+    return data, out_file
 
 
 def get_random_audio_recordings(
-        baw_api,
-        filter,
-        limit=10,
-        seed=42,
-        order_by="created_at",
-        order_direction="desc",
-    ):
-    """Get random audio recordings from the BAW API."""
+    api,
+    filter_params: dict,
+    save_dir: str | Path,
+    *,
+    limit: int = 10,
+    seed: int = 42,
+    order_by: str = "created_at",
+    order_direction: str = "desc",
+    use_cache: bool = True,
+) -> list[dict] | tuple[list[dict], Path]:
+    """
+    Fetch all recordings for the filter (disable paging), cache the JSON,
+    then return a deterministic random subset.
+    """
 
-    filter_payload = {
-        "filter": filter,
-        "projection": {
-            "include": ["id", "site_id", "canonical_file_name", "sites.name", 
-                        "regions.name", "regions.id", "duration_seconds"]
-        },
-        "sorting": {
+    payload = wrap_filter(filter_params)
+    
+
+    if "projection" not in payload:
+        payload["projection"] = {
+                "include": ["id", "site_id", "canonical_file_name", "sites.name", 
+                            "regions.name", "regions.id", "duration_seconds"]
+            }
+
+    if "sorting" not in payload:
+        payload["sorting"] = {
             "order_by": order_by,
-            "direction": order_direction
+            "direction": order_direction,
         }
-    }
 
-    endpoint = "/audio_recordings/filter?disable_paging=true"
+    qsp = {"disable_paging": 'true'}
+    data, cache_path = get_filter_result(
+        api=api,
+        model="audio_recordings",
+        filter_params=payload,
+        save_path=save_dir,
+        qsp=qsp,
+        use_cache=use_cache,
+        include_qsp_in_hash=True
+    )
 
-    response = baw_api.post(endpoint, data=filter_payload)
+    if not data or "data" not in data:
+        raise ValueError("No data found in response (or cached file) for audio_recordings filter")
 
-    if not response or "data" not in response:
-        raise ValueError("No data found in response from BAW API")
+    recordings = data["data"]
+    if not isinstance(recordings, list):
+        raise ValueError("Unexpected response format: 'data' is not a list")
 
-    recordings = response.get("data")
+    # 3) Deterministic shuffle preserving ordering
 
-    real_limit = min(limit, len(recordings))
-    if real_limit != limit:
-        print(f"Warning: Only {real_limit} recordings found, requested {limit}")
-    
-    # Shuffle the recordings to get a random selection
- 
-    random.seed(seed)
-    random.shuffle(recordings)
-    return recordings[:real_limit]
-    
+    n = len(recordings)
+    if limit >= n or limit < 0:
+        return recordings, cache_path
+    rng = random.Random(seed)
+    idxs = sorted(rng.sample(range(n), limit))   # pick k unique positions, then sort them
+    out = [recordings[i] for i in idxs]
+
+    return out, cache_path
 
 
 def get_embeddings(
@@ -114,7 +195,6 @@ def get_embeddings(
     return result
 
 
-
 def get_events_for_sites(baw_api, filter_params, tags=None):
     """Get any audio recordings that have events for a specific region.
     region_index is the index of the region in the regions list.
@@ -137,9 +217,7 @@ def get_events_for_sites(baw_api, filter_params, tags=None):
             raise ValueError("Either site_id, project_id or region_id must be provided.")
         sites = baw_api.post("/sites/filter?disable_paging=true", data={"filter": site_filter})
         site_id = [site["id"] for site in sites.get("data", [])]
-    
-
-    
+        
     # this is too slow and times out for lots of sites
     ae_filter = {
         "audio_recordings.site_id": {"in": site_id}
@@ -155,7 +233,6 @@ def get_events_for_sites(baw_api, filter_params, tags=None):
 
 
     return response.get("data", [])
-
 
 
 def get_verifications_for_sites(api, event_ids=None, filter_params=None):
@@ -225,8 +302,6 @@ def canonical_file_name_to_source(file_name: str, base_url="https://api.ecosound
     return f"{base_url}/audio_recordings/{arid}/original"
 
 
-
-
 def annotation_upload_csv(api, filepath_to_csv, provenance_id, import_name, commit='true'):
 
     event_import_endpoint = "/audio_event_imports"
@@ -249,9 +324,6 @@ def annotation_upload_csv(api, filepath_to_csv, provenance_id, import_name, comm
         else:
             print("Failed to create a new audio_event_import record.")
             return
-
-
-    # https://api.ecosounds.org/audio_event_imports/12/files/
 
     event_file_upload_endpoint = f"/audio_event_imports/{import_id}/files"
 

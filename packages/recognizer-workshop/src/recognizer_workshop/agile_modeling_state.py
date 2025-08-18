@@ -443,6 +443,8 @@ class agile_state:
 
         self.classifier = linear_classifier
 
+        return eval_scores
+
 
     def save_search_results(self, path, append=False):
         """
@@ -605,6 +607,7 @@ class agile_state:
 
         if subset is None:
             subset = 1.0
+        subset = float(subset)
 
         if subset <= 0 or subset > 1:
           raise ValueError('Subset must be between 0 and 1')
@@ -698,7 +701,7 @@ class agile_state:
             print(f'CSV file {csv_path} does not exist. Please provide a valid path.')
             return
         
-        upload_name = f"Recognizer Workshop: {self.get_target_label_description()}"
+        upload_name = f"Agile Modelling: {self.get_target_label_description()}"
 
         provenance_data = get_or_create_workshop_provenance(self.baw_api)
         provenance_id = provenance_data['id']

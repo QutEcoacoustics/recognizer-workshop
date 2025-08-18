@@ -94,3 +94,23 @@ exclude_lines = [
 testpaths = [
     "tests",
 ]
+
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/recognizer_workshop"]
+include = [
+  { path = "src/recognizer_workshop/resources/embedding_configs/*.json", formats = ["wheel", "sdist"] }
+]
+
+[tool.hatch.build]
+# Include non-Python resources in both sdist and wheel
+include = [
+  "src/recognizer_workshop/resources/embedding_configs/*.json",
+]
+
+[tool.hatch.build.targets.sdist]
+# (Optional) Explicitly include in sdist as well; top-level include already covers it,
+# but this makes the intent clear.
+include = [
+  "src/recognizer_workshop/resources/embedding_configs/*.json",
+]
