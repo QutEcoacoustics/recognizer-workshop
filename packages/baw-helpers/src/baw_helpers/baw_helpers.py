@@ -114,7 +114,7 @@ def get_random_audio_recordings(
     order_by: str = "created_at",
     order_direction: str = "desc",
     use_cache: bool = True,
-) -> list[dict] | tuple[list[dict], Path]:
+) -> tuple[list[dict], Path]:
     """
     Fetch all recordings for the filter (disable paging), cache the JSON,
     then return a deterministic random subset.

@@ -29,8 +29,9 @@ from recognizer_workshop.embedding_config_loader import load_baw_embedding_confi
 
 PARQUET_METADATA_COLUMNS = ('source', 'channel', 'offset',)
 
-BAW_ANALYSIS_JOB_ID = 3  
-BAW_ANALYSIS_NAME = "perch-embeddings_4"
+#TODO: don't hardcode these
+BAW_ANALYSIS_JOB_ID = 3
+DEFAULT_BAW_ANALYSIS_NAME = "perch-embeddings_4"
 
 def convert_source_to_original_url(source: str, domain='https://api.ecosounds.org') -> str:
     """
@@ -45,12 +46,12 @@ def convert_source_to_original_url(source: str, domain='https://api.ecosounds.or
         return source
 
 
-def create_database(
+def create_database_from_baw(
         db_path: str | Path,
         filelist_path: str | Path,
         *,
         config_folder: str | Path | None = None,
-        client: baw_api.baw_api | None = None, # needed if pulling remote files
+        client: baw_api.baw_api | None = None, 
         project_ids: int | list | None = None,
         region_ids: int | list | None = None,
         site_ids: int | list | None = None,
@@ -93,7 +94,7 @@ def convert_parquet(
     db_path: str,
     *,
     parquet_source: str | list | Path,
-    config_folder: str | Path | None = None,
+    config: str | Path | None = None,
     db_type: str = 'sqlite_usearch',
     dataset_name: str = 'search_set',
     max_count: int = -1,
@@ -118,7 +119,7 @@ def convert_parquet(
         db, model_config = create_empty_db(
             db_path=db_path,
             parquet_source=parquet_source,
-            config_folder=config_folder,     
+            config=config,     
             db_type=db_type,
             max_size=max_size,
             api_client=api_client,      
@@ -138,7 +139,7 @@ def iter_parquet_dataframes(
     columns: list[str] | None = None,  # optional column projection
     skip_arids_in: list[int] | tuple[int] | set[int] | None = None,
     analysis_job_id: int = BAW_ANALYSIS_JOB_ID, # TODO: some sort of per-host defaults for different embeddings sources, or eventaully look it up on the host to see what's available
-    analysis_name: str = BAW_ANALYSIS_NAME,
+    analysis_name: str = DEFAULT_BAW_ANALYSIS_NAME,
 ):
     """
     Yield pandas DataFrames from local or downloaded files
@@ -250,10 +251,46 @@ def iter_parquet_dataframes(
                 warn(path or "<fragment>", e)
 
 
-def create_empty_db(
+def _load_embedding_config(config: str | Path | dict | None):
+    """
+    Accepts:
+      - None -> use DEFAULT_BAW_ANALYSIS_NAME via load_baw_embedding_config
+      - dict/ConfigDict -> normalize & return ConfigDict
+      - Path -> must exist; load via load_embedding_config
+      - str -> if path exists load it, else treat as named config via load_baw_embedding_config
+    Raises:
+      - TypeError for unsupported types
+      - FileNotFoundError for non-existent Path
+    """
+    if config is None:
+        config = DEFAULT_BAW_ANALYSIS_NAME
+
+    # Already a mapping: normalize and return
+    if isinstance(config, (dict, config_dict.ConfigDict)):
+        return config_dict.ConfigDict(config)
+
+    # Path-like
+    if isinstance(config, Path):
+        if config.exists():
+            return config_dict.ConfigDict(load_embedding_config(config))
+        raise FileNotFoundError(f"Config path does not exist: {config}")
+
+    # String: maybe a path, else named default
+    if isinstance(config, str):
+        p = Path(config)
+        if p.exists():
+            return config_dict.ConfigDict(load_embedding_config(p))
+        # Treat as named config (will raise inside if unknown)
+        return config_dict.ConfigDict(load_baw_embedding_config(config))
+
+    # Anything else: bad type
+    raise TypeError(f"Unsupported config type: {type(config).__name__}")
+
+
+def create_empty_db(    
     db_path: str,
     parquet_source: str | Path | list,
-    config_folder: str | Path | None = None,
+    config: str | Path | None = None,
     db_type: str = 'sqlite_usearch',
     max_size: int | None = 1_000_000,
     api_client=None
@@ -269,12 +306,10 @@ def create_empty_db(
     emb_dim = first_item.shape[1] - len(meta_cols)
     if emb_dim <= 0:
         raise ValueError(f"Could not infer embedding dim (got {emb_dim}).")
+    
+    legacy_config = _load_embedding_config(config)
 
-    # Convert embedding config to new format and insert into the DB.
-    if config_folder is not None:
-        legacy_config = load_embedding_config(config_folder)
-    else:
-        legacy_config = load_baw_embedding_config(BAW_ANALYSIS_NAME)
+
 
     model_config = embed.ModelConfig(
         model_key=legacy_config.embed_fn_config.model_key,
@@ -366,9 +401,10 @@ def add_parquet_to_existing_db(
 
 def get_existing_arids(db) -> set[int]:
     existing_sources = sqlite_usearch_impl_custom.get_all_sources(db)
-    def extract(source_id: str | None) -> int | None:
+    def extract(source_id: str) -> int | None:
         try:
-            return int(source_id.split("/")[-3]) if source_id else None
+            _, arid = extract_arid_and_domain(source_id)
+            return int(arid) if arid else None
         except Exception:
             return None
     return {a for a in (extract(s.source_id) for s in existing_sources) if a is not None}

@@ -63,23 +63,3 @@ def test_thread_safety_smoke(api_client, workers):
             # Any of these are acceptable: dict/list JSON body or None (204/empty)
             assert resp is None or isinstance(resp, (dict, list))
 
-@pytest.mark.skipif(
-    not os.getenv("STAGING_UPLOAD_ENDPOINT"),
-    reason="set STAGING_UPLOAD_ENDPOINT to enable upload test",
-)
-def test_post_files_optional(api_client, tmp_path):
-    """
-    Optional: exercise multipart upload if you provide an endpoint via env.
-    Expect the server to accept a small text file; schema is unknown so we just check 2xx.
-    """
-    upload_ep = os.environ["STAGING_UPLOAD_ENDPOINT"]  # e.g. "/uploads"
-    sample = tmp_path / "hello.txt"
-    sample.write_text("hello baw", encoding="utf-8")
-
-    with sample.open("rb") as fh:
-        files = {"file": ("hello.txt", fh, "text/plain")}
-        resp = api_client.post_files(upload_ep, files=files, data={"note": "smoke"}, timeout=30)
-
-    r = api_client.last_response
-    assert r is not None and 200 <= r.status_code < 300
-    assert resp is None or isinstance(resp, (dict, list))

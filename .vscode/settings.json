@@ -1,7 +1,6 @@
 {
   "python.testing.pytestEnabled": true,
   "python.testing.unittestEnabled": false,
-  "python.testing.pytestArgs": ["."],         // let pytest.ini drive what’s collected
   "python.testing.autoTestDiscoverOnSaveEnabled": false,
-  "python.testing.pytestArgs": ["-m", "integration", "-vv"]
+  "python.testing.pytestArgs": ["-vv", "."]
 }
