@@ -43,7 +43,7 @@ from perch_hoplite.db import sqlite_usearch_impl
 from perch_hoplite.db import interface as hoplite_interface
 # from chirp.projects.zoo import models
 from perch_hoplite.zoo import model_configs
-from recognizer_workshop.create_database import convert_parquet
+from recognizer_workshop.create_database.create_database import convert_parquet
 
 import baw_helpers.baw_utils as baw_utils
 from recognizer_workshop.perch_hoplite_custom_modifications import sqlite_usearch_impl as sqlite_usearch_impl_mod
