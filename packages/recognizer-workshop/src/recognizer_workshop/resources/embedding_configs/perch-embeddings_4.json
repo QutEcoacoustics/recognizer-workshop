@@ -1,0 +1,26 @@
+{
+  "embed_fn_config": {
+            "model_key": "taxonomy_model_tf",
+    "write_embeddings": true,
+    "write_logits": false,
+    "write_separated_audio": false,
+    "write_raw_audio": false,
+    "tensor_dtype": "float16",
+    "min_audio_s": 1.0,
+            "model_config": {
+              "window_size_s": 5.0,
+              "hop_size_s": 5.0,
+              "sample_rate": 32000,
+              "tfhub_version": 8,
+              "model_path": ""
+            },
+    "file_id_depth": 1
+  },
+  "shard_len_s": 60,
+  "num_shards_per_file": 240,
+  "tf_record_shards": 256,
+  "output_dir": "/",
+  "source_file_patterns": [
+    "/mnt/source/*.wav"
+  ]
+}

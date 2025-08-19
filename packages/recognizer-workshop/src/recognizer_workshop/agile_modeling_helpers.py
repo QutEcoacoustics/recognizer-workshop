@@ -5,8 +5,9 @@ from pathlib import Path
 
 from perch_hoplite.db import interface as hoplite_interface
 
-from . import baw_api as baw_api
-from . import baw_helpers
+from baw_helpers import baw_api as baw_api
+from baw_helpers import baw_helpers
+
 from . import sample_for_verification
 from collections import Counter
 
@@ -76,21 +77,18 @@ def labels_from_event_taggings(api, filter_params, target_labels):
 
     events = get_events_with_verifications_and_tags(api, filter_params, target_labels)
 
-
-
     # for each event, determine if it is trusted and its type (positive or negative)
 
     for event in events:
-        
-        if event['provenance_id'] is None:
-            # no provenance: probably not machine generated (TODO: revisit this assumption)
-            for tagging in event.get('taggings', []):
-                tagging['type'] = 'positive'
 
-        else:
-            # if there is a provenance, probably it is auto generated and needs verification
-            for tagging in event.get('taggings', []):
+        for tagging in event.get('taggings', []):
+            if len(tagging['verifications']) == 0 and event['provenance_id'] is None:
+                # if there is no provenance, it should be likely that it was manually created and therefore treat as verified
+                # but if there are verifications, we should check them to know for sure
+                tagging['type'] = 'positive'
+            else:
                 tagging['type'] = get_consensus(tagging['verifications'])
+   
 
     # for each event, determine the 5-second segments that each event covers
     for event in events:
@@ -99,6 +97,7 @@ def labels_from_event_taggings(api, filter_params, target_labels):
     # reshape into a format so we can determine negative labels in a multi-class setting
 
     items = {}
+    counts = {}
     for event in events:
         arid = event['audio_recording_id']
         source = f"{api.base_url}/audio_recordings/{arid}/original"
@@ -112,6 +111,8 @@ def labels_from_event_taggings(api, filter_params, target_labels):
             for label_str in target_labels:
                 if label_str not in items[source][segment['start']]:
                     items[source][segment['start']][label_str] = None
+                if label_str not in counts:
+                    counts[label_str] = {'positive': 0, 'negative': 0}
 
                 for tagging in event.get('taggings', []):
                     if items[source][segment['start']][label_str] == 'pos':
@@ -120,15 +121,21 @@ def labels_from_event_taggings(api, filter_params, target_labels):
 
                     if tagging['tag']['text'] == label_str and tagging['type'] == 'positive':
                         items[source][segment['start']][label_str] = 'pos'
+                        counts[label_str]['positive'] += 1
                     elif tagging['tag']['text'] == label_str and tagging['type'] == 'negative':
                         items[source][segment['start']][label_str] = 'neg'
+                        counts[label_str]['negative'] += 1
                     elif tagging['tag']['text'] != label_str and tagging['type'] == 'positive':
                         items[source][segment['start']][label_str] = 'neg'
+                        counts[label_str]['negative'] += 1
                     
                     # Note: unverified taggings which require verification will not have a tagging['type'], so are ignored
                     # Note: we don't add a positive label for the true class where a tagging has been verified as FP (negative)
                     #       because we don't have that information. 
     
+    print(f'counts: {counts}')
+
+
     # reshape into the format that is best for inserting into the hoplite database
     items_for_insert = {}
     for source in items:

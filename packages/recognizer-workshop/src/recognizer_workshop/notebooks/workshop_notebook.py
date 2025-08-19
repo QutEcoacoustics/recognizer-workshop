@@ -68,7 +68,7 @@ agile.initialize()
 
 # BONUS CELL - pull all labels from the website and insert into the database
 # from recognizer_workshop.agile_modeling_helpers import labels_from_event_taggings
-# from recognizer_workshop.baw_api import baw_api
+# from baw_helpers.baw_api import baw_api
 
 #from recognizer_workshop.agile_modeling_helpers import fix_source_format
 #fix_source_format(agile.db)

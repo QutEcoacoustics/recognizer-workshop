@@ -1,4 +1,4 @@
-from . import baw_helpers
+from baw_helpers import baw_helpers
 from hashlib import sha256
 import json
 from pathlib import Path

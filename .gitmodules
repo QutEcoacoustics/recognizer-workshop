@@ -1,0 +1,3 @@
+[submodule "libs/perch-hoplite"]
+	path = libs/perch-hoplite
+	url = https://github.com/google-research/perch-hoplite

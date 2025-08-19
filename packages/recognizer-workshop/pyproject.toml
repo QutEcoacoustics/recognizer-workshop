@@ -1,0 +1,116 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "recognizer-workshop"
+dynamic = ["version"]
+description = 'Tools for developing recognizers with perch-hoplite and Ecosounds'
+readme = "../../README.md"
+requires-python = ">=3.11"
+license = { file = "../../LICENSE" } 
+keywords = []
+authors = [
+  { name = "peichins", email = "peichins@users.noreply.github.com" },
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Programming Language :: Python :: Implementation :: PyPy",
+]
+# dependencies = [
+#   "baw-helpers @ {root:parent:uri}/baw-helpers",
+#   "perch-hoplite @ {root:parent:parent:uri}/libs/perch-hoplite",
+#   "ipywidgets>=8.1.0"
+# ]
+
+# dependencies = [
+#   "baw-helpers = { path = \"../baw-helpers\", editable = true }",
+#   "perch-hoplite @ git+https://github.com/google-research/perch-hoplite.git@c151c7b8be0f829973a1213555aefe732225a089",
+#   "ipywidgets>=8.1.0"
+# ]
+
+
+dependencies = [
+  "ipywidgets>=8.1.0"
+]
+
+
+[project.urls]
+Documentation = "https://github.com/QutEcoacoustics/recognizer-workshop#readme"
+Issues = "https://github.com/QutEcoacoustics/recognizer-workshop/issues"
+Source = "https://github.com/QutEcoacoustics/recognizer-workshop"
+
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.version]
+path = "src/recognizer_workshop/__about__.py"
+
+[tool.hatch.envs.default]
+
+# [tool.hatch.envs.default.overrides]
+# path = { "baw-helpers" = "../baw-helpers", "perch-hoplite" = "../../libs/perch-hoplite" }
+
+
+[tool.hatch.envs.test]
+template = "default"
+dev-mode = true
+dependencies = ["pytest>=7.0", "pytest-cov"]
+pre-install-commands = [
+  "python -m pip install -e {root:parent}/baw-helpers",
+  "python -m pip install -e {root:parent:parent}/libs/perch-hoplite",
+]
+
+[tool.hatch.envs.types]
+extra-dependencies = [
+  "mypy>=1.0.0",
+]
+[tool.hatch.envs.types.scripts]
+check = "mypy --install-types --non-interactive {args:src/recognizer_workshop tests}"
+
+[tool.coverage.run]
+source = ["src"]
+branch = true
+parallel = true
+omit = [
+  "src/recognizer_workshop/__about__.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+  "no cov",
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:",
+]
+
+
+
+[tool.pytest.ini_options]
+testpaths = [
+    "tests",
+]
+
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/recognizer_workshop"]
+include = [
+  { path = "src/recognizer_workshop/resources/embedding_configs/*.json", formats = ["wheel", "sdist"] }
+]
+
+[tool.hatch.build]
+# Include non-Python resources in both sdist and wheel
+include = [
+  "src/recognizer_workshop/resources/embedding_configs/*.json",
+]
+
+[tool.hatch.build.targets.sdist]
+# (Optional) Explicitly include in sdist as well; top-level include already covers it,
+# but this makes the intent clear.
+include = [
+  "src/recognizer_workshop/resources/embedding_configs/*.json",
+]

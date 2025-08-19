@@ -45,12 +45,12 @@ from perch_hoplite.db import interface as hoplite_interface
 from perch_hoplite.zoo import model_configs
 from recognizer_workshop.create_database import convert_parquet
 
-import recognizer_workshop.baw_utils as baw_utils
+import baw_helpers.baw_utils as baw_utils
 from recognizer_workshop.perch_hoplite_custom_modifications import sqlite_usearch_impl as sqlite_usearch_impl_mod
 from recognizer_workshop.perch_hoplite_custom_modifications import classifier as classifier_mod
 from recognizer_workshop.agile_modeling_helpers import list_audio_files, get_or_create_workshop_provenance
-from recognizer_workshop.baw_api import baw_api
-from recognizer_workshop.baw_helpers import annotation_upload_csv
+from baw_helpers.baw_api import baw_api
+from baw_helpers.baw_helpers import annotation_upload_csv
 
 from recognizer_workshop import agile_widgets
 
@@ -443,6 +443,8 @@ class agile_state:
 
         self.classifier = linear_classifier
 
+        return eval_scores
+
 
     def save_search_results(self, path, append=False):
         """
@@ -605,6 +607,7 @@ class agile_state:
 
         if subset is None:
             subset = 1.0
+        subset = float(subset)
 
         if subset <= 0 or subset > 1:
           raise ValueError('Subset must be between 0 and 1')
@@ -698,7 +701,7 @@ class agile_state:
             print(f'CSV file {csv_path} does not exist. Please provide a valid path.')
             return
         
-        upload_name = f"Recognizer Workshop: {self.get_target_label_description()}"
+        upload_name = f"Agile Modelling: {self.get_target_label_description()}"
 
         provenance_data = get_or_create_workshop_provenance(self.baw_api)
         provenance_id = provenance_data['id']
