@@ -6,7 +6,7 @@ import pytest
 from perch_hoplite.db import sqlite_usearch_impl
 
 
-from recognizer_workshop.create_database.create_database import create_database
+from recognizer_workshop.create_database.create_database import create_database_from_baw
 
 
 @pytest.mark.integration
@@ -21,7 +21,7 @@ def test_create_db_from_project_1189(prod_api_client, tmp_path):
     max_embeddings = 500
 
     # Run the pipeline
-    create_database(
+    create_database_from_baw(
         db_path=db_dir,
         filelist_path=cache_dir,
         client=prod_api_client,
