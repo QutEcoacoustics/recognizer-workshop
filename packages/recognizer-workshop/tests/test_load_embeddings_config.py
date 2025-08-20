@@ -2,7 +2,7 @@ from pathlib import Path
 import pytest
 from ml_collections import config_dict
 
-from recognizer_workshop.create_database import _load_embedding_config, DEFAULT_BAW_ANALYSIS_NAME
+from recognizer_workshop.create_database.create_database import _load_embedding_config, DEFAULT_BAW_ANALYSIS_NAME
 
 
 def test_dict_input_returns_configdict():
@@ -28,7 +28,7 @@ def test_none_uses_default_named_config(monkeypatch):
         return {"model_key": "dummy", "name": name}
 
     # Patch in the module-under-test namespace
-    import recognizer_workshop.create_database as mod
+    import recognizer_workshop.create_database.create_database as mod
     monkeypatch.setattr(mod, "load_baw_embedding_config", fake_load_baw)
 
     out = _load_embedding_config(None)
@@ -48,7 +48,7 @@ def test_path_input_calls_load_embedding_config(monkeypatch, tmp_path):
         seen["path"] = Path(path)
         return {"loaded_from": str(path)}
 
-    import recognizer_workshop.create_database as mod
+    import recognizer_workshop.create_database.create_database as mod
     monkeypatch.setattr(mod, "load_embedding_config", fake_loader)
 
     out = _load_embedding_config(cfg_dir)
@@ -65,7 +65,7 @@ def test_str_named_config_calls_load_baw_and_returns(monkeypatch):
         return {"model_key": "dummy", "name": name}
 
     # Ensure Path(config).exists() is False for this test so we hit the str branch.
-    import recognizer_workshop.create_database as mod
+    import recognizer_workshop.create_database.create_database as mod
     monkeypatch.setattr(mod, "load_baw_embedding_config", fake_load_baw)
 
     # Make sure we don't accidentally trip the Path.exists branch

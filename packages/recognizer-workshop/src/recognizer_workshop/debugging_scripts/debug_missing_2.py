@@ -39,10 +39,7 @@ def debug_missing(db_path,
     arids_from_events = list(set([event['audio_recording_id'] for event in events]))
     print(f"Found {len(arids_from_events)} events for region {region_id}")
 
-
     arid_from_source_id = lambda source: int(source.split('/')[-2])
-
-  
 
     passed_source_id_arids = [arid_from_source_id(source) for source in source_ids]
     passed_db_sources_arids = [arid_from_source_id(source) for source in passed_db_sources]

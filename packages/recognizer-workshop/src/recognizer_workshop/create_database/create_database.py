@@ -25,7 +25,7 @@ from baw_helpers import baw_api
 from baw_helpers.baw_helpers import get_filter_result, simple_filter, get_random_audio_recordings
 from baw_helpers.baw_utils import extract_arid_and_domain
 
-from recognizer_workshop.embedding_config_loader import load_baw_embedding_config
+from recognizer_workshop.create_database.embedding_config_loader import load_baw_embedding_config
 
 PARQUET_METADATA_COLUMNS = ('source', 'channel', 'offset',)
 

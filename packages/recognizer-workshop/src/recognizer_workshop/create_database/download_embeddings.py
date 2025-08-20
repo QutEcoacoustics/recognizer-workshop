@@ -8,7 +8,9 @@ from tqdm import tqdm
 import ipywidgets as widgets
 from IPython.display import display
 
-def download_embeddings(dataset_name, embeddings_dir, download_from_gcp: bool = False):
+def download_embeddings(dataset_name, 
+                        embeddings_dir, 
+                        download_from_gcp: bool = False):
     """
     Downloads a zip file from a url based on the dataset_name and extracts it to the embeddings_dir
     Shows progress for both download and extraction
