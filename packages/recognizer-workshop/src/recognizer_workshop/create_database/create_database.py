@@ -50,7 +50,7 @@ def create_database_from_baw(
         db_path: str | Path,
         filelist_path: str | Path,
         *,
-        config_folder: str | Path | None = None,
+        config: str | Path | None = None,
         client: baw_api.baw_api | None = None, 
         project_ids: int | list | None = None,
         region_ids: int | list | None = None,
@@ -85,7 +85,7 @@ def create_database_from_baw(
         parquet_source=arids,
         api_client=client,    
         max_count=max_embeddings,
-        config_folder=config_folder
+        config=config
     )
 
 

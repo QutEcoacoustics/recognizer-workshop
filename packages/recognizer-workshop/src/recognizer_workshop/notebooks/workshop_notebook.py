@@ -1,15 +1,12 @@
 # code from the notebook for debugging
 
-
-
-
 # CELL ONE
 
 import os
 import dotenv
 from pathlib import Path
 
-from recognizer_workshop.agile_modeling_state import agile_config, agile_state
+from recognizer_workshop.engine.agile_engine import agile_config, agile_state
 from recognizer_workshop.agile_modeling_helpers import list_audio_files, labels_from_event_taggings, add_labels_to_db
 
 find_dotenv = dotenv.find_dotenv
