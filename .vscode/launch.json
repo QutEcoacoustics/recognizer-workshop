@@ -11,6 +11,15 @@
       "request": "launch",
       "program": "${file}",
       "console": "integratedTerminal"
+    },
+    {
+      "name": "Python: Debug Tests",
+      "type": "python",
+      "request": "test",                 // special request for test debugging
+      "purpose": ["debug-test"],         // makes the Testing pane use THIS config
+      "justMyCode": false,               // <— allow stepping into libraries
+      "debugStdLib": false,              // set true if you also want to step into stdlib
+      "console": "integratedTerminal"    // optional, nicer I/O
     }
   ]
 }

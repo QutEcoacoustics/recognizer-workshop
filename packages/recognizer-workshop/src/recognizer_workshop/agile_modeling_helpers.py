@@ -173,9 +173,13 @@ def add_labels_to_db(agile, config, items):
     embedding_count = 0
     source_count = 0
 
+    inserted = {"pos": 0, "neg": 0}
+    duplicates = {"pos": 0, "neg": 0}
+    touched_sources = set()
+
 
     # debug_missing(
-    #     db_path='/Users/eichinsp/Documents/github/peichins/recognizer-workshop/local_scripts/test_folder/db/116',
+    #     db_path='/Users/eichinsp/Documents/github/peichinsp/recognizer-workshop/local_scripts/test_folder/db/116',
     #     db=agile.db,
     #     region_id=116,
     #     source_ids=list(items.keys()))
@@ -191,7 +195,10 @@ def add_labels_to_db(agile, config, items):
                 embeddings = get_embeddings_by_source(agile, dataset_name = config.search_dataset_name,  
                                                             source_id = source,  
                                                             offsets = offsets)
-
+                if len(embeddings) != len(offsets):
+                    # if there are zero embeeddings returned, it means that the source is not in the database or the offsets are not in the database
+                    # which might happen due to floating point errors (this shoudld have been fixed). 
+                    print(f"Warning: {len(embeddings)} embeddings found for {len(offsets)} offsets for source {source} and label {label_str} ({label_type_str}).")
           
                 label_type = hoplite_interface.LabelType.POSITIVE if label_type_str == 'pos' else hoplite_interface.LabelType.NEGATIVE
 
