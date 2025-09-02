@@ -4,11 +4,11 @@ import numpy as np
 
 import ipywidgets as widgets
 from IPython.display import display
-from recognizer_workshop import agile_widgets
+from recognizer_workshop.ui.notebook import agile_widgets
 from recognizer_workshop.perch_hoplite_custom_modifications import embedding_display
 from matplotlib import pyplot as plt
 from perch_hoplite.db import interface as hoplite_interface
-from recognizer_workshop.agile_modeling_helpers import list_audio_files
+from recognizer_workshop.app.agile_modeling_helpers import list_audio_files
 
 
 

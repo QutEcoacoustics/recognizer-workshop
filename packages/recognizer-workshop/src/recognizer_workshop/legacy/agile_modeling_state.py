@@ -50,14 +50,14 @@ from perch_hoplite.db import sqlite_usearch_impl
 from perch_hoplite.db import interface as hoplite_interface
 from perch_hoplite.zoo import model_configs
 
-from recognizer_workshop.create_database.create_database import convert_parquet
-from recognizer_workshop.agile_modeling_helpers import list_audio_files
+from recognizer_workshop.app.create_database.create_database import convert_parquet
+from recognizer_workshop.app.agile_modeling_helpers import list_audio_files
 
 import baw_helpers.baw_utils as baw_utils
 from baw_helpers.baw_api import baw_api
 
-from recognizer_workshop.db_labels.db_labels import db_summary as _db_summary_print
-from recognizer_workshop.inference.inference import run_inference as _run_inference
+from recognizer_workshop.app.services.db_labels.db_labels import db_summary as _db_summary_print
+from recognizer_workshop.app.services.inference.inference import run_inference as _run_inference
 
 
 # =====================

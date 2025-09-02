@@ -1,0 +1,10 @@
+{
+  "annotator_id": "",
+  "db_path": "",
+  "labeled_examples_folder": "",
+  "models_folder": "",
+  "predictions_folder": "",
+  "baw_config": {
+    "domain": ""
+  }
+}

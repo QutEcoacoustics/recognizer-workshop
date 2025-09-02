@@ -4,7 +4,7 @@ from pathlib import Path
 
 from baw_helpers import baw_api
 from baw_helpers.baw_helpers import annotation_upload_csv
-from recognizer_workshop.agile_modeling_helpers import get_or_create_workshop_provenance
+from recognizer_workshop.app.agile_modeling_helpers import get_or_create_workshop_provenance
 
 STAGING_URL = "https://api.staging.ecosounds.org"
 

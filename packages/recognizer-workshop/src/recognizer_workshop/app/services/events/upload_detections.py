@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from recognizer_workshop.agile_modeling_helpers import get_or_create_workshop_provenance 
+from recognizer_workshop.app.agile_modeling_helpers import get_or_create_workshop_provenance 
 from baw_helpers.baw_helpers import annotation_upload_csv
 
 def upload_detections(csv_path,

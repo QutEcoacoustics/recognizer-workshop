@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Union
 
-from recognizer_workshop.agile_modeling_helpers import list_audio_files
+from recognizer_workshop.app.agile_modeling_helpers import list_audio_files
 
 def resolve_query_uri(query: Union[str, int], labeled_examples_folder: Path) -> str:
     s = str(query)

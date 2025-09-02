@@ -438,7 +438,7 @@ class baw_api:
         """Test the connection to the BAW API."""
         try:
             # This will use the request method, which has the debug logic
-            response = self.get("/status")
+            response = self.request("GET", "/status", return_json=False)
             if not silent:
                 print("Connection successful:", response)
             return response
@@ -459,8 +459,7 @@ class baw_api:
             # because I keep pasting into env incorrectly somehow
             print("Possibly unclosed quote in your token string")
 
-        self.test_connection(silent=True)
-        r = self.last_response
+        r = self.test_connection(silent=True)
 
         if r is not None and r.status_code == 401:
             is_valid, message = False, "Token is invalid or expired."

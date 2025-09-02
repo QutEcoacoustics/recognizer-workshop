@@ -8,7 +8,7 @@ from perch_hoplite.db import interface as hoplite_interface
 from baw_helpers import baw_api as baw_api
 from baw_helpers import baw_helpers
 
-from recognizer_workshop.verification import sample_for_verification
+from recognizer_workshop.app.services.verification import sample_for_verification
 from collections import Counter
 
 

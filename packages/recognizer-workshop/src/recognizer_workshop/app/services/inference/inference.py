@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from recognizer_workshop.perch_hoplite_custom_modifications import brutalism
-from recognizer_workshop.inference.helpers import make_site_map
+from recognizer_workshop.app.services.inference.helpers import make_site_map
 from baw_helpers import baw_utils
 
 from recognizer_workshop.perch_hoplite_custom_modifications import classifier as classifier_mod

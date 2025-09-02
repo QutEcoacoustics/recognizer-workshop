@@ -1,18 +1,25 @@
 """Wrapper class for agile modeling steps."""
 
 
-from dataclasses import dataclass, field
+
+import dataclasses
 import json
 from pathlib import Path
 import numpy as np
 import pandas as pd
 import random
+import tempfile
+import shutil
 
 from tqdm import tqdm
-from typing import Union
+from typing import Union, Dict, Any, List
 
 
 from ml_collections import config_dict
+
+
+import logging
+
 
 
 from perch_hoplite.agile import audio_loader
@@ -32,107 +39,176 @@ from perch_hoplite.zoo import model_configs
 import baw_helpers.baw_utils as baw_utils
 from recognizer_workshop.perch_hoplite_custom_modifications import sqlite_usearch_impl as sqlite_usearch_impl_mod
 from recognizer_workshop.perch_hoplite_custom_modifications import classifier as classifier_mod
-from recognizer_workshop.agile_modeling_helpers import list_audio_files, get_or_create_workshop_provenance
+from recognizer_workshop.app.agile_modeling_helpers import list_audio_files, get_or_create_workshop_provenance
 from baw_helpers.baw_api import baw_api
 from baw_helpers.baw_helpers import annotation_upload_csv
 
 
 
-from recognizer_workshop.events.upload_detections import upload_detections
-from recognizer_workshop.inference.helpers import make_site_map
-from recognizer_workshop.db_labels.db_labels import print_label_counts, db_summary
-from recognizer_workshop.inference.inference import run_inference
+from recognizer_workshop.app.services.events.upload_detections import upload_detections
+from recognizer_workshop.app.services.inference.helpers import make_site_map
+from recognizer_workshop.app.services.db_labels.db_labels import get_db_summary, get_label_counts
+from recognizer_workshop.app.services.inference.inference import run_inference
 
 
+log = logging.getLogger(__name__)
 
 
-@dataclass
-class agile_config:
+@dataclasses.dataclass
+class AgileConfig:
+    """
+    Configuration class for the Agile Recognizer workshop.
+    Manages loading, saving, and validating configuration settings, especially file paths.
+    """
+    # --- Paths ---
+    db_path: Path
+    embeddings_folder: Path | None = None
+    labeled_examples_folder: Path | None = None
+    models_folder: Path | None = None
+    predictions_folder: Path | None = None
 
-    # path to the sqlite db containing the embeddings
-    db_path: Union[str, Path] = None
-
-    # annotator id to attach to labels
-    annotator_id: str = None
-
-    # config for the baw api 
-    baw_config: dict = field(default_factory=dict)
-
-    # name of the dataset in the database we are working with
+    # --- Configuration ---
+    annotator_id: str = "default_annotator"
     search_dataset_name: str = 'search_set'
-
-    # path to the embeddings files to create the database from
-    embeddings_folder: str = None
-
-    # path to labeled examples
-    labeled_examples_folder: str = None
-    
-    # path to the folder where we will save the classifiers
-    models_folder: str = None
-
-    # path to the folder where we will save the inference results
-    predictions_folder: str = None
-
-    # max number of embeddings to load from the embeddings_folder
     max_embeddings_count: int = -1
-
-    def from_json(self, json_path = "./agile_config.json"):
-        # read a json file and populate the dataclass properties from that
-
-        if not Path(json_path).exists():
-            Warning(f'Config file {json_path} does not exist. Config not loaded.')
-            return
-
-        def resolve_path(path):
-            if not Path(path).is_absolute():
-                path = Path(json_path).parent / Path(path)
-            return path
-          
-        with open(json_path, 'r') as f:
-            # paths in config is relative to the working directory, 
-            # paths in json config is relative to the json file
-            data = json.load(f)
-            paths_to_resolve = ['db_path', 'embeddings_folder', 'labeled_examples_folder']
-            for key, value in data.items():
-                if key in paths_to_resolve:
-                    value = resolve_path(value)
-                setattr(self, key, value)
-
-        self.check()
-        self.show_config()
+    baw_config: Dict[str, Any] = dataclasses.field(default_factory=dict)
     
+    # List of fields that should be treated as paths
+    _PATH_FIELDS: dataclasses.InitVar[List[str]] = [
+        'db_path', 'embeddings_folder', 'labeled_examples_folder', 
+        'models_folder', 'predictions_folder'
+    ]
 
-    def show_config(self, conf_dict=None, depth=0):
-        if depth == 0:
-            print(f'Config:')
-        if conf_dict is None:
-            conf_dict = self.__dict__
+    def __post_init__(self, *args, **kwargs):
+        """
+        Called after initialization, for validation.
+        """
+        log.info("Running validation...")
+
+        # convert all paths
+        for file_name in self._PATH_FIELDS:
+            # convert the filename property to a Path object
+            setattr(self, file_name, Path(getattr(self, file_name)) if getattr(self, file_name) is not None else None)
+
+        # Check if essential paths exist
+        # Note: We check the PARENT of db_path, as the file may not exist yet.
+        if not self.db_path.parent.exists():
+            log.warning(f"Database directory does not exist: {self.db_path}. You may need to create it.")
         
-        for key, value in conf_dict.items():
-            # if value is a dict, recurse
-            if isinstance(value, dict):
-                print(f'{key}:')
-                self.show_config(value, depth+1)
-            else:
-                if key in ['auth_token']:
-                    # replace all but the 1st and last characters with *
-                    value = value[0] + '*' * (len(value) - 2) + value[-1]
-                print(f'{key}: {value}')
+        # we automatically create all folders if they don't exist, except for the db one, 
+        # because it needs to exist before we start (this might change)
+        for field_name in self._PATH_FIELDS:
+            if 'db_path' in field_name: continue # already checked
+            path_value = getattr(self, field_name)
+            if path_value and not path_value.exists():
+                log.info(f"Path for '{field_name}' does not exist: {path_value}. Creating it.")
+                path_value.mkdir(parents=True, exist_ok=True)
 
 
-    def check(self):
-        # check if the paths in the config exist
-        if not Path(self.db_path).exists():
-            Warning(f'DB path {self.db_path} does not exist.')
+    def __str__(self) -> str:
+        """Readable string representation of the config."""
+        lines = ["Agile Recognizer Config:"]
+        for field in dataclasses.fields(self):
+            if field.name.startswith('_'): continue # Skip private fields
+            
+            value = getattr(self, field.name)
+            
+            # Mask sensitive information like auth tokens if they exist
+            if 'auth_token' in str(field.name) and isinstance(value, str) and len(value) > 2:
+                value = f"{value[0]}**********{value[-1]}"
+            
+            lines.append(f"  - {field.name}: {value}")
+        return "\n".join(lines)
+
+    @classmethod
+    def from_json(cls, config_path: str | Path, relative_to: str | Path | None = None) -> 'AgileConfig':
+        """
+        Loads configuration from a JSON file and returns a new AgileConfig instance.
+        Paths within the JSON are resolved relative to a specified base directory.
+
+        Args:
+            config_path: The path to the JSON configuration file.
+            relative_to: The base directory for resolving relative paths.
+                         - If None (default), paths are relative to the config file's location.
+                         - If ".", paths are relative to the current working directory.
+                         - If a specific path is given, paths are relative to that directory.
+        """
+        config_path = Path(config_path).resolve()
+        if not config_path.exists():
+            log.warning(f"Config file not found at {config_path}. Creating a default one.")
+            # Create a default instance and save it so it exists for next time
+            default_config = cls()
+            default_config.to_json(config_path)
+            return default_config
+
+        # Determine the base directory for path resolution
+        if relative_to is None:
+            base_dir = config_path.parent
+        else:
+            base_dir = Path(relative_to).resolve()
+
+        with open(config_path, 'r') as f:
+            data = json.load(f)
+
+        # Resolve paths: if a path in the JSON is not absolute, join it with the base_dir
+        for field_name in cls._PATH_FIELDS:
+            if field_name in data:
+                path_from_json = Path(data[field_name])
+                if not path_from_json.is_absolute():
+                    data[field_name] = base_dir / path_from_json
+
+        return cls(**data)
+
+    def to_json(self, config_path: str | Path, relative_to: str | Path | None = None) -> None:
+        """
+        Saves the current configuration to a JSON file.
+        Path objects are converted to strings, relative to a specified base directory.
+
+        Args:
+            config_path: The path where the JSON file will be saved.
+            relative_to: The base directory for making paths relative.
+                         - If None (default), paths are relative to the saved config file's location.
+                         - If ".", paths are relative to the current working directory.
+                         - If "/", paths are saved as absolute paths.
+                         - If a specific path is given, paths are relative to that directory.
+        """
+        config_path = Path(config_path).resolve()
+        
+        # Determine the base directory for creating relative paths
+        if relative_to is None:
+            base_dir = config_path.parent
+        elif str(relative_to) == "/":
+            base_dir = None # Special case to signal saving absolute paths
+        else:
+            base_dir = Path(relative_to).resolve()
+            
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        data_to_save = dataclasses.asdict(self)
+        
+        import os
+        for field_name in self._PATH_FIELDS:
+            if field_name in data_to_save:
+                absolute_path = Path(data_to_save[field_name])
+                if base_dir is None: # Save as absolute path
+                    saved_path = str(absolute_path)
+                else: # Save as relative path
+                    saved_path = os.path.relpath(absolute_path, base_dir)
+                
+                data_to_save[field_name] = saved_path.replace("\\", "/")
+
+        with open(config_path, 'w') as f:
+            json.dump(data_to_save, f, indent=4)
+        log.info(f"Configuration saved to: {config_path}")
+
 
 
 class agile_state:
 
-    config: agile_config = None
+    config: AgileConfig = None
     db: sqlite_usearch_impl.SQLiteUsearchDB = None
     db_model_config = None
     model_class = None
-    embedding_model = None
+    _embedding_model = None
     audio_filepath_loader = None
     baw_api = None
     label = {"value": None}  # this is used to store the label selected by the user in the label selector widget
@@ -155,7 +231,7 @@ class agile_state:
 
 
     def init_db(self):
-        print('Initializing DB...')
+        log.info('Initializing DB...')
 
         if not self.config.db_path:
             raise ValueError('DB path not set in config. Please set it before initializing the DB.')
@@ -166,9 +242,11 @@ class agile_state:
         self.db_model_config = self.db.get_metadata('model_config')
         
         self.model_class = model_configs.get_model_class(self.db_model_config.model_key)
-        self.embedding_model = self.model_class.from_config(self.db_model_config.model_config)
+        # self.embedding_model = self.model_class.from_config(self.db_model_config.model_config)
+
+
         num_embeddings = self.db.count_embeddings()
-        #print(f'DB initialized with {num_embeddings} embeddings.')
+        log.info(f'DB initialized with {num_embeddings} embeddings.')
         self.db_summary()
 
         #TODO: This is a hack to get the audio loader to be created even when it's not used.  
@@ -180,11 +258,49 @@ class agile_state:
         embed_config = self.db.get_metadata('audio_sources')
         self.audio_filepath_loader = audio_loader.make_filepath_loader(
           audio_sources=source_info.AudioSources.from_config_dict(embed_config),
-          window_size_s=self.embedding_model.window_size_s,
-          sample_rate_hz=self.embedding_model.sample_rate,
+          window_size_s=self.db_model_config.model_config.window_size_s,
+          sample_rate_hz=self.db_model_config.model_config.sample_rate,
         )
 
+        return True
 
+    @property
+    def embedding_model(self):
+        """
+        Lazy-loads the embedding model on first access and caches it.
+        Tfhub attempts to cache downloaded models. This function handles cache clearing and retries,
+        in the event that the cache is corrupted.
+        """
+        if self._embedding_model is None:
+            log.info("Loading embedding model for the first time...")
+
+            def clear_tfhub_cache():
+                cache_dir = Path(tempfile.gettempdir()) / "tfhub_modules"
+                if cache_dir.exists():
+                    log.info(f"Corrupted cache detected. Deleting {cache_dir}...")
+                    try:
+                        shutil.rmtree(cache_dir)
+                        log.info("Cache cleared successfully.")
+                    except OSError as e:
+                        log.info(f"Error clearing cache: {e}")
+
+            max_retries = 2
+            for attempt in range(max_retries):
+                try:
+                    # Load and cache the model in the private attribute
+                    self._embedding_model = self.model_class.from_config(self.db_model_config.model_config)
+                    log.info("Model loaded successfully.")
+                    break
+                except ValueError as e:
+                    is_cache_error = 'saved_model.pb' in str(e) or 'saved_model.pbtxt' in str(e)
+                    if is_cache_error and attempt < max_retries - 1:
+                        log.info(f"Attempt {attempt + 1} failed. Looks like a cache issue.")
+                        clear_tfhub_cache()
+                        log.info("Retrying model load...")
+                    else:
+                        log.warning("Failed to load model after retries.")
+                        raise e
+        return self._embedding_model
 
     
     def embed_query(self, query_audio_samples):
@@ -194,9 +310,6 @@ class agile_state:
 
         self.query_embedding = self.embedding_model.embed(query_audio_samples).embeddings[0, 0]
         return self.query_embedding
-
-
-
     
 
     def get_random_labeled_examples(self, label, label_type=1, num=5, dataset_name=None):
@@ -238,12 +351,12 @@ class agile_state:
             labels = self.get_target_labels()
             if len(labels) == 1:
                 target_label = labels[0]
-                print(f'No target label specified. Using the only available label: {target_label}')
+                log.info(f'No target label specified. Using the only available label: {target_label}')
             elif len(labels) > 1:
-                print(f'No target label specified. Available labels: {labels}')
+                log.info(f'No target label specified. Available labels: {labels}')
                 return
             else:
-                print('No labels set for the classifier. Please set a label first.')
+                log.warning('No labels set for the classifier. Please set a label first.')
                 return
             
         self.search(
@@ -269,7 +382,7 @@ class agile_state:
         score_fn = score_functions.get_score_fn('dot', bias=bias, target_score=target_score)
         all_datasets = self.db.get_dataset_names()
         if dataset is not None and dataset not in all_datasets:
-            print(f'Dataset {dataset} not found in DB. Available datasets are {all_datasets}')
+            log.warning(f'Dataset {dataset} not found in DB. Available datasets are {all_datasets}')
             return
         # results, all_scores = brutalism.threaded_brute_search(
         #     self.db, query, num_results, score_fn=score_fn,
@@ -293,20 +406,20 @@ class agile_state:
 
 
     def save_labels(self, verified_labels):
-        prev_lbls, new_lbls = 0, 0
-
+    
+        labels_before = get_label_counts(self.db)
+        success_count = 0
+        failed_count = 0
         for lbl in verified_labels:
             check = self.db.insert_label(lbl, skip_duplicates=True)
-            new_lbls += check
-            prev_lbls += (1 - check)
+            success_count += int(check)
+            failed_count += int(not check)
         self.db.commit()
-        print('\nnew_lbls: ', new_lbls)
-        print('\nprev_lbls: ', prev_lbls)
-        print_label_counts(self.db)
-        return prev_lbls, new_lbls
-    
-    
-    def train_classifier(self, 
+        labels_after = get_label_counts(self.db)
+        return labels_before, labels_after, success_count, failed_count
+
+
+    def train_classifier(self,
                         learning_rate = 1e-3,
                         weak_neg_weight = 0.05,
                         num_steps = 128,
@@ -324,21 +437,21 @@ class agile_state:
             batch_size=batch_size,
             weak_negatives_batch_size=weak_negatives_batch_size,
             rng=np.random.default_rng(seed=5))
-        print('Training for target labels : ')
-        print(data_manager.get_target_labels())
+        log.info('Training for target labels : ')
+        log.info(data_manager.get_target_labels())
         linear_classifier, eval_scores = classifier.train_linear_classifier(
             data_manager=data_manager,
             learning_rate=learning_rate,
             weak_neg_weight=weak_neg_weight,
             num_train_steps=num_steps,
         )
-        print('\n' + '-' * 80)
+        log.info('\n' + '-' * 80)
         top1 = eval_scores['top1_acc']
-        print(f'top-1      {top1:.3f}')
+        log.info(f'top-1      {top1:.3f}')
         rocauc = eval_scores['roc_auc']
-        print(f'roc_auc    {rocauc:.3f}')
+        log.info(f'roc_auc    {rocauc:.3f}')
         cmap = eval_scores['cmap']
-        print(f'cmap       {cmap:.3f}')
+        log.info(f'cmap       {cmap:.3f}')
         # self.classifier_params = params
         # self.classifier_eval_scores = eval_scores
 
@@ -360,11 +473,11 @@ class agile_state:
         """
 
         target_labels = self.classifier.classes
-        print('target_labels: ', target_labels)
+        log.info('target_labels: ', target_labels)
         
         for target_label_idx, target_label in enumerate(target_labels):
 
-            print(f'Searching for {target_label}...')
+            log.info(f'Searching for {target_label}...')
 
             class_query = self.classifier.beta[:, target_label_idx]
             bias = self.classifier.beta_bias[target_label_idx]
@@ -380,14 +493,28 @@ class agile_state:
                 exclude_labeled=True)
       
   
+    def get_status(self) -> dict:
+        """
+        Returns a dict with the status of the agile state
+        - db_loaded: Whether the database is loaded
+        - embedding_model_loaded: Whether the embedding model is loaded
+        - embedding_model_config: The configuration of the embedding model
+        - db_summary: A summary of the database contents (self.db.summary())
+        """
 
+        status = {
+            "config": self.config,
+            "db_loaded": self.db is not None,
+            "embedding_model_loaded": self._embedding_model is not None,
+            "embedding_model_config": self._embedding_model.config if self._embedding_model else None,
+            "db_summary": self.db_summary() if self.db else None,
+        }
+
+        return status
 
     def db_summary(self):
         """Debugging/sanity checking to see what's in the database"""
-        if not self.db:
-            print('DB not initialized.')
-            return
-        db_summary(self.db)
+        return get_db_summary(self.db)
 
 
     def save_classifier(self, path=None):
@@ -436,19 +563,27 @@ class agile_state:
                           project_id=project_id, limit=limit, baw_api=self.baw_api)
         
 
-    def init_workbench(self, token=None):
-                
-        # this will prompt for a token if not set
-        self.baw_api = baw_api(token=token)
+
+    def init_workbench(self, token=None, allow_prompt=True):
+        """
+        Inits our workbench client for interacting with Ecosounds. 
+        """
+
+        if token is None:
+            token = self.config.baw_config.get('auth_token', None)
+
+        self.baw_api = baw_api(token=token,
+                               base_url=self.config.baw_config.get('domain', None),
+                               allow_prompt=allow_prompt)
 
         if self.baw_api.token is not None:
-            if self.config.baw_config.get('auth_token'):
-                print("Overwriting config auth token with new value")
+            # token supplied was valid OR was loaded from env and valid OR was prompted for and valid
+            # update our config to sync with the baw_api loaded token
             self.config.baw_config['auth_token'] = self.baw_api.token
-        elif self.config.baw_config.get('auth_token'):
-            print("Auth token not loaded, but already in config")
+            return True
         else:
-            print("No auth token set")
+            log.warning("No auth token set")
+            return False
 
 
 

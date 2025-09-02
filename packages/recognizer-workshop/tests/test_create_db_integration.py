@@ -6,7 +6,7 @@ import pytest
 from perch_hoplite.db import sqlite_usearch_impl
 
 
-from recognizer_workshop.create_database.create_database import create_database_from_baw
+from recognizer_workshop.app.create_database.create_database import create_database_from_baw
 
 
 @pytest.mark.integration

@@ -12,7 +12,7 @@ import pytest
 from perch_hoplite.db import sqlite_usearch_impl
 from recognizer_workshop.perch_hoplite_custom_modifications import sqlite_usearch_impl as sqlite_usearch_impl_custom
 
-from recognizer_workshop.create_database.create_database import (
+from recognizer_workshop.app.create_database.create_database import (
     iter_parquet_dataframes,
     add_parquet_to_db,
     convert_source_to_original_url,

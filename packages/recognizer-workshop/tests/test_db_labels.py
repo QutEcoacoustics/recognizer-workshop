@@ -11,7 +11,7 @@ from perch_hoplite.db import sqlite_usearch_impl
 from perch_hoplite.db import interface as hoplite_interface
 
 # Functions to test
-from recognizer_workshop.db_labels import db_labels
+from recognizer_workshop.app.services.db_labels import db_labels
 
 # This is a constant we will use across our tests
 TEST_ANNOTATOR_ID = "test_suite_annotator"
