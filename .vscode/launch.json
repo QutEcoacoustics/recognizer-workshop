@@ -20,6 +20,18 @@
         ]
     },
     {
+        "name": "Panel: Run with Autoreload",
+        "type": "python",
+        "request": "launch",
+        // This tells VS Code to run the script directly,
+        // which correctly handles the sys.path modifications.
+        "program": "${workspaceFolder}/scripts/run_server.py",
+        "args": [],
+        "jinja": true,
+        "justMyCode": true 
+    },
+
+    {
       "name": "Python Debugger: Current File",
       "type": "debugpy",
       "request": "launch",

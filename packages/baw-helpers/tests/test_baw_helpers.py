@@ -8,8 +8,6 @@ from baw_helpers.baw_helpers import simple_filter, get_random_audio_recordings
 
 STAGING_URL = "https://api.staging.ecosounds.org"
 
-# api_token = os.environ.get("API_TOKEN")
-# api_base_url = os.environ.get("API_BASE_URL")
 
 @pytest.fixture(scope="module")
 def api_client():

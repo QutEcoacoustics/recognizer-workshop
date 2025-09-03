@@ -5,7 +5,7 @@ import json
 from datetime import datetime
 
 # Assuming your classes are now in these locations after refactoring
-from recognizer_workshop.app.agile_engine import AgileConfig, agile_state
+from recognizer_workshop.app.agile_engine import AgileConfig, agile_state, LabelName
 from recognizer_workshop.ui.panel.adaptors import PanelUI
 from recognizer_workshop.ui.panel.utils import ppath
 
@@ -38,14 +38,16 @@ def build(vm):
     models_dir = pn.widgets.TextInput(name="Models folder", value=str(vm.config.models_folder or ""))
     preds_dir = pn.widgets.TextInput(name="Predictions folder", value=str(vm.config.predictions_folder or ""))
     domain = pn.widgets.TextInput(name="Workbench API domain", value=vm.config.baw_config.get("domain", ""))
-    api_token = pn.widgets.TextInput(name="Workbench API token", value=vm.config.baw_config.get("auth_token", ""))
+    auth_token = pn.widgets.TextInput(name="Workbench API token", value=vm.config.baw_config.get("auth_token", ""))
 
     # --- BUTTONS ---
     btn_start_engine = pn.widgets.Button(name="Start Engine", button_type="primary")
-    btn_test_connection = pn.widgets.Button(name="Test Connection", button_type="primary", disabled=True)
-    btn_init_db = pn.widgets.Button(name="Initialize DB", button_type="success", disabled=True)
-    btn_pick_label = pn.widgets.Button(name="Pick Target Label(s)", button_type="primary", disabled=True)
-    current_label = pn.pane.Markdown("*(no label picked yet)*")
+
+    labels_container = pn.Column(sizing_mode="stretch_width")
+    btn_add_label = pn.widgets.Button(name="Add Label", icon="plus", button_type="success", disabled=True)
+    current_labels_display = pn.pane.Markdown("*(Engine not started. No labels defined.)*")
+
+
 
     # update the config object and immediately save to json 
     # triggered whenever the user makes a change to the UI fields
@@ -59,7 +61,7 @@ def build(vm):
             vm.config.models_folder = Path(models_dir.value) if models_dir.value else None
             vm.config.predictions_folder = Path(preds_dir.value) if preds_dir.value else None
             vm.config.baw_config["domain"] = domain.value
-            vm.config.baw_config["api_token"] = api_token.value
+            vm.config.baw_config["auth_token"] = auth_token.value
 
             # Save the updated config object to JSON using its own method
             vm.config.to_json(config_path_widget.value)
@@ -73,6 +75,7 @@ def build(vm):
 
 
     def open_file_selector(target_widget, is_directory, event):
+        
         #TODO: this is broken and doesn't work
         """Opens a file selector dialog and updates the target widget."""
         start_dir = Path(target_widget.value).parent if Path(target_widget.value).exists() else Path.home()
@@ -102,6 +105,68 @@ def build(vm):
         dialog.open = True # Open the dialog
 
 
+    def sync_and_update_display(*events):
+        """A wrapper to save the config and update the human-readable display text."""
+        sync_ui_to_config_and_save()
+        if not vm.eng: return
+        try:
+            description = vm.eng.get_target_label_description()
+            current_labels_display.object = f"**Summary:** {description}" if description else "*(No labels defined)*"
+        except Exception:
+            current_labels_display.object = "*(No labels defined)*"
+
+
+    def _remove_label(label_to_remove, event):
+        """Callback to remove a label from the list and rebuild the UI."""
+        if label_to_remove in vm.config.target_labels:
+            vm.config.target_labels.remove(label_to_remove)
+            _build_labels_ui()
+            sync_and_update_display()
+
+    def _build_labels_ui():
+        """Clears and rebuilds the UI for editing labels."""
+        labels_container.clear()
+                
+        for i, label in enumerate(vm.config.target_labels):
+            species_widget = pn.widgets.AutocompleteInput(
+                name=f"Species {i+1}",
+                options=vm.eng.workbench_tags,
+                value=label.species,
+                placeholder="Type to search for a species...",
+                case_sensitive=False
+            )
+            call_types_widget = pn.widgets.TextInput(
+                name="Call Type",
+                value=label.call_type,
+                placeholder="(optional) e.g., song"
+            )
+            remove_btn = pn.widgets.Button(name="Remove", icon="trash", button_type="danger", width=100, align="end")
+            remove_btn.on_click(partial(_remove_label, label))
+
+            def _update_species(event, target_label=label):
+                target_label.species = event.new
+                sync_and_update_display()
+            
+            def _update_call_type(event, target_label=label):
+                target_label.call_type = event.new.strip()
+                sync_and_update_display()
+
+            species_widget.param.watch(_update_species, 'value')
+            call_types_widget.param.watch(_update_call_type, 'value')
+
+            labels_container.append(
+                pn.Row(species_widget, call_types_widget, remove_btn, sizing_mode="stretch_width")
+            )
+
+    def _add_label(event):
+        """Callback to add a new empty label and rebuild the UI."""
+        vm.config.target_labels.append(LabelName(species= "", call_type=None))
+        _build_labels_ui()
+        sync_and_update_display()
+
+    btn_add_label.on_click(_add_label)
+
+
     def _make_engine(_):
         vm.eng = agile_state(vm.config)
         # create the UI adaptor that 'implements' the AgileUI protocol
@@ -110,7 +175,7 @@ def build(vm):
         vm.notify("Engine started", "success")
 
         # initialise the API connection
-        token_success = vm.eng.init_workbench()
+        token_success = vm.eng.init_workbench(allow_prompt=False)
         if token_success:
             vm.notify("API connection successful", "success")
         else:
@@ -123,53 +188,33 @@ def build(vm):
         else:
             vm.notify("Database initialization failed", "error")
 
-        # btn_test_connection.disabled = False
-        # btn_init_db.disabled    = False
-        # btn_pick_label.disabled = True
+        tags_success = vm.eng.fetch_workbench_tags()
+        if tags_success:
+            vm.notify("Tags fetched successfully", "success")
+            btn_add_label.disabled = False
+            _build_labels_ui()
+            
+        else:
+            vm.notify("Failed to fetch tags", "error")
+
+        sync_and_update_display()
 
 
-    # def _load_token(_):
-    #     if not vm.eng: return vm.notify("Create engine first.", "error")
-    #     try:
-    #         vm.eng.init_workbench()
-    #         vm.notify("Token step finished.", "success")
-    #     except Exception as e:
-    #         vm.notify(f"Token step failed: {e}", "error")
-
-    # def _init_db(_):
-    #     if not vm.eng: return vm.notify("Create engine first.", "error")
-    #     try:
-    #         vm.eng.init_db()
-    #         btn_pick_label.disabled = False
-    #         vm.notify("DB initialized. You can now pick labels and use other tabs.", "success")
-    #     except Exception as e:
-    #         vm.notify(f"DB init failed: {e}", "error")
-
-    def _pick_label(_):
-        if not (vm.eng and vm.ui): return vm.notify("Initialize first.", "error")
-        vm.ui.pick_label(vm.eng)
-        try:
-            current_label.object = f"**Target labels:** {', '.join(vm.eng.get_target_labels())}"
-        except Exception:
-            current_label.object = "*(no label picked yet)*"
 
     # --- BINDINGS ---
-    all_widgets = [annotator_id, db_path, labeled_dir, models_dir, preds_dir, domain, config_path_widget]
-    for widget in all_widgets:
+    config_widgets = [annotator_id, db_path, labeled_dir, models_dir, preds_dir, domain, auth_token]
+    for widget in config_widgets:
         widget.param.watch(sync_ui_to_config_and_save, 'value')
 
     btn_start_engine.on_click(_make_engine)
-    # btn_test_connection.on_click(_load_token)
-    # btn_init_db.on_click(_init_db)
-    btn_pick_label.on_click(_pick_label)
-    
+   
 
     # --- LAYOUT ---
     return pn.Column(
         "## Config",
         pn.Row(config_path_widget, save_status, annotator_id, sizing_mode="stretch_width"),
         pn.Row(
-            pn.Column("## Workbench Connection", domain, api_token, 
+            pn.Column("## Workbench Connection", domain, auth_token, 
                       #btn_test_connection
                       ),
             pn.Column(
@@ -183,7 +228,16 @@ def build(vm):
             )
         ),
         pn.Row(btn_start_engine, sizing_mode="stretch_width"),
-        pn.Row(btn_pick_label, current_label),
+        "---",
+        pn.pane.Markdown("## 3. Define Target Labels"),
+        pn.pane.Alert(
+            "Define one or more target species. For each species, you can optionally specify distinct call types. "
+            "If no call types are given, all sounds for that species will be treated as a single class.",
+            alert_type="info"
+        ),
+        current_labels_display,
+        labels_container,
+        btn_add_label,
         sizing_mode="stretch_both",
     )
 

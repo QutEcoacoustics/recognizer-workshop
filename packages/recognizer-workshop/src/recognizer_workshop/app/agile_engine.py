@@ -2,8 +2,10 @@
 
 
 
+import dacite
 import dataclasses
 import json
+import os
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -45,9 +47,10 @@ from baw_helpers.baw_helpers import annotation_upload_csv
 
 
 
+
 from recognizer_workshop.app.services.events.upload_detections import upload_detections
 from recognizer_workshop.app.services.inference.helpers import make_site_map
-from recognizer_workshop.app.services.db_labels.db_labels import get_db_summary, get_label_counts
+from recognizer_workshop.app.services.db_labels.db_labels import get_db_summary, get_label_counts, LabelName
 from recognizer_workshop.app.services.inference.inference import run_inference
 
 
@@ -60,8 +63,11 @@ class AgileConfig:
     Configuration class for the Agile Recognizer workshop.
     Manages loading, saving, and validating configuration settings, especially file paths.
     """
+
+    # Note: type hinting is important here so dacite can serialize and deserialize things correctly
+
     # --- Paths ---
-    db_path: Path
+    db_path: Path | None = None
     embeddings_folder: Path | None = None
     labeled_examples_folder: Path | None = None
     models_folder: Path | None = None
@@ -72,6 +78,10 @@ class AgileConfig:
     search_dataset_name: str = 'search_set'
     max_embeddings_count: int = -1
     baw_config: Dict[str, Any] = dataclasses.field(default_factory=dict)
+
+    # list of species labels and optional call types
+    target_labels: List[LabelName] = dataclasses.field(default_factory=list) 
+
     
     # List of fields that should be treated as paths
     _PATH_FIELDS: dataclasses.InitVar[List[str]] = [
@@ -92,7 +102,7 @@ class AgileConfig:
 
         # Check if essential paths exist
         # Note: We check the PARENT of db_path, as the file may not exist yet.
-        if not self.db_path.parent.exists():
+        if self.db_path and not self.db_path.parent.exists():
             log.warning(f"Database directory does not exist: {self.db_path}. You may need to create it.")
         
         # we automatically create all folders if they don't exist, except for the db one, 
@@ -152,12 +162,18 @@ class AgileConfig:
 
         # Resolve paths: if a path in the JSON is not absolute, join it with the base_dir
         for field_name in cls._PATH_FIELDS:
-            if field_name in data:
+            if field_name in data and data[field_name] is not None:
                 path_from_json = Path(data[field_name])
                 if not path_from_json.is_absolute():
                     data[field_name] = base_dir / path_from_json
 
-        return cls(**data)
+        instance = dacite.from_dict(
+            data_class=cls,
+            data=data,
+            config=dacite.Config(type_hooks={Path: Path}),
+        )
+
+        return instance
 
     def to_json(self, config_path: str | Path, relative_to: str | Path | None = None) -> None:
         """
@@ -178,20 +194,23 @@ class AgileConfig:
         if relative_to is None:
             base_dir = config_path.parent
         elif str(relative_to) == "/":
-            base_dir = None # Special case to signal saving absolute paths
+            # TODO: why can't we just make the base dir "/"
+            base_dir = None 
         else:
             base_dir = Path(relative_to).resolve()
             
         config_path.parent.mkdir(parents=True, exist_ok=True)
         data_to_save = dataclasses.asdict(self)
         
-        import os
+
         for field_name in self._PATH_FIELDS:
-            if field_name in data_to_save:
+            if field_name in data_to_save and data_to_save[field_name] is not None:
                 absolute_path = Path(data_to_save[field_name])
-                if base_dir is None: # Save as absolute path
-                    saved_path = str(absolute_path)
-                else: # Save as relative path
+                if base_dir is None: 
+                    # Save as absolute path
+                    saved_path = absolute_path.as_posix()
+                else: 
+                    # Save as relative path
                     saved_path = os.path.relpath(absolute_path, base_dir)
                 
                 data_to_save[field_name] = saved_path.replace("\\", "/")
@@ -221,6 +240,9 @@ class agile_state:
     # including result of interactive user-labeling of these results. 
     # this is overwritten each time a search results are displayed. 
     display_group = None
+
+    # list of tags pulled from ecosounds to use for selecting labels
+    workbench_tags = []
 
     def __init__(self, config):
         self.config = config
@@ -585,6 +607,28 @@ class agile_state:
             log.warning("No auth token set")
             return False
 
+
+    def fetch_workbench_tags(self):
+        """
+        """
+        self.workbench_tags = []
+
+
+        # get all taxonomic tags from the workbench
+        if self.baw_api is None:
+            log.warning("Tags not fetched, BAW API is not initialized")
+            return True
+        else:
+        
+            response = self.baw_api.baw_filter('/tags', {'is_taxonomic': {'eq': True}}, qsp={"disable_paging":"true"})
+            
+            if response is None:
+                log.warning("Tags not fetched, BAW API request failed")
+                return False
+            else:
+                self.workbench_tags = sorted([l['text'] for l in response.get('data', [])])
+                log.info(f"Fetched {len(self.workbench_tags)} workbench tags")
+                return True
 
 
 

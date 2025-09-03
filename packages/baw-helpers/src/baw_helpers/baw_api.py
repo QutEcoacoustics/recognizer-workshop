@@ -448,7 +448,7 @@ class baw_api:
             return None
         
 
-    def test_token(self, default=True):
+    def test_token(self, default=False):
         """Test the API token on the server for validity."""
         if not self.token:
             if self.debug:
@@ -456,16 +456,20 @@ class baw_api:
             return False
         
         if self.token[:1] in {"'", '"'} and self.token[-1:] != self.token[:1]:
-            # because I keep pasting into env incorrectly somehow
+            # Token in env can be quoted or unquoted, but if it has a missing opening or closing quote, will include the quote in the value
             print("Possibly unclosed quote in your token string")
 
         r = self.test_connection(silent=True)
 
-        if r is not None and r.status_code == 401:
+        status_code = r.status_code if r is not None else None
+        
+        if status_code is None:
+            is_valid, message = default, "Token can't be verified, no response."
+        elif status_code == 401:
             is_valid, message = False, "Token is invalid or expired."
-        elif r is not None and 200 <= r.status_code < 300:
+        elif 200 <= status_code < 300:
             is_valid, message = True, "Token is valid."
-        elif r is not None and r.status_code >= 500:
+        elif r is not None and status_code >= 500:
             is_valid, message = default, "Token can't be verified, due to server or connection issues."
         else:
             is_valid, message = default, "Token can't be verified, something went wrong."

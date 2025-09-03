@@ -36,7 +36,8 @@ classifiers = [
 
 dependencies = [
   "ipywidgets>=8.1.0",
-  "panel>=0.14.0"
+  "panel>=0.14.0",
+  "dacite"
 ]
 
 

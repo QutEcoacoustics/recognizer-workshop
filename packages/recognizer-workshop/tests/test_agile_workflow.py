@@ -1,7 +1,7 @@
 
 from pathlib import Path
 
-from recognizer_workshop.app.agile_engine import agile_config, agile_state
+from recognizer_workshop.app.agile_engine import AgileConfig, agile_state
 
 from recognizer_workshop.app.agile_modeling_helpers import list_audio_files, labels_from_event_taggings, add_labels_to_db
 
