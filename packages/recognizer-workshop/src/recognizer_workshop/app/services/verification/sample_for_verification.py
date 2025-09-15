@@ -31,11 +31,10 @@ def calculate_sigmas(min_val, max_val, neg_target_y=0.05, pos_target_y=0.05):
     """
     if not (0 < neg_target_y < 1 and 0 < pos_target_y < 1):
         raise ValueError("Target y values must be between 0 and 1.")
-    # if min_val > 0 or max_val < 0:
-    #     raise ValueError("min_val must be negative and max_val must be positive.")
 
-    min_val = min(min_val, 0)  # Ensure min_val is non-positive
-    max_val = max(max_val, 0)  # Ensure max_val is non-negative
+    # Ensure min_val is negative and max_val is positive for the calculations
+    min_val = min(min_val, 0)
+    max_val = max(max_val, 0)
 
     # Calculate denominator for each side based on its target_y
     denom_neg = np.sqrt(-2 * np.log(neg_target_y))
@@ -45,6 +44,7 @@ def calculate_sigmas(min_val, max_val, neg_target_y=0.05, pos_target_y=0.05):
     sigma_pos = max_val / denom_pos if max_val != 0 else 1.0
     
     return sigma_neg, sigma_pos
+
 
 def _internal_sampler(numbers, original_indices, k, min_val, max_val, neg_target_y, pos_target_y):
     """
@@ -56,7 +56,7 @@ def _internal_sampler(numbers, original_indices, k, min_val, max_val, neg_target
     if k > len(numbers):
         raise ValueError(f"Sample size k ({k}) cannot be larger than the number of available items ({len(numbers)}).")
         
-    # 1. Define the target probability distribution function (PDF)
+    # Define the target probability distribution function (PDF)
     sigma_neg, sigma_pos = calculate_sigmas(min_val, max_val, neg_target_y, pos_target_y)
     print(f"Calculated σ_neg: {sigma_neg:.4f} (for x={min_val}, y={neg_target_y})")
     print(f"Calculated σ_pos: {sigma_pos:.4f} (for x={max_val}, y={pos_target_y})\n")
@@ -77,7 +77,7 @@ def _internal_sampler(numbers, original_indices, k, min_val, max_val, neg_target
     # We set replace=False to encourage a wider spread of ideal points to map from.
     ideal_samples = np.random.choice(x_range, size=k, replace=False, p=pdf_weights)
 
-    # 3. MAP IDEAL SAMPLES TO REAL, UNIQUE DATA POINTS
+    # map ideal samples to the closest available scores
     selected_original_indices = []
     available_items = list(zip(numbers, original_indices))
     
@@ -100,6 +100,7 @@ def _internal_sampler(numbers, original_indices, k, min_val, max_val, neg_target
             
     print(f"Successfully selected {len(selected_original_indices)} unique items.")
     return np.array(selected_original_indices)
+
 
 def sample_for_validation(scores,
                           pos_threshold=None,
@@ -127,7 +128,7 @@ def sample_for_validation(scores,
     scores_arr = np.array(scores)
     original_indices = np.arange(len(scores_arr))
     
-    # 1. Create a boolean mask for filtering scores and their indices together
+    # Create a boolean mask for filtering scores and their indices together
     mask = np.ones_like(scores_arr, dtype=bool)
     if neg_threshold is not None:
         mask &= (scores_arr >= neg_threshold)
@@ -140,7 +141,7 @@ def sample_for_validation(scores,
     if len(filtered_scores) == 0:
         raise ValueError("No scores remain after applying thresholds.")
 
-    # 2. Determine the effective min/max for the distribution shape
+    # Determine the effective min/max for the distribution shape
     # Use the threshold if provided, otherwise use the data's actual min/max
     effective_min = neg_threshold if neg_threshold is not None else filtered_scores.min()
     effective_max = pos_threshold if pos_threshold is not None else filtered_scores.max()
@@ -149,7 +150,6 @@ def sample_for_validation(scores,
     # this will select them all, but it's easier to just do it than have a special condition
     sample_size = min(sample_size, len(filtered_scores))
 
-    # 3. Call the internal sampler with the filtered data and their original indices
     sampled_indices = _internal_sampler(
         numbers=filtered_scores,
         original_indices=filtered_original_indices,
@@ -161,6 +161,7 @@ def sample_for_validation(scores,
     )
     
     return sampled_indices, filtered_scores, effective_min, effective_max
+
 
 def plot_sampling_results(original_scores, sampled_scores, filtered_scores, min_val, max_val, neg_target_y, pos_target_y):
     """
@@ -201,17 +202,17 @@ def plot_sampling_results(original_scores, sampled_scores, filtered_scores, min_
     plt.tight_layout(rect=[0, 0, 1, 0.96])
     plt.show()
 
+
 def demonstrate_sampling():
     """
-    Creates dummy data and runs the full sampling and plotting process.
+    Sanity check to plot and demonstrate the sampling process.
+    TODO: move this to a test
     """
-    # 1. DEFINE YOUR DATA
-    # Create a NON-UNIFORM list of numbers to demonstrate the method's power.
+
     group1 = np.random.normal(loc=-40, scale=10, size=300)
     group2 = np.random.normal(loc=60, scale=20, size=700)
     my_scores = np.concatenate([group1, group2]).astype(int)
     
-    # 2. PERFORM SAMPLING
     sampled_indices, filtered_data, eff_min, eff_max = sample_for_validation(
         scores=my_scores,
         neg_threshold=-60,      # Ignore scores below -60
@@ -227,7 +228,6 @@ def demonstrate_sampling():
     print(f"\nSample of 10 chosen indices: {sampled_indices[:10]}")
     print(f"Corresponding values: {sampled_values[:10]}")
 
-    # 3. VISUALIZE THE RESULTS
     plot_sampling_results(
         original_scores=my_scores,
         sampled_scores=sampled_values,

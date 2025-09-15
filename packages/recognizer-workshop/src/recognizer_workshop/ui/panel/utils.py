@@ -21,6 +21,7 @@ def resolve_query_uri(query: str, labeled_dir: Path) -> str:
         return str(p)
     return q  # URL / absolute / XC id passthrough
 
+#TODO: this is not UI specific, move to genneral utils
 def parse_target_score(s: str):
     s = s.strip()
     if s.lower() == "none":

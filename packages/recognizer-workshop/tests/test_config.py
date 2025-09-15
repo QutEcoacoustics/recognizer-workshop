@@ -1,13 +1,24 @@
 import json
 from pathlib import Path
+import pytest
 
 # Import the classes from your file
 # Make sure this import path is correct for your project structure
-from recognizer_workshop.app.agile_engine import AgileConfig, LabelName
+from recognizer_workshop.app.agile_engine import AgileConfig, LabelName, get_recent_files, _write_app_data, _APP_DATA_FILE
 
-# Note: The class no longer needs to inherit from unittest.TestCase
+
 class TestAgileConfig:
     """Unit tests for the AgileConfig class using pytest."""
+
+    def test_reset_method(self):
+        """Test that the reset() method restores an instance to default values."""
+        config = AgileConfig(annotator_id="test_user")
+        assert config.annotator_id == "test_user"
+
+        config.reset()
+        assert config.annotator_id == "default_annotator"
+        assert config.db_path is None
+        assert config.config_path is None
 
 
     def test_default_creation(self):
@@ -41,32 +52,107 @@ class TestAgileConfig:
         assert config.db_path is None
 
 
+    def test_save_as_and_load_preserves_data(self, tmp_path: Path):
+        """Tests the save_as -> load roundtrip preserves all data and types."""
+        db_path_abs = tmp_path / "data" / "database.sqlite"
+        
+        original_config = AgileConfig(
+            db_path=db_path_abs,
+            annotator_id="tester-01",
+            target_labels=[LabelName("Koala", "Bellow")]
+        )
+        config_path = tmp_path / "config.json"
+
+        original_config.save_as(config_path)
+        
+        # The instance should now know its own path
+        assert original_config.config_path == config_path
+
+        loaded_config = AgileConfig.load(config_path)
+
+        assert loaded_config == original_config
+        assert isinstance(loaded_config.db_path, Path)
+        assert loaded_config.config_path == config_path
+
+
+    def test_save_updates_file(self, tmp_path: Path):
+        """Tests that save() correctly overwrites the file with new data."""
+        config_path = tmp_path / "config.json"
+        config = AgileConfig(annotator_id="version1")
+        config.save_as(config_path)
+        config.annotator_id = "version2"
+        config.save()
+        loaded_config = AgileConfig.load(config_path)
+        assert loaded_config.annotator_id == "version2"
+
+
+    def test_save_without_path_raises_error(self):
+        """Tests that save() fails if the config has never been saved."""
+        config = AgileConfig() # This config has no path
+        with pytest.raises(ValueError, match="Use 'save_as"):
+            config.save()
+
+
+    def test_load_non_existent_raises_error(self, tmp_path: Path):
+        """Tests that load() fails correctly if the file does not exist."""
+        non_existent_path = tmp_path / "ghost.json"
+        with pytest.raises(FileNotFoundError):
+            AgileConfig.load(non_existent_path)
+
+
+    def test_recent_files_logic(self, monkeypatch, tmp_path: Path):
+        """Tests the recent files list management by patching the getter function."""
+        
+        temp_app_data_file = tmp_path / ".test_app_data.json"
+        monkeypatch.setattr(
+            "recognizer_workshop.app.agile_engine._get_app_data_file",
+            lambda: temp_app_data_file
+        )
+        
+        if temp_app_data_file.exists():
+            temp_app_data_file.unlink()
+            
+        path1 = tmp_path / "proj1.json"
+        path2 = tmp_path / "proj2.json"
+        path3 = tmp_path / "proj3.json"
+
+        config = AgileConfig()
+        config.save_as(path1)
+        assert get_recent_files() == [str(path1)]
+        
+        config.save_as(path2)
+        assert get_recent_files() == [str(path2), str(path1)]
+        
+        config.save_as(path3)
+        assert get_recent_files() == [str(path3), str(path2), str(path1)]
+
+        # Loading a file should move it to the top
+        AgileConfig.load(path1)
+        assert get_recent_files() == [str(path1), str(path3), str(path2)]
+
+
+
     def test_save_and_load_roundtrip_relative(self, tmp_path: Path):
         """Test the full save/load cycle with default relative paths."""
         config_path = tmp_path / "config.json"
         db_path_abs = tmp_path / "data" / "database.sqlite"
         
-        # 1. Create the config with some data
         config = AgileConfig(
             db_path=db_path_abs,
             annotator_id="tester-01",
             target_labels=[LabelName("Koala", "Bellow")]
         )
         
-        # 2. Save it to JSON
-        config.to_json(config_path)
+        config._to_json(config_path)
         assert config_path.exists()
 
-        # 3. Manually check the saved JSON for relative paths
         with open(config_path, 'r') as f:
             data = json.load(f)
         assert data['db_path'] == 'data/database.sqlite'
         assert data['annotator_id'] == 'tester-01'
 
-        # 4. Load the config back using from_json
         loaded_config = AgileConfig.from_json(config_path)
 
-        # 5. Assert that the loaded config is identical and paths are absolute
         assert isinstance(loaded_config.db_path, Path)
         assert loaded_config.db_path == db_path_abs
         assert loaded_config.annotator_id == "tester-01"
@@ -82,38 +168,13 @@ class TestAgileConfig:
         config = AgileConfig(db_path=db_path_abs)
         
         # Save with the special flag to force absolute paths
-        config.to_json(config_path, relative_to="/")
+        config._to_json(config_path, relative_to="/")
         
         with open(config_path, 'r') as f:
             data = json.load(f)
             
-        # Check that the saved path is the string representation of the absolute path
         assert data['db_path'] == str(db_path_abs.as_posix())
 
-
-    def test_from_json_non_existent_creates_default(self, tmp_path: Path):
-        """Test that from_json creates a default config file if none exists."""
-        config_path = tmp_path / "new_config.json"
-        
-        # Ensure it doesn't exist
-        assert not config_path.exists()
-        
-        # Call from_json, which should create and save a default config
-        config = AgileConfig.from_json(config_path)
-        
-        # Assert that the file now exists
-        assert config_path.exists()
-        
-        # Assert that the returned object has default values
-        assert config.db_path is None
-        assert config.annotator_id == "default_annotator"
-
-        # Check the contents of the created file
-        with open(config_path, 'r') as f:
-            data = json.load(f)
-        assert data['db_path'] is None
-        assert data['annotator_id'] == "default_annotator"
-        
 
     def test_update_config_and_save(self, tmp_path: Path):
         """Test that updating an instance and saving it persists changes."""
@@ -121,7 +182,7 @@ class TestAgileConfig:
 
         # 1. Create a default config and save it
         config = AgileConfig()
-        config.to_json(config_path)
+        config._to_json(config_path)
 
         # 2. Update the attributes
         config.annotator_id = "final_annotator"
@@ -129,7 +190,7 @@ class TestAgileConfig:
         config.target_labels.append(LabelName("Frog"))
 
         # 3. Save the modified config over the old one
-        config.to_json(config_path)
+        config._to_json(config_path)
 
         # 4. Load it back
         reloaded_config = AgileConfig.from_json(config_path)
@@ -169,19 +230,14 @@ class TestAgileConfig:
 
         config_path = tmp_path / "full_config.json"
 
-        # 2. Save the config to a JSON file
-        original_config.to_json(config_path)
+        original_config._to_json(config_path)
         assert config_path.exists()
 
-        # 3. Load the config back from the file
         loaded_config = AgileConfig.from_json(config_path)
 
-        # 4. Assert that the loaded object is identical to the original
-        # Dataclasses automatically provide an __eq__ method that compares all fields.
-        # This single assertion is powerful and checks everything.
+        # because it's a dataclass, this checks all fields for equality
         assert original_config == loaded_config
 
-        # (Optional but good practice) Add a specific check for a restored type
-        # to be certain that dacite's type hooks worked as expected.
+        # check that dacite's type hooks worked as expected.
         assert isinstance(loaded_config.db_path, Path)
         assert loaded_config.db_path == db_path

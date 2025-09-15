@@ -1,8 +1,11 @@
 from __future__ import annotations
-
-from typing import Iterable, Literal, Optional
+from functools import partial
+from turtle import st
+from typing import Iterable, Literal, Optional, Sequence
 from pathlib import Path
 import numpy as np
+from dataclasses import dataclass, field
+from typing import Any
 
 import panel as pn
 import param
@@ -14,6 +17,29 @@ from perch_hoplite.db import interface as hoplite_interface
 # Optional: if you want to fetch tags from BAW
 # and to build ecosounds audio URLs for examples
 from baw_helpers import baw_utils
+
+# import QueryDisplay
+
+from recognizer_workshop.app.agile_engine import AgileConfig, agile_state, LabelName
+#from recognizer_workshop.ui.panel.components.ipy_widgets.query_selector import QuerySelector
+from recognizer_workshop.perch_hoplite_custom_modifications.embedding_display import QueryDisplay
+
+from recognizer_workshop.ui.panel.components.native.embedding_display import PanelQuerySelector, PanelEmbeddingDisplay, PanelEmbeddingDisplayGroup
+
+@dataclass
+class Region():
+    """
+    Holds state for a named region.
+    A region is an area of the UI for a specific purpose, e.g. the query selector, search results etc
+    Each region has a box - a pn.Column, which is where the UI components are rendered.
+    and a state dict for any additional state (selected samples, etc)
+    
+    """
+    name: str
+    box: pn.Column = field(
+        default_factory=lambda: pn.Column(sizing_mode="stretch_both")
+    )
+    state: dict[str, Any] = field(default_factory=dict)
 
 
 class PanelUI(param.Parameterized):
@@ -28,46 +54,143 @@ class PanelUI(param.Parameterized):
         active label’s selections.
     """
 
-    # public, handy if the controller wants to introspect
-    view = param.Parameter(default=None)
 
-    # ---- internal state
-    _annotator_id: str
-    _sample_rate_hz: int
-    _frame_rate: int
+    # dictionary of pn columns where all the different elements are rendered. 
+    _region_names = [
+        "config.main", 
+        "config.label_picker", 
+        "search.query_selector", 
+        "search.results",
+        "refine.results",
+        "status.main"
+    ]
 
-    _active_label: Optional[str]
-    _last_query_samples: Optional[np.ndarray]
 
-    # selections cache: label -> { embedding_id: "pos"/"neg"/"skip" }
-    _selections_by_label: dict[str, dict[int, str]]
+    def __init__(self):
 
-    # rows cache: label -> list of dicts describing each result row
-    #   each row contains: {"embedding_id","dataset_name","uri","offset","score","radio"}
-    _rows_by_label: dict[str, list[dict]]
-
-    # panel containers
-    _status = None
-    _main_col = None
-
-    def __init__(self,
-                 annotator_id: str,
-                 sample_rate_hz: int = 32000,
-                 frame_rate: int = 100):
         super().__init__()
-        pn.extension()
-        self._annotator_id = annotator_id
-        self._sample_rate_hz = sample_rate_hz
-        self._frame_rate = frame_rate
+        # initialise the state to have a dict of state for each region, with a 'region' property that contains the pn Column. 
+        self._regions = { 
+            region_name: Region(name=region_name) for region_name in self._region_names
+            }
+        
+        # list of callbacks to call when the engine is ready
+        self._on_engine_ready = []
 
-        self._active_label = None
-        self._last_query_samples = None
-        self._selections_by_label = {}
-        self._rows_by_label = {}
+    def on_engine_ready(self, fn):
+        """Register a callback to be called when the engine is ready."""
+        self._on_engine_ready.append(fn)
 
-        self._status = pn.pane.Markdown("", sizing_mode="stretch_width")
-        self._main_col = pn.Column(self._status, sizing_mode="stretch_width")
-        self.view = self._main_col  # expose a top-level view to mount
+    def engine_attached(self, eng):
+        # call after vm.eng is created/initialized
+        for fn in list(self._on_engine_ready):
+            try: fn()
+            except Exception: pass
+
+    def get_region_box(self, name: str) -> pn.Column:
+        """
+        Get or create a named region container.
+        Pages use this to create named regions, and insert them into the layout
+        and functions from this class can then populate them and update them.
+
+        Region names are not arbitrary: the pages should name things correctly becasue
+        the names are referred to in interactions between functions in this UI adaptor.       
+        """
+
+        try:
+            return self._regions[name].box
+        except KeyError as e:
+            valid = ", ".join(self._region_names)
+            raise KeyError(f"Unknown region '{name}'. Valid regions: {valid}") from e
+
+
+    def render(self, view: pn.viewable.Viewable, region_name: str) -> None:
+        box = self.get_region_box(region_name)
+        box[:] = [view]
+
+
+    def clear_region_box(self, name: str):
+        """Empty a region's children but keep the container."""
+        self.get_region_box(name).clear()
+
+
+    def view_target_labels(self, eng) -> pn.layout.Panel:
+        """Builds and returns the UI component for defining target labels."""
+        labels_container = pn.Column(sizing_mode="stretch_width")
+        btn_add_label = pn.widgets.Button(name="Add Label", icon="plus", button_type="success")
+        current_labels_display = pn.pane.Markdown()
+
+        def sync_and_update_display(*events):
+            # Save the config whenever a change is made
+            eng.config.save() # Assumes config_path is stored on eng.config
+            description = eng.get_target_label_description()
+            current_labels_display.object = f"**Summary:** {description}" if description else "*(No labels defined)*"
+
+        def _remove_label(label_to_remove, event):
+            if label_to_remove in eng.config.target_labels:
+                eng.config.target_labels.remove(label_to_remove)
+                _build_labels_ui()
+                sync_and_update_display()
+
+        def _build_labels_ui():
+            labels_container.clear()
+            for i, label in enumerate(eng.config.target_labels):
+                species_widget = pn.widgets.AutocompleteInput(
+                    name=f"Species {i+1}", 
+                    options=eng.workbench_tags, 
+                    value=label.species,
+                    placeholder="Type to search for a species...",
+                    case_sensitive=False
+                )
+                call_types_widget = pn.widgets.TextInput(
+                    name="Call Type", 
+                    value=label.call_type, 
+                    placeholder="(optional) e.g., song")
+                remove_btn = pn.widgets.Button(name="Remove", icon="trash", button_type="danger")
+                remove_btn.on_click(partial(_remove_label, label))
+
+                def _update_species(event, target_label=label):
+                    target_label.species = event.new
+                    sync_and_update_display()
+
+                def _update_call_type(event, target_label=label):
+                    target_label.call_type = event.new.strip() or None
+                    sync_and_update_display()
+
+                species_widget.param.watch(_update_species, 'value')
+                call_types_widget.param.watch(_update_call_type, 'value')
+
+                labels_container.append(pn.Row(species_widget, call_types_widget, 
+                                               remove_btn, sizing_mode="stretch_width"))
+
+        def _add_label(event):
+            eng.config.target_labels.append(LabelName(species="", call_type=None))
+            _build_labels_ui()
+            sync_and_update_display()
+
+        btn_add_label.on_click(_add_label)
+
+        # Initial build
+        if eng:
+            btn_add_label.disabled = False
+            _build_labels_ui()
+            sync_and_update_display()
+        else:
+            current_labels_display.object = "*(Engine must be started)*"
+            btn_add_label.disabled = True
+
+
+        return pn.Column(
+            pn.pane.Markdown("## Define Target Labels"),
+            pn.pane.Alert(
+                "Define one or more target species. For each species, you can optionally specify distinct call types.",
+                alert_type="info"
+            ),
+            current_labels_display,
+            labels_container,
+            btn_add_label,
+            sizing_mode="stretch_width"
+        )
 
     # ------------------------------------------------------------------
     # Protocol: label selection (updates eng.label)
@@ -110,7 +233,6 @@ class PanelUI(param.Parameterized):
         def _submit(_):
             eng.label['species'] = species.value
             typed = [s.strip() for s in call_types.value.split(",") if s.strip()]
-            # normalize capitalization (like your notebook UI does)
             eng.label['call_types'] = [t.lower().capitalize() for t in typed]
             self.notify(f"Label bound → species={eng.label['species']}, "
                         f"call_types={eng.label['call_types']}", "info")
@@ -128,240 +250,148 @@ class PanelUI(param.Parameterized):
 
         self._main_col[:] = [self._status, card]
 
-    # ------------------------------------------------------------------
-    # Protocol: select_query_window(uri) -> np.ndarray
-    # ------------------------------------------------------------------
-    def select_query_window(self, uri: str, window_size_s: float = 5.0) -> np.ndarray:
-        """Display a small tool to choose the 5s window; store samples internally.
 
-        Returns the *current* selection immediately (offset 0 initially).
-        The controller should embed using `eng.embed_query(self._last_query_samples)`
-        when the user clicks 'Use 5s window'.
-        """
-        # normalize Xeno-Canto ID
-        if uri.startswith("XC"):
-            uri = "xc" + uri[2:]
+    def show_query_window_selector(self, uri: str, window_size_s: float = 5.0, region_name="search.query_selector"):
+        self.render(pn.Card("⏳ Loading selector..."), region_name)
+        region = self._regions[region_name]
+        selector = PanelQuerySelector(uri=uri, window_size_s=window_size_s)
+        region.state["selector"] = selector
+        self.render(selector, region_name)
+    
 
-        status_txt = pn.pane.Markdown("", sizing_mode="stretch_width")
-        offset = pn.widgets.FloatSlider(
-            name="Offset (s)",
-            start=0.0, end=30.0, step=0.1, value=0.0, sizing_mode="stretch_width"
-        )
-        use_btn = pn.widgets.Button(name="Use 5s window", button_type="primary")
-        spec_pane = pn.pane.Matplotlib(height=240, tight=True)
-        audio_info = pn.pane.Markdown("", sizing_mode="stretch_width")
-
-        # Lazily load audio once; if it fails, keep status
-        _audio = {'arr': None}
-
-        def _load_audio():
-            if _audio['arr'] is None:
-                try:
-                    # audio_io.load_audio handles files/urls/xc
-                    _audio['arr'] = np.array(audio_io.load_audio(uri, self._sample_rate_hz))
-                    status_txt.object = f"Loaded audio: {len(_audio['arr'])/self._sample_rate_hz:.1f}s"
-                    # set slider max to clip length
-                    offset.end = max(0.0, max(0.0, len(_audio['arr']) / self._sample_rate_hz - window_size_s))
-                except Exception as e:
-                    status_txt.object = f"**Error loading audio**: {e}"
-                    _audio['arr'] = None
-
-        def _draw_spec():
-            if _audio['arr'] is None:
-                return
-            st = int(offset.value * self._sample_rate_hz)
-            ed = int(st + window_size_s * self._sample_rate_hz)
-            win = _audio['arr'][st:ed]
-            if win.size == 0:
-                return
-            # very simple waveform plot (feel free to replace with your web spectrogram)
-            fig = plt.figure(figsize=(6, 2.5))
-            t = np.arange(win.size) / self._sample_rate_hz
-            plt.plot(t, win)
-            plt.title(f"Query window: {offset.value:.2f}s → {offset.value+window_size_s:.2f}s")
-            plt.xlabel("Time (s)")
-            plt.ylabel("Amplitude")
-            spec_pane.object = fig
-            audio_info.object = f"Samples: {win.size}"
-
-        def _on_offset(_):
-            _load_audio()
-            _draw_spec()
-
-        def _on_use(_):
-            _load_audio()
-            if _audio['arr'] is None:
-                return
-            st = int(offset.value * self._sample_rate_hz)
-            ed = int(st + window_size_s * self._sample_rate_hz)
-            win = _audio['arr'][st:ed]
-            self._last_query_samples = win
-            status_txt.object = "✅ Window captured. You can now embed it."
-
-        offset.param.watch(_on_offset, "value")
-        use_btn.on_click(_on_use)
-
-        _load_audio()
-        _draw_spec()
-
-        card = pn.Card(
-            "# Select query window",
-            pn.Row(offset, use_btn),
-            spec_pane,
-            audio_info,
-            status_txt,
-            collapsible=False,
-            sizing_mode="stretch_width",
-        )
-        self._main_col[:] = [self._status, card]
-
-        # return current window (offset=0) for convenience
-        if _audio['arr'] is not None:
-            st0 = 0
-            ed0 = int(window_size_s * self._sample_rate_hz)
-            win0 = _audio['arr'][st0:ed0]
-            self._last_query_samples = win0
-            return win0
-        else:
-            return np.array([], dtype=np.float32)
-
-    # ------------------------------------------------------------------
-    # Protocol: show_results(eng, results, *, positive_labels)
-    # ------------------------------------------------------------------
-    def show_results(self, eng, results, *, positive_labels: list[str]) -> None:
-        """Render TopK results and store selections. One label expected here."""
-        if not positive_labels:
-            self.notify("No label provided for rendering results.", "warn")
+    def search_with_selected_window(
+        self,
+        eng,
+        *,
+        num_results: int = 10,
+        target_score=None,
+        selector_region: str = "search.query_selector",
+        results_region: str = "search.results",
+    ):
+        """Read samples from the selector, embed, run search, then render results."""
+        region = self._regions[selector_region]
+        selector = region.state.get("selector")
+        if selector is None:
+            self.render(pn.pane.Alert("No selector loaded.", alert_type="warning"), results_region)
             return
-        label_key = positive_labels[0]
-        self._active_label = label_key
-        self._selections_by_label.setdefault(label_key, {})
-        self._rows_by_label[label_key] = []
 
-        rows = []
-        for r in results:
-            src = eng.db.get_embedding_source(r.embedding_id)
-            uri = src.source_id
-            off = float(src.offsets[0])
-            score = float(r.sort_score)
+        # get the 5s window from the selector's QueryDisplay
+        audio_window = selector.qd.get_audio_window()
+        if audio_window is None or len(audio_window) == 0:
+            self.render(pn.pane.Alert("Select a 5s window first.", alert_type="warning"), results_region)
+            return
 
-            radio = pn.widgets.RadioButtonGroup(
-                name=f"eid={r.embedding_id}",
-                options=[("skip","skip"),("pos","pos"),("neg","neg")],
-                value="skip",
-                button_type="default",
-            )
+        # embed & search
+        eng.embed_query(audio_window)
+        active_label = eng.active_label
+        if not active_label:
+            self.render(pn.pane.Alert("Pick target label(s) on the Config tab.", alert_type="warning"), results_region)
+            return
 
-            # keep selection in the cache
-            def _bind(embed_id: int, w=radio):
-                def _cb(_):
-                    self._selections_by_label[label_key][embed_id] = w.value
-                return _cb
-            radio.param.watch(_bind(r.embedding_id), "value")
+        eng.search_with_query(num_results=num_results, sample_size=None, target_score=target_score, target_label=active_label)
 
-            row_dict = dict(
-                embedding_id=int(r.embedding_id),
-                dataset_name=src.dataset_name,
-                uri=uri,
-                offset=off,
-                score=score,
-                radio=radio,
-            )
-            self._rows_by_label[label_key].append(row_dict)
+        self.show_results(eng, active_label, results_region=results_region)
 
-            rows.append(
-                pn.Row(
-                    pn.pane.Markdown(
-                        f"**eid**: {r.embedding_id} &nbsp;&nbsp; "
-                        f"**offset**: {off:.2f}s &nbsp;&nbsp; **score**: {score:.2f}",
-                        width=500
-                    ),
-                    radio,
-                    sizing_mode="stretch_width",
-                )
-            )
 
-        header = pn.pane.Markdown(f"### Search results – label: **{label_key}**")
-        self._main_col[:] = [self._status, header, *rows]
+    def search_with_classifier(
+        self,
+        eng,
+        *,
+        num_results: int = 10,
+        target_score=None,
+        results_region: str = "refine.results",
+    ):
+        """Read samples from the selector, embed, run search, then render results."""
 
-    # ------------------------------------------------------------------
-    # Protocol: show_examples(examples, eng)
-    # ------------------------------------------------------------------
-    def show_examples(self, examples: list[dict], eng) -> None:
-        """Very simple viewer: just list the examples. Replace with spectrograms if needed."""
-        items = []
-        for ex in examples:
-            items.append(pn.pane.Markdown(
-                f"- eid: **{ex['eid']}** &nbsp; dataset: `{ex['dataset_name']}` "
-                f"&nbsp; offset: {ex['offset']:.2f}s",
-                sizing_mode="stretch_width",
-            ))
-        card = pn.Card("## Random labeled examples", *items, sizing_mode="stretch_width")
-        self._main_col[:] = [self._status, card]
+        eng.search_with_classifier(num_results=num_results, sample_size=None, target_score=target_score)
 
-    # ------------------------------------------------------------------
-    # Protocol: harvest_labels() -> Iterable[Label]
-    # ------------------------------------------------------------------
-    def harvest_labels(self) -> Iterable[hoplite_interface.Label]:
-        if not self._active_label:
+        active_label = eng.active_label
+        if not active_label:
+            self.render(pn.pane.Alert("Pick target label(s) on the Config tab.", alert_type="warning"), results_region)
+            return
+        self.show_results(eng, active_label, results_region=results_region)
+
+
+
+    def show_results(
+        self,
+        eng,
+        label: str,
+        *,
+        results_region: str,
+        page_size: int = 10,
+    ):
+        """Render a pageable group for a label’s TopK results."""
+        label_str = str(label)
+        results = eng.search_results.get(label_str)
+        if not results:
+            self.render(pn.pane.Alert(f"No results for '{label_str}'.", alert_type="info"), results_region)
+            return
+
+        # TODO: support search and verification of multiple labels
+        
+
+        group = PanelEmbeddingDisplayGroup.from_search_results(
+            results,
+            db=eng.db,
+            labels=[label_str],
+            page_size=page_size,
+            sample_rate_hz=eng.db_model_config.model_config.sample_rate,
+            frame_rate=100,
+            window_size_s=5.0,
+            audio_loader=eng.audio_filepath_loader,
+        )
+        self._regions[results_region].state["group"] = group
+        self.render(group, results_region)
+
+
+    def harvest_labels(self, eng, *, results_region: str):
+        """Collect user judgements from the current results page(s)."""
+        group = self._regions[results_region].state.get("group")
+        if group is None:
             return []
-        label_key = self._active_label
-        selected = self._selections_by_label.get(label_key, {})
-        out: list[hoplite_interface.Label] = []
-        for row in self._rows_by_label.get(label_key, []):
-            eid = row["embedding_id"]
-            choice = selected.get(eid, "skip")
-            if choice == "skip":
-                continue
-            lt = hoplite_interface.LabelType.POSITIVE if choice == "pos" else hoplite_interface.LabelType.NEGATIVE
-            out.append(
-                hoplite_interface.Label(
-                    embedding_id=int(eid),
-                    label=str(label_key),
-                    type=lt,
-                    provenance=self._annotator_id,
-                )
-            )
-        return out
+        provenance = eng.config.annotator_id
+        return group.harvest_labels(provenance)
 
-    # ------------------------------------------------------------------
-    # Protocol: plot_scores_histogram(eng, label)
-    # ------------------------------------------------------------------
-    def plot_scores_histogram(self, eng, label: str) -> None:
-        scores = None
-        if getattr(eng, "search_scores", None) and label in eng.search_scores:
-            scores = eng.search_scores[label]
-        if scores is None:
-            self.notify(f"No stored scores for label '{label}'. Run search first.", "warn")
-            return
 
-        fig = plt.figure(figsize=(6, 3))
-        _ = plt.hist(scores, bins=100)
-        if eng.search_results and label in eng.search_results:
-            hit_scores = [r.sort_score for r in eng.search_results[label].search_results]
-            plt.scatter(hit_scores, np.zeros_like(hit_scores), marker='|', alpha=0.5)
-        plt.title(f"Score distribution — {label}")
+    # # ------------------------------------------------------------------
+    # # Protocol: plot_scores_histogram(eng, label)
+    # # ------------------------------------------------------------------
+    # def plot_scores_histogram(self, eng, label: str) -> None:
+    #     scores = None
+    #     if getattr(eng, "search_scores", None) and label in eng.search_scores:
+    #         scores = eng.search_scores[label]
+    #     if scores is None:
+    #         self.notify(f"No stored scores for label '{label}'. Run search first.", "warn")
+    #         return
 
-        pane = pn.pane.Matplotlib(fig, tight=True, height=260)
-        self._main_col[:] = [self._status, pn.Card("## Scores histogram", pane, sizing_mode="stretch_width")]
+    #     fig = plt.figure(figsize=(6, 3))
+    #     _ = plt.hist(scores, bins=100)
+    #     if eng.search_results and label in eng.search_results:
+    #         hit_scores = [r.sort_score for r in eng.search_results[label].search_results]
+    #         plt.scatter(hit_scores, np.zeros_like(hit_scores), marker='|', alpha=0.5)
+    #     plt.title(f"Score distribution — {label}")
 
-    # ------------------------------------------------------------------
-    # Protocol: utilities
-    # ------------------------------------------------------------------
-    def set_active_label(self, label: str | None) -> None:
-        self._active_label = label
+    #     pane = pn.pane.Matplotlib(fig, tight=True, height=260)
+    #     self._main_col[:] = [self._status, pn.Card("## Scores histogram", pane, sizing_mode="stretch_width")]
 
-    def clear_results(self) -> None:
-        if self._active_label and self._active_label in self._rows_by_label:
-            self._rows_by_label[self._active_label] = []
-            self._selections_by_label[self._active_label] = {}
-        self._status.object = "Cleared current results."
+    # # ------------------------------------------------------------------
+    # # Protocol: utilities
+    # # ------------------------------------------------------------------
+    # def set_active_label(self, label: str | None) -> None:
+    #     self._active_label = label
 
-    def confirm_overwrite(self, db_path: Path) -> bool:
-        # For Panel apps you’d typically render a modal and await the user click.
-        # Minimal stub: always confirm True for now.
-        return True
+    # def clear_results(self) -> None:
+    #     if self._active_label and self._active_label in self._rows_by_label:
+    #         self._rows_by_label[self._active_label] = []
+    #         self._selections_by_label[self._active_label] = {}
+    #     self._status.object = "Cleared current results."
 
-    def notify(self, msg: str, level: Literal["info","warn","error"] = "info") -> None:
-        emoji = {"info":"ℹ️","warn":"⚠️","error":"❌"}.get(level, "ℹ️")
-        self._status.object = f"{emoji} {msg}"
+    # def confirm_overwrite(self, db_path: Path) -> bool:
+    #     # For Panel apps you’d typically render a modal and await the user click.
+    #     # Minimal stub: always confirm True for now.
+    #     return True
+
+    # def notify(self, msg: str, level: Literal["info","warn","error"] = "info") -> None:
+    #     emoji = {"info":"ℹ️","warn":"⚠️","error":"❌"}.get(level, "ℹ️")
+    #     self._status.object = f"{emoji} {msg}"

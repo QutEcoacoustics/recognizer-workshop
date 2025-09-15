@@ -4,6 +4,41 @@
   // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
   "version": "0.2.0",
   "configurations": [
+
+
+    {
+        "name": "Panel: Debug Notebook App",
+        "type": "python",
+        "request": "launch",
+        // Use "module" to run "python -m panel"
+        "module": "panel",
+        // These are the arguments passed to "panel serve"
+        "args": [
+            "serve",
+            "${workspaceFolder}/packages/recognizer-workshop/src/recognizer_workshop/ui/panel/app.ipynb",
+            "--show",
+            // Panel's default debug port is 5006
+            "--port",
+            "5006",
+            // The --debug flag enables Panel's verbose logging
+            "--log-level",
+            "debug"
+        ],
+        "console": "integratedTerminal",
+        "justMyCode": true
+    },
+    {
+        "name": "JupyterLab: Launch and Debug Panel App",
+        "type": "python",
+        "request": "launch",
+        "module": "jupyter",
+        "args": [
+            "lab",
+            "--no-browser"
+        ],
+        "justMyCode": false,
+        "console": "integratedTerminal"
+    },
     {
         "name": "Python: Attach to Panel App",
         "type": "python",

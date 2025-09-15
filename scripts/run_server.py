@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 """
-A robust Python-based launcher for the Panel application.
+Python-based launcher for the Panel application.
 
-This script programmatically configures the Python path and launches the
-server, bypassing the shell and the `panel serve` command's path
-resolution issues.
+This script configures the Python path and launches the
+server, bypassing the shell and the `panel serve` command's
+which had some import path resolution issues.
 
 To run the app, execute this script from your project's root directory:
   python ./scripts/run_server.py
@@ -35,7 +35,9 @@ def main():
     sys.path.insert(0, str(src_path))
 
     try:
-        from recognizer_workshop.ui.panel.app import app
+        from recognizer_workshop.ui.panel.app import create_app_session
+        app, _ = create_app_session()
+
     except ImportError as e:
         print(f"\nError: Could not import the application.")
         print(f"Please ensure the path '{src_path}' is correct and contains your package.")

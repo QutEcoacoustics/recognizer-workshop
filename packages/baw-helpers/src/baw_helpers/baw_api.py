@@ -423,12 +423,12 @@ class baw_api:
                 print(f"  {key}: {value}")
 
             # Only print response body if it's likely text/JSON, not for large binary files
-            content_type = response_obj.headers.get('Content-Type', '').split(';')[0].strip().lower()
-            if content_type.startswith('application/json') or content_type.startswith('text/'):
-                print("Response Body:")
-                print(response_obj.text)
-            else:
-                print(f"Response Body: (Content-Type: {content_type}, likely a file, not printed)")
+            # content_type = response_obj.headers.get('Content-Type', '').split(';')[0].strip().lower()
+            # if content_type.startswith('application/json') or content_type.startswith('text/'):
+            #     print("Response Body:")
+            #     print(response_obj.text)
+            # else:
+            #     print(f"Response Body: (Content-Type: {content_type}, likely a file, not printed)")
         else:
             if error_context:
                 print("\n--- RESPONSE DETAILS NOT AVAILABLE (e.g., ConnectionError) ---")

@@ -37,7 +37,15 @@ classifiers = [
 dependencies = [
   "ipywidgets>=8.1.0",
   "panel>=0.14.0",
-  "dacite"
+
+  # allows restoring nested dataclass objects saved as json to their correct classes
+  "dacite",
+
+  # allows serving the app through a notebook
+  "jupyter_bokeh",
+
+  # allows serving the app through a notebook
+  "jupyter-server-proxy"
 ]
 
 

@@ -142,7 +142,7 @@ def load_baw_audio(
     audio_url: str,
     auth_token: str,
     sample_rate: int,
-    session: requests.Session,
+    session: requests.Session | None = None,
 ) -> np.ndarray | None:
   """Load audio from the Bioacoustics Workbench API.
 

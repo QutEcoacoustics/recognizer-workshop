@@ -12,7 +12,7 @@ def _build_status_view(vm: ViewModel):
 
     status_data = vm.eng.get_status()
 
-    # --- 1. General Status Section ---
+    # General Status Section
     general_status_view = pn.Column(
         "### General Status",
         pn.Row(
@@ -26,8 +26,7 @@ def _build_status_view(vm: ViewModel):
         pn.layout.Divider()
     )
 
-    # --- 2. Configuration Section ---
-    # Use the __str__ method we created for the AgileConfig dataclass
+    # Configuration Section
     config_str = str(status_data['config'])
     config_view = pn.Column(
         "### Configuration",
@@ -35,7 +34,7 @@ def _build_status_view(vm: ViewModel):
         pn.layout.Divider()
     )
 
-    # --- 3. Database Summary Section ---
+    # Database Summary Section
     db_summary: DatabaseSummary = status_data.get('db_summary')
     if db_summary:
         # Create a table for the label counts
@@ -66,7 +65,6 @@ def _build_status_view(vm: ViewModel):
     else:
         db_summary_view = pn.Column("### Database Summary", pn.pane.Markdown("*Database not loaded.*"))
 
-    # --- Assemble all sections ---
     return pn.Column(
         general_status_view,
         config_view,
@@ -88,17 +86,14 @@ def build(vm: ViewModel):
         align='end'
     )
     
-    # A container to hold the dynamically generated status view
     content_pane = pn.Column(_build_status_view(vm))
 
     def refresh_view(event):
         """Callback for the refresh button."""
-        # Replace the contents of the pane with a freshly built view
         content_pane.objects = [_build_status_view(vm)]
 
     refresh_button.on_click(refresh_view)
 
-    # The final layout for the tab is the button and the content pane
     return pn.Column(
         refresh_button,
         content_pane

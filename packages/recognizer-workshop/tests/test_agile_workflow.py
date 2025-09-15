@@ -3,23 +3,21 @@ from pathlib import Path
 
 from recognizer_workshop.app.agile_engine import AgileConfig, agile_state
 
-from recognizer_workshop.app.agile_modeling_helpers import list_audio_files, labels_from_event_taggings, add_labels_to_db
+from recognizer_workshop.app.agile_modeling_helpers import list_audio_files
+
+from recognizer_workshop.app.services.db_labels.db_labels import add_labels_to_db, labels_from_event_taggings
 
 def test_full_workflow (db_with_path, working_folder, audio_files_folder):
 
     db, path_to_db = db_with_path
 
 
-
     annotator_id = "phil"
-
 
     config = agile_config(
         db_path=path_to_db,
         annotator_id=annotator_id,
-        # For this tutorial we arbitrarily choose to name our search dataset
-        # "search_set", however if you manage multiple search datasets you will have
-        # to assign each a unique name via this configuration.
+
         search_dataset_name="search_set",
         embeddings_folder=None,
         labeled_examples_folder=audio_files_folder,

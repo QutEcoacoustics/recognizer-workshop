@@ -1,3 +1,8 @@
+
+import os
+os.environ.setdefault("MPLBACKEND", "module://matplotlib_inline.backend_inline")
+
+
 import panel as pn
 from recognizer_workshop.ui.panel.view_model import ViewModel
 from recognizer_workshop.ui.panel.pages import config, labeled_examples, search, train, refine, inference, status
@@ -5,11 +10,17 @@ from recognizer_workshop.ui.panel.pages import config, labeled_examples, search,
 import logging
 from recognizer_workshop.ui.panel.utils import PanelLogHandler
 
+from recognizer_workshop.ui.panel.adaptors import PanelUI
 
-pn.extension()
+# Without ipywidgets, might get blank panes or “unknown model” 
+# errors when embedding complex ipywidgets.
+# TODO: probably don't need this now that we use pure Panel components?
+pn.extension('ipywidgets', sizing_mode="stretch_width")
+print("Panel extension loaded.")
 
-def build_app():
-    vm = ViewModel()
+def build_app(vm):
+
+
     tabs = pn.Tabs(
         ("Config",            config.build(vm)),
         ("Labelled examples", labeled_examples.build(vm)),
@@ -27,5 +38,10 @@ def build_app():
         sizing_mode="stretch_both",
     )
 
-app = build_app()
-app.servable(title="Recognizer Workshop")
+def create_app_session():
+    """Creates a complete, isolated application session."""
+    vm = ViewModel()
+    vm.ui = PanelUI()
+    app = build_app(vm)
+    # Returns both the UI and the state object
+    return app, vm

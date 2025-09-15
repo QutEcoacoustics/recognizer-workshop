@@ -1,6 +1,101 @@
 import numpy as np
 from perch_hoplite.db import interface
 
+
+import sqlite3
+from perch_hoplite.db.sqlite_usearch_impl import SQLiteUsearchDB, USEARCH_DTYPES, HOPLITE_FILENAME, UNDEX_FILENAME, USEARCH_CONFIG_KEY
+
+from etils import epath
+from ml_collections import config_dict
+
+from usearch import index as uindex
+
+
+# this is a modified version of the SQLiteUsearchDB from perch_hoplite
+# to allow for cross-thread usage of the DB connection
+# an alternative would be to create a standalone factory function (no class or OO inheritance)
+# which just does the create() setup and then calls the constructor of SQLiteUsearchDB. 
+# the difference is that this returns a different type (ThreadedSQLiteUsearchDB)
+class ThreadedSQLiteUsearchDB(SQLiteUsearchDB):
+    """
+    An inherited version of SQLiteUsearchDB that allows connections
+    to be shared across threads by setting check_same_thread=False.
+    - we are accessing private methods/attributes of the parent class,
+      but this is necessary to avoid re-implementing everything or modifying the parent class.
+    """
+    @classmethod
+    def create(
+        cls,
+        db_path: str,
+        usearch_cfg: config_dict.ConfigDict | None = None,
+    ):
+        """
+        Duplicate the parent class method but modify the sqlite3.connect with the check_same_thread=False option.
+        """
+
+        db_path = epath.Path(db_path)
+        db_path.mkdir(parents=True, exist_ok=True)
+        hoplite_path = db_path / HOPLITE_FILENAME 
+
+        # Only this line is modified from the parent class, to allow cross-thread usage
+        db = sqlite3.connect(hoplite_path.as_posix(), check_same_thread=False)
+
+        # The rest of the method is exactly the same as the original
+        cursor = db.cursor()
+        cursor.execute('PRAGMA journal_mode=WAL;')
+        _setup_sqlite_tables(cursor) 
+        db.commit()
+
+        metadata = _get_metadata(cursor, None) # Assuming accessible
+        if (
+            USEARCH_CONFIG_KEY in metadata
+            and usearch_cfg is not None
+            and metadata[USEARCH_CONFIG_KEY] != usearch_cfg
+        ):
+            raise ValueError(
+                'A usearch_cfg was provided, but one already exists in the DB.'
+            )
+        elif USEARCH_CONFIG_KEY in metadata:
+            usearch_cfg = metadata[USEARCH_CONFIG_KEY]
+        elif usearch_cfg is None:
+            raise ValueError('No usearch config found in DB and none provided.')
+        else:
+            _insert_metadata(cursor, USEARCH_CONFIG_KEY, usearch_cfg)
+            db.commit()
+
+        usearch_dtype = USEARCH_DTYPES[usearch_cfg.dtype]
+        ui_mem = uindex.Index(
+            ndim=usearch_cfg.embedding_dim,
+            metric=getattr(uindex.MetricKind, usearch_cfg.metric_name),
+            expansion_add=usearch_cfg.expansion_add,
+            expansion_search=usearch_cfg.expansion_search,
+            dtype=usearch_dtype,
+        )
+        index_path = db_path / UINDEX_FILENAME
+        ui_disk_view = uindex.Index(ndim=usearch_cfg.embedding_dim)
+        if index_path.exists():
+            ui_disk_view.view(index_path.as_posix())
+            ui = ui_disk_view
+        else:
+            ui = ui_mem
+        
+        return cls(
+            db_path=db_path.as_posix(),
+            db=db,
+            ui=ui,
+            _ui_mem=ui_mem,
+            _ui_disk_view=ui_disk_view,
+            embedding_dim=usearch_cfg.embedding_dim,
+            embedding_dtype=usearch_cfg.dtype,
+        )
+
+
+
+
+
+
+
+
 # augmented from perch_hoplite.db.sqlite_usearch_impl
 # to allow for dataset filtering
 def get_embedding_ids(db, dataset=None) -> np.ndarray:

@@ -14,7 +14,7 @@ import tempfile
 import shutil
 
 from tqdm import tqdm
-from typing import Union, Dict, Any, List
+from typing import Union, Dict, Any, List, Optional, Callable
 
 
 from ml_collections import config_dict
@@ -32,11 +32,11 @@ from perch_hoplite.agile import classifier_data
 from perch_hoplite.agile import source_info
 from recognizer_workshop.perch_hoplite_custom_modifications import brutalism
 from perch_hoplite.db import score_functions
-from perch_hoplite.db import sqlite_usearch_impl
+#from perch_hoplite.db import sqlite_usearch_impl
 from perch_hoplite.db import interface as hoplite_interface
 # from chirp.projects.zoo import models
 from perch_hoplite.zoo import model_configs
-
+from perch_hoplite import audio_io
 
 import baw_helpers.baw_utils as baw_utils
 from recognizer_workshop.perch_hoplite_custom_modifications import sqlite_usearch_impl as sqlite_usearch_impl_mod
@@ -50,11 +50,15 @@ from baw_helpers.baw_helpers import annotation_upload_csv
 
 from recognizer_workshop.app.services.events.upload_detections import upload_detections
 from recognizer_workshop.app.services.inference.helpers import make_site_map
-from recognizer_workshop.app.services.db_labels.db_labels import get_db_summary, get_label_counts, LabelName
+from recognizer_workshop.app.services.db_labels.db_labels import get_db_summary, get_label_counts, labels_from_event_taggings, add_labels_to_db
+from recognizer_workshop.app.services.db_labels.dataclasses import LabelName
 from recognizer_workshop.app.services.inference.inference import run_inference
 
 
 log = logging.getLogger(__name__)
+
+_APP_DATA_FILE = Path.home() / ".recognizer_workshop_data.json"
+_MAX_RECENT_FILES = 10
 
 
 @dataclasses.dataclass
@@ -82,6 +86,11 @@ class AgileConfig:
     # list of species labels and optional call types
     target_labels: List[LabelName] = dataclasses.field(default_factory=list) 
 
+    # Path to the current config file after a load or save_as, not part of the JSON serialization.
+    config_path: Path | None = dataclasses.field(default=None, init=False, repr=False)
+
+    _APP_DATA_FILE = Path.home() / ".recognizer_workshop_data.json"
+    _MAX_RECENT_FILES = 10
     
     # List of fields that should be treated as paths
     _PATH_FIELDS: dataclasses.InitVar[List[str]] = [
@@ -115,6 +124,33 @@ class AgileConfig:
                 path_value.mkdir(parents=True, exist_ok=True)
 
 
+    def reset(self):
+        """Resets the config to its default state, clearing the current path."""
+        # Create a new default instance and copy its values to this one.
+        default_instance = AgileConfig()
+        for field in dataclasses.fields(self):
+            if field.init: # Don't overwrite fields like 'config_path'
+                setattr(self, field.name, getattr(default_instance, field.name))
+        self.config_path = None
+        log.info("New configuration created.")
+
+
+    def save(self):
+        if not self.config_path:
+            raise ValueError(
+                "No file path is set for this configuration. "
+                "Use 'save_as(path)' to save it for the first time."
+            )
+        self._to_json(self.config_path)
+        log.info(f"Configuration saved to {self.config_path}")
+
+
+    def save_as(self, path):
+        self.config_path = Path(path).resolve()
+        self._to_json(self.config_path)
+        _add_to_recent_files(self.config_path)
+        log.info(f"Configuration saved to new location: {self.config_path}")
+
     def __str__(self) -> str:
         """Readable string representation of the config."""
         lines = ["Agile Recognizer Config:"]
@@ -130,6 +166,23 @@ class AgileConfig:
             lines.append(f"  - {field.name}: {value}")
         return "\n".join(lines)
 
+
+    @classmethod
+    def load(cls, path: str | Path) -> 'AgileConfig':
+        """Loads a config from a path and updates the recent files list."""
+        load_path = Path(path).resolve()
+
+        if not load_path.exists():
+            raise FileNotFoundError(f"Config file not found: {load_path}")
+
+        instance = cls.from_json(load_path)
+        instance.config_path = load_path
+        _add_to_recent_files(load_path)
+        return instance
+
+
+
+
     @classmethod
     def from_json(cls, config_path: str | Path, relative_to: str | Path | None = None) -> 'AgileConfig':
         """
@@ -144,11 +197,12 @@ class AgileConfig:
                          - If a specific path is given, paths are relative to that directory.
         """
         config_path = Path(config_path).resolve()
+        
         if not config_path.exists():
             log.warning(f"Config file not found at {config_path}. Creating a default one.")
             # Create a default instance and save it so it exists for next time
             default_config = cls()
-            default_config.to_json(config_path)
+            default_config._to_json(config_path)
             return default_config
 
         # Determine the base directory for path resolution
@@ -174,8 +228,11 @@ class AgileConfig:
         )
 
         return instance
+    
 
-    def to_json(self, config_path: str | Path, relative_to: str | Path | None = None) -> None:
+ 
+
+    def _to_json(self, config_path: str | Path, relative_to: str | Path | None = None) -> None:
         """
         Saves the current configuration to a JSON file.
         Path objects are converted to strings, relative to a specified base directory.
@@ -200,9 +257,11 @@ class AgileConfig:
             base_dir = Path(relative_to).resolve()
             
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        data_to_save = dataclasses.asdict(self)
-        
 
+        
+        data_to_save = dataclasses.asdict(self)
+        del data_to_save['config_path'] # don't include the config path
+      
         for field_name in self._PATH_FIELDS:
             if field_name in data_to_save and data_to_save[field_name] is not None:
                 absolute_path = Path(data_to_save[field_name])
@@ -224,13 +283,13 @@ class AgileConfig:
 class agile_state:
 
     config: AgileConfig = None
-    db: sqlite_usearch_impl.SQLiteUsearchDB = None
+    db: sqlite_usearch_impl_mod.ThreadedSQLiteUsearchDB = None
     db_model_config = None
     model_class = None
     _embedding_model = None
     audio_filepath_loader = None
     baw_api = None
-    label = {"value": None}  # this is used to store the label selected by the user in the label selector widget
+    _active_label: Optional[LabelName] = None  
 
     # search results from the last search, whether it's a single example query
     # or a classifier-based search.
@@ -241,7 +300,7 @@ class agile_state:
     # this is overwritten each time a search results are displayed. 
     display_group = None
 
-    # list of tags pulled from ecosounds to use for selecting labels
+    # list of all ecosounds tags to use for selecting target labels
     workbench_tags = []
 
     def __init__(self, config):
@@ -260,7 +319,7 @@ class agile_state:
         if not Path(self.config.db_path).exists():
             raise ValueError(f'DB path {self.config.db_path} does not exist.')
         
-        self.db = sqlite_usearch_impl.SQLiteUsearchDB.create(self.config.db_path)
+        self.db = sqlite_usearch_impl_mod.ThreadedSQLiteUsearchDB.create(self.config.db_path)
         self.db_model_config = self.db.get_metadata('model_config')
         
         self.model_class = model_configs.get_model_class(self.db_model_config.model_key)
@@ -277,12 +336,14 @@ class agile_state:
         # In the case of ecosounds recordings, this filepath loader is not really used, but
         # it needs to exist to pass to the display_group object.
 
-        embed_config = self.db.get_metadata('audio_sources')
-        self.audio_filepath_loader = audio_loader.make_filepath_loader(
-          audio_sources=source_info.AudioSources.from_config_dict(embed_config),
-          window_size_s=self.db_model_config.model_config.window_size_s,
-          sample_rate_hz=self.db_model_config.model_config.sample_rate,
-        )
+        # embed_config = self.db.get_metadata('audio_sources')
+        # self.audio_filepath_loader = audio_loader.make_filepath_loader(
+        #   audio_sources=source_info.AudioSources.from_config_dict(embed_config),
+        #   window_size_s=self.db_model_config.model_config.window_size_s,
+        #   sample_rate_hz=self.db_model_config.model_config.sample_rate,
+        # )
+
+        self.audio_filepath_loader = self._create_audio_loader()
 
         return True
 
@@ -323,6 +384,36 @@ class agile_state:
                         log.warning("Failed to load model after retries.")
                         raise e
         return self._embedding_model
+
+    @property
+    def active_label(self) -> Optional[LabelName]:
+        """
+        Gets the active label, ensuring it is an identical object from the
+        config.target_labels list. Includes a fast-path identity check.
+        """
+        pool = getattr(self.config, "target_labels", []) or []
+        current_intent = self._active_label
+
+        if not pool:
+            return None
+
+        if current_intent in pool:
+            return current_intent
+
+        if current_intent:
+            match = next((ln for ln in pool if ln == current_intent), None)
+            if match is not None:
+                # We found the equivalent object, return it.
+                return match
+
+        # We always return an active label, defaulting to the first item if necessary.
+        return pool[0]
+
+
+    @active_label.setter
+    def active_label(self, value: Optional[LabelName]):
+        """Sets the user's intended active label."""
+        self._active_label = value
 
     
     def embed_query(self, query_audio_samples):
@@ -421,10 +512,69 @@ class agile_state:
         self.search_results[target_label] = results
         if getattr(self, "search_scores", None) is None:
             self.search_scores = {}
+
         self.search_scores[target_label] = all_scores
 
 
 
+    def _create_audio_loader(self) -> Callable[[str], np.ndarray]:
+        """
+        Returns a single, unified audio loader function.
+        This function can handle both local file paths and remote BAW URLs.
+        """
+        baw_domain = self.config.baw_config.get('domain')
+        baw_token = self.config.baw_config.get('auth_token', '')
+
+        window_size_s=self.db_model_config.model_config.window_size_s
+        sample_rate_hz=self.db_model_config.model_config.sample_rate
+
+        # untested attempt to support non-baw-url sources (local audio paths)
+        filepath_loader = None
+        if self.db_model_config:
+            embed_config = self.db.get_metadata('audio_sources')
+
+            # make_filepath_loader returns a callable that accepts a uri and offset
+            filepath_loader = audio_loader.make_filepath_loader(
+                        audio_sources=source_info.AudioSources.from_config_dict(embed_config),
+                        window_size_s=window_size_s,
+                        sample_rate_hz=sample_rate_hz,
+                    )
+
+        # This is the actual loader function that will be returned.
+        # It has access to 'self' from the outer scope, so it can use self.baw_api.
+        def _loader(uri: str, offset: float | int) -> np.ndarray:
+            if baw_domain and uri.startswith((baw_domain)):
+                # It's a URL, so use the baw utils to download and load the audio data.
+                # TODO: We need to support public projects that don't need a token.
+                try:
+
+                    segment_url = baw_utils.make_baw_audio_url_from_file_id(uri, offset, window_size_s, baw_domain)
+                    # we can just use the load_baw_audio function directly since we are not doing multi loading anymore
+                    audio_segment = baw_utils.load_baw_audio(segment_url, sample_rate=sample_rate_hz, auth_token=baw_token)
+                    return audio_segment
+                except Exception as e:
+                    log.error(f"Failed to load BAW audio from {uri}: {e}")
+                    # Return an empty array on failure so the UI doesn't crash.
+                    return np.array([])
+            else:
+
+                # It's not a url belonging to our baw config domain, so treat it as a local file path.
+                # If the db metadata allowed us to create a filepath_loader, use that (it prepends base paths, etc)
+                # Otherwise, fallback to just loading the path directly. 
+                if filepath_loader:
+                    return filepath_loader(uri, offset)
+                else:
+                    return np.array(
+                        audio_io.load_audio_window(
+                            uri,
+                            offset_s=offset,
+                            sample_rate=sample_rate_hz,
+                            window_size_s=window_size_s,
+                        )
+                    )
+
+
+        return _loader
 
 
     def save_labels(self, verified_labels):
@@ -488,22 +638,25 @@ class agile_state:
 
 
     def search_with_classifier(self,
-          num_results=50, sample_size=1_000_000, target_score=None, dataset=None):
+          num_results=50, sample_size=1_000_000, target_score=None, dataset=None, target_labels=None):
         """
         For each class in the classifier, 
         Prepares the query and bias from the classifier params and searches with these
         """
-
-        target_labels = self.classifier.classes
-        log.info('target_labels: ', target_labels)
+        
+        # unless we specify target labels, search for everything we trained on
+        if target_labels is None:
+            target_labels = self.classifier.classes
+            log.info("target_labels: %s", ','.join(target_labels))
         
         for target_label_idx, target_label in enumerate(target_labels):
 
-            log.info(f'Searching for {target_label}...')
+            log.info('Searching for %s ...', target_label)
 
             class_query = self.classifier.beta[:, target_label_idx]
             bias = self.classifier.beta_bias[target_label_idx]
-                
+
+            # don't return anything, it saves to the self.search_results dict    
             self.search(
                 query=class_query,
                 target_label=target_label,
@@ -537,7 +690,52 @@ class agile_state:
     def db_summary(self):
         """Debugging/sanity checking to see what's in the database"""
         return get_db_summary(self.db)
+    
 
+    def get_baw_filters(self):
+        """returns a list of audio_recording filter critera used to create the database
+        This is saved as hoplite db metadata and is used to get events from the workbench for
+        adding labels to embeddings
+        """
+
+        baw_filters = self.db.get_metadata('baw_filters')
+
+        if not baw_filters:
+            log.warning("No baw_filters found in db metadata")
+            return None
+
+        return baw_filters
+    
+
+    def set_baw_filters(self, baw_filters):
+        """returns a list of audio_recording filter critera used to create the database
+        This is saved as hoplite db metadata and is used to get events from the workbench for
+        adding labels to embeddings
+        """
+
+        self.db.insert_metadata('baw_filters', baw_filters)
+        self.db.commit()
+
+
+    def fetch_labels(self):
+
+        baw_filters = self.get_baw_filters()
+        if not baw_filters:
+            log.warning("No baw_filters found in db metadata. Cannot update labels.")
+            return "no_baw_filters"
+        
+        all_results = []
+        
+        for filter_params in baw_filters:
+            labels = labels_from_event_taggings(self.baw_api, filter_params, self.config.target_labels)
+            all_results.append({
+                "filter_params": filter_params,
+                "labels": labels
+            })
+
+        return all_results
+
+        
 
     def save_classifier(self, path=None):
         if path is None:
@@ -635,26 +833,68 @@ class agile_state:
     def get_target_labels(self):
         """
         """
-        species = self.label.get('species', '')
-        call_types = self.label.get('call_types') or []
-
-        if not call_types:
-            return [species]
-        else:
-            return [f"{species} {ct}" for ct in call_types]
-        
+        return [str(lbl) for lbl in self.config.target_labels]
+    
 
     def get_target_label_description(self):
         """
-        Returns a string describing the target label, e.g. "species (call_type1, call_type2)"
+        Returns a string describing the target labels, 
+        e.g. "species (call_type1, call_type2); species2"
         """
-        species = self.label.get('species', '')
-        call_types = self.label.get('call_types') or []
 
-        if not call_types:
-            return species
-        else:
-            return f"{species} ({', '.join(call_types)})"
+        description_dict = {}
+        for lbl in self.config.target_labels:
+
+            if lbl.species not in description_dict:
+                description_dict[lbl.species] = []
+            if lbl.call_type:
+                description_dict[lbl.species].append(lbl.call_type)
+
+        descriptions = []
+        for species, call_types in description_dict.items():
+            desc = species
+            if call_types:
+                desc += f" ({', '.join(call_types)})"
+            descriptions.append(desc)
+
+        return '; '.join(descriptions)
 
 
 
+# private module functions for saving/loading app data
+
+def _get_app_data_file() -> Path:
+    """Returns the path to the central app data file."""
+    return AgileConfig._APP_DATA_FILE
+
+def _read_app_data() -> dict:
+    """Reads the central app data file."""
+    if _get_app_data_file().exists():
+        with open(_get_app_data_file(), 'r') as f:
+            try:
+                return json.load(f)
+            except json.JSONDecodeError:
+                return {}
+    return {}
+
+def _write_app_data(data: dict):
+    """Writes to the central app data file."""
+    with open(_get_app_data_file(), 'w') as f:
+        json.dump(data, f, indent=4)
+
+
+def _add_to_recent_files(path: Path):
+    """Adds a file path to the top of the recent files list."""
+    data = _read_app_data()
+    recent_files = data.get("recent_files", [])
+    str_path = str(path)
+    if str_path in recent_files:
+        recent_files.remove(str_path)
+    recent_files.insert(0, str_path)
+    data["recent_files"] = recent_files[:AgileConfig._MAX_RECENT_FILES]
+    _write_app_data(data)
+
+
+def get_recent_files(num: int = AgileConfig._MAX_RECENT_FILES) -> list[str]:
+    data = _read_app_data()
+    return data.get("recent_files", [])[:num]
