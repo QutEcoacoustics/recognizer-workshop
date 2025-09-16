@@ -1,5 +1,7 @@
 import panel as pn
+import pandas as pd
 import json
+import copy
 
 from recognizer_workshop.app.services.db_labels.db_labels import add_labels_to_db
 
@@ -8,22 +10,39 @@ def build(vm):
     btn_fetch = pn.widgets.Button(name="Fetch labels from server", button_type="primary")
     btn_add   = pn.widgets.Button(name="Add fetched labels to DB", button_type="success", disabled=True)
     log       = pn.pane.Markdown("")
-    stash     = {"result_sets": None}
-
-
-    filter_display = pn.pane.JSON(depth=-1, name="Current BAW Filters", sizing_mode="stretch_width")
+    summary_table = pn.pane.DataFrame(sizing_mode="stretch_width")
+    outcomes_table = pn.pane.DataFrame(sizing_mode="stretch_width")
+    
+    # Details table - shows ALL outcomes, sortable and filterable
+    details_table = pn.widgets.Tabulator(
+        sizing_mode="stretch_width", 
+        pagination='remote', 
+        page_size=50,
+        sorters=[{'field': 'Outcome', 'dir': 'asc'}],
+        show_index=False,
+        disabled=True  # Make read-only
+    )
+    details_title = pn.pane.Markdown("")
+    stash     = {"result_sets": None, "outcomes": None}
     
     project_ids_input = pn.widgets.TextInput(name="Project IDs (comma-separated)", placeholder="e.g., 123, 456")
     region_ids_input = pn.widgets.TextInput(name="Region IDs (comma-separated)", placeholder="e.g., 789")
     site_ids_input = pn.widgets.TextInput(name="Site IDs (comma-separated)", placeholder="e.g., 101, 102")
-
-    btn_edit = pn.widgets.Button(name="Edit", icon='edit')
     btn_save = pn.widgets.Button(name="Save Filters", button_type="primary", icon='save')
     btn_cancel = pn.widgets.Button(name="Cancel")
 
 
-    display_view = pn.Row(filter_display, btn_edit, align="start")
+    filter_display = pn.pane.Markdown(sizing_mode="stretch_width")
+    btn_edit = pn.widgets.Button(name="Edit", icon='edit')
+
+    editor_container = pn.Column(sizing_mode="stretch_width")
+
+    display_view = pn.Column(
+        pn.pane.Markdown("#### Ecosounds Recording Settings"),
+        pn.Row(filter_display, btn_edit, align="center")
+    )
     edit_view = pn.Column(
+        pn.pane.Markdown("#### Edit Ecosounds Recording Settings"),
         project_ids_input,
         region_ids_input,
         site_ids_input,
@@ -32,36 +51,284 @@ def build(vm):
 
 
     def _update_filter_display():
-        """Helper to fetch filters and update the UI state."""
+        """Decides whether to show the display_view or edit_view."""
         if not (vm.eng and vm.eng.db):
-            display_view.visible = False
-            edit_view.visible = False
+            editor_container.objects = [
+                pn.pane.Alert("Initialize the engine on the 'Config' tab to set up filters.", alert_type="warning")
+            ]
             return
 
         filters = vm.eng.get_baw_filters()
-        if filters:
-            filter_display.object = filters
-            display_view.visible = True
-            edit_view.visible = False
+        filter_display.object = _format_filters_for_display(filters)
+        # If filters exist and are not empty, show the display view.
+        if filters and filters[0]:
+            editor_container.objects = [display_view]
+        else: # Otherwise, show the edit view to prompt the user.
+            _populate_editors_from_filters()
+            editor_container.objects = [edit_view]
+
+
+    def _format_filters_for_display(filters: list) -> str:
+        """Human-readable formatting of the filters"""
+        if not filters or not filters[0]:
+            return "No filters set. Click 'Edit' to add one."
+
+        filter_dict = filters[0]
+        description_lines = []
+        
+        # Define the order and labels for the filters
+        filter_keys = {
+            "projects.id": "Projects",
+            "regions.id": "Regions",
+            "sites.id": "Sites"
+        }
+
+        for key, label in filter_keys.items():
+            if key in filter_dict and "in" in filter_dict[key]:
+                id_list = filter_dict[key]["in"]
+                if id_list:
+                    ids_str = ', '.join(map(str, id_list))
+                    description_lines.append(f"**{label}:** `{ids_str}`")
+
+        if not description_lines:
+            return "No filters set. Click 'Edit' to add one."
+
+        # Join the lines with an "OR"
+        return " <br> **OR** <br> ".join(description_lines)
+
+
+    def _format_filter_params_for_display(filter_params: dict, fallback_name: str = "Filter") -> str:
+        """Convert filter parameters to human-readable description."""
+        filter_parts = []
+        
+        if 'projects.id' in filter_params and 'in' in filter_params['projects.id']:
+            project_ids = ', '.join(map(str, filter_params['projects.id']['in']))
+            filter_parts.append(f"Projects: {project_ids}")
+        if 'regions.id' in filter_params and 'in' in filter_params['regions.id']:
+            region_ids = ', '.join(map(str, filter_params['regions.id']['in']))
+            filter_parts.append(f"Regions: {region_ids}")
+        if 'sites.id' in filter_params and 'in' in filter_params['sites.id']:
+            site_ids = ', '.join(map(str, filter_params['sites.id']['in']))
+            filter_parts.append(f"Sites: {site_ids}")
+        
+        return ' + '.join(filter_parts) if filter_parts else fallback_name
+
+
+    def _create_summary_table(result_sets):
+        """Create a summary table from the fetched results."""
+        if not result_sets:
+            return None
+        
+        rows = []
+        for i, result_set in enumerate(result_sets):
+            filter_params = result_set.get('filter_params', {})
+            counts = result_set.get('counts', {})
+            
+            # Use the abstracted function to get filter description
+            filter_desc = _format_filter_params_for_display(filter_params, f"Filter {i+1}")
+            
+            # Add rows for each species and label type
+            for species, label_counts in counts.items():
+                if 'positive' in label_counts:
+                    rows.append({
+                        'Filter': filter_desc,
+                        'Species': species,
+                        'Type': 'Positive',
+                        'Count': label_counts['positive']
+                    })
+                if 'negative' in label_counts:
+                    rows.append({
+                        'Filter': filter_desc,
+                        'Species': species,
+                        'Type': 'Negative', 
+                        'Count': label_counts['negative']
+                    })
+        
+        if not rows:
+            return None
+            
+        df = pd.DataFrame(rows)
+        # Reset index to ensure clean integer sequence starting from 0 and hide it
+        df = df.reset_index(drop=True)
+        return df
+
+
+    def _create_outcomes_table(outcomes_by_filter):
+        """Create a table showing the outcomes of adding labels to the database."""
+        if not outcomes_by_filter:
+            return None
+        
+        rows = []
+        
+        # Process each filter's outcomes
+        for filter_data in outcomes_by_filter:
+            filter_desc = filter_data['filter_desc']
+            outcomes_data = filter_data['outcomes']
+            
+            # Aggregate outcomes by species and type for this filter
+            species_type_outcomes = {}
+            
+            for source_id, labels_data in outcomes_data.items():
+                for label_str, type_data in labels_data.items():
+                    for label_type_str, outcome_list in type_data.items():
+                        # Create a key for this species/type combination
+                        key = (label_str, label_type_str)
+                        
+                        if key not in species_type_outcomes:
+                            species_type_outcomes[key] = {
+                                'added': 0, 'already_exists': 0, 'embedding_not_found': 0, 
+                                'replaced_type': 0, 'error': 0
+                            }
+                        
+                        # Count outcomes for this species/type
+                        for outcome_item in outcome_list:
+                            outcome = outcome_item.get('outcome', 'error')
+                            if outcome in species_type_outcomes[key]:
+                                species_type_outcomes[key][outcome] += 1
+            
+            # Create rows for this filter
+            for (label_str, label_type_str), outcome_counts in species_type_outcomes.items():
+                # Calculate total count (should match the original count if everything went right)
+                total_count = sum(outcome_counts.values())
+                
+                type_display = 'Positive' if label_type_str == 'pos' else 'Negative'
+                
+                rows.append({
+                    'Filter': filter_desc,
+                    'Species': label_str,
+                    'Type': type_display,
+                    'Count': total_count,
+                    'Added': outcome_counts['added'],
+                    'Already Exists': outcome_counts['already_exists'],
+                    'Embedding Not Found': outcome_counts['embedding_not_found'],
+                    'Replaced Type': outcome_counts['replaced_type'],
+                    'Error': outcome_counts['error']
+                })
+        
+        if not rows:
+            return None
+            
+        df = pd.DataFrame(rows)
+        df = df.reset_index(drop=True)
+        return df
+
+
+    def _create_details_table(filter_desc, species, label_type, outcome_type):
+        """Create a detailed table showing source/offset for a specific outcome."""
+        if not stash["outcomes"]:
+            return None
+            
+        rows = []
+        
+        # Process all filter data
+        for filter_data in stash["outcomes"]:
+            # If filter_desc is specified, only show data for that filter
+            if filter_desc and filter_data['filter_desc'] != filter_desc:
+                continue
+                
+            outcomes = filter_data['outcomes']
+            current_filter_desc = filter_data['filter_desc']
+            
+            # Process each source's outcomes
+            for source_id, labels_data in outcomes.items():
+                for label_str, type_data in labels_data.items():
+                    # If species is specified, only show data for that species
+                    if species and label_str != species:
+                        continue
+                        
+                    for label_type_str, outcome_list in type_data.items():
+                        current_label_type = 'Positive' if label_type_str == 'pos' else 'Negative'
+                        
+                        # If label_type is specified, only show data for that type
+                        if label_type and current_label_type != label_type:
+                            continue
+                        
+                        for outcome_item in outcome_list:
+                            current_outcome = outcome_item.get('outcome', 'error')
+                            
+                            # If outcome_type is specified, only show data for that outcome
+                            if outcome_type and current_outcome != outcome_type:
+                                continue
+                                
+                            rows.append({
+                                'Filter': current_filter_desc,
+                                'Species': label_str,
+                                'Type': current_label_type,
+                                'Source': source_id,
+                                'Offset': outcome_item.get('offset', 'N/A'),
+                                'Outcome': current_outcome
+                            })
+        
+        if rows:
+            df = pd.DataFrame(rows)
+            df = df.reset_index(drop=True)
+            return df
         else:
-            display_view.visible = False
-            edit_view.visible = True
-            # Clear fields if no filter exists
-            project_ids_input.value = ""
-            region_ids_input.value = ""
-            site_ids_input.value = ""
+            return None
+
+
+    def _create_all_details_table(outcomes_by_filter):
+        """Create a comprehensive table showing ALL outcome details."""
+        if not outcomes_by_filter:
+            return None
+        
+        rows = []
+        
+        # Process each filter's outcomes
+        for filter_data in outcomes_by_filter:
+            filter_desc = filter_data['filter_desc']
+            outcomes = filter_data['outcomes']
+            
+            for source_id, labels_data in outcomes.items():
+                for species, type_data in labels_data.items():
+                    for label_type_str, outcome_list in type_data.items():
+                        type_display = 'Positive' if label_type_str == 'pos' else 'Negative'
+                        
+                        for outcome_item in outcome_list:
+                            rows.append({
+                                'Filter': filter_desc,
+                                'Species': species,
+                                'Type': type_display,
+                                'Source': source_id,
+                                'Offset': outcome_item.get('offset', 'N/A'),
+                                'Outcome': outcome_item.get('outcome', 'N/A')
+                            })
+        
+        if not rows:
+            return None
+            
+        df = pd.DataFrame(rows)
+        df = df.reset_index(drop=True)
+        return df
+        """Automatically show embedding_not_found details if any exist."""
+        if not outcomes_by_filter:
+            return
+            
+        # Check if there are any embedding_not_found cases
+        has_missing = False
+        for filter_data in outcomes_by_filter:
+            outcomes = filter_data['outcomes']
+            for source_id, labels_data in outcomes.items():
+                for species, type_data in labels_data.items():
+                    for label_type_str, outcome_list in type_data.items():
+                        if any(item.get('outcome') == 'embedding_not_found' for item in outcome_list):
+                            has_missing = True
+                            break
+        
+        if has_missing:
+            # Show details for embedding_not_found
+            _show_outcome_details('', '', '', 'embedding_not_found')
 
 
     def _populate_editors_from_filters():
         """Helper to parse existing filters and fill the text inputs."""
         filters = vm.eng.get_baw_filters()
-        # Reset fields before populating
         project_ids_input.value, region_ids_input.value, site_ids_input.value = "", "", ""
 
         if not filters or not isinstance(filters, list) or not filters[0]:
             return
             
-        filter_dict = filters[0] # We assume the first filter in the list holds the IDs
+        filter_dict = filters[0]
 
         def get_ids(key):
             if key in filter_dict and "in" in filter_dict[key]:
@@ -74,50 +341,31 @@ def build(vm):
 
 
     def _toggle_to_edit_view(_):
-        """Callback for the 'Edit' button."""
+        """Swaps the container's content to the edit_view."""
         _populate_editors_from_filters()
-        display_view.visible = False
-        edit_view.visible = True
+        editor_container.objects = [edit_view]
 
 
     def _save_filters(_):
-        """Callback for 'Save'. Parses the 3 fields and generates the filter."""
+        """Saves filters and then switches back to the display view."""
         if not vm.eng: return vm.notify("Initialize on Config tab first.", "error")
 
-        inputs = {
-            "projects.id": project_ids_input.value,
-            "regions.id": region_ids_input.value,
-            "sites.id": site_ids_input.value
-        }
-
-        # Validate that at least one field is filled
+        inputs = {"projects.id": project_ids_input.value, "regions.id": region_ids_input.value, "sites.id": site_ids_input.value}
         if not any(val.strip() for val in inputs.values()):
-            vm.notify("Please enter IDs in at least one field.", "warn")
-            return
-
+            vm.notify("Please enter IDs in at least one field.", "warn"); return
         new_filter = {}
         try:
             for key, value_str in inputs.items():
-                if not value_str.strip():
-                    continue
-                
-                # Parse comma-separated string into a list of integers
+                if not value_str.strip(): continue
                 id_list = [int(s.strip()) for s in value_str.split(',') if s.strip()]
-                
-                if id_list:
-                    new_filter[key] = {"in": id_list}
-        
+                if id_list: new_filter[key] = {"in": id_list}
         except ValueError:
-            vm.notify("Invalid input. Please ensure all IDs are comma-separated numbers.", "error")
-            return
+            vm.notify("Invalid input. Please ensure all IDs are comma-separated numbers.", "error"); return
         
-        # The filter is a list containing one dictionary
-        final_filters = [new_filter]
-
         try:
-            vm.eng.set_baw_filters(final_filters)
+            vm.eng.set_baw_filters([new_filter])
             vm.notify("BAW filters saved successfully!", "success")
-            _update_filter_display()
+            _update_filter_display() 
         except Exception as e:
             vm.notify(f"Could not save filters: {e}", "error")
 
@@ -127,23 +375,67 @@ def build(vm):
         try:
             result = vm.eng.fetch_labels()
             stash["result_sets"] = result
-            log.object = f"Successfully fetched **{sum(len(rs['labels']) for rs in result)}** labels across {len(result)} result sets."
+            
+            # Create and display summary table
+            summary_df = _create_summary_table(result)
+            if summary_df is not None:
+                # Configure the DataFrame to not show index
+                summary_table.object = summary_df.style.hide(axis='index')
+            else:
+                summary_table.object = None
+            
+            total_labels = sum(len(rs['labels']) for rs in result)
+            log.object = f"Successfully fetched **{total_labels}** labels across {len(result)} result sets."
             btn_add.disabled = False
             vm.notify("Fetch successful. Ready to add to DB.", "success")
         except Exception as e:
             log.object = f"Error: {e}"
+            summary_table.object = None
             vm.notify(f"Fetch failed: {e}", "error")
 
     def _add(_):
         if not vm.eng: return vm.notify("Initialize first.", "error")
         if not stash["result_sets"]: return vm.notify("Fetch labels first.", "warn")
 
-        for result_set in stash["result_sets"]:
+        all_outcomes_by_filter = []
+        
+        for i, result_set in enumerate(stash["result_sets"]):
             try:
-                add_labels_to_db(vm.eng.db, vm.eng.config, result_set["labels"])
+                outcomes = add_labels_to_db(vm.eng.db, vm.eng.config, result_set["labels"])
+                
+                # Store outcomes with filter context
+                filter_params = result_set.get('filter_params', {})
+                filter_desc = _format_filter_params_for_display(filter_params, f"Filter {i+1}")
+                
+                all_outcomes_by_filter.append({
+                    'filter_desc': filter_desc,
+                    'filter_params': filter_params,
+                    'outcomes': outcomes
+                })
+                        
                 vm.notify("Labels added to DB.", "success")
             except Exception as e:
                 vm.notify(f"Insert failed: {e}", "error")
+                return
+        
+        # Store outcomes and create tables
+        stash["outcomes"] = all_outcomes_by_filter
+        outcomes_df = _create_outcomes_table(all_outcomes_by_filter)
+        if outcomes_df is not None:
+            outcomes_table.object = outcomes_df.style.hide(axis='index')
+            
+            # Create and show the comprehensive details table
+            details_df = _create_all_details_table(all_outcomes_by_filter)
+            if details_df is not None:
+                details_table.value = details_df
+                details_title.object = f"### All Outcome Details ({len(details_df)} records)"
+            else:
+                details_table.value = pd.DataFrame()
+                details_title.object = "### No outcome details available"
+        else:
+            outcomes_table.object = None
+            details_table.value = pd.DataFrame()
+            details_title.object = ""
 
 
     btn_edit.on_click(_toggle_to_edit_view)
@@ -151,20 +443,36 @@ def build(vm):
     btn_cancel.on_click(lambda _: _update_filter_display())
     btn_fetch.on_click(_fetch)
     btn_add.on_click(_add)
+    
+    # Set up click event for outcomes table
+    # outcomes_table.param.watch(_on_outcomes_table_click, 'clicks')
 
     _update_filter_display()
 
+    @pn.depends(vm.obs.ensure("engine_state").param.version, watch=True)
+    def _on_engine_state_change(_):
+        _update_filter_display()
+
     return pn.Column(
-        "## Labelled examples",
-        pn.Card(
-            display_view,
-            edit_view,
-            title=" Baw API Filters",
-            collapsible=True,
-            sizing_mode="stretch_width"
+        pn.pane.Markdown("## Labelled examples"),
+        pn.pane.Alert(
+            "Define a set of Ecosounds recordings by Project, Region, or Site IDs. "
+            "Labels will be fetched from annotations within these recordings.",
+            alert_type="info"
         ),
+
+        editor_container,
         pn.layout.Divider(),
         pn.Row(btn_fetch, btn_add),
         log,
+        pn.layout.Divider(),
+        pn.pane.Markdown("### Label Summary"),
+        summary_table,
+        pn.layout.Divider(),
+        pn.pane.Markdown("### Database Insert Outcomes"),
+        outcomes_table,
+        pn.layout.Divider(),
+        details_title,
+        details_table,
         sizing_mode="stretch_both",
     )

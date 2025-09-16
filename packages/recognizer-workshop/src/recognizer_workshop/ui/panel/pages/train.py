@@ -7,6 +7,8 @@ import tqdm
 from contextlib import contextmanager
 import panel as pn
 
+from recognizer_workshop.ui.panel.utils.patch_tqdm import patch_tqdm
+
 def build(vm):
     learning_rate = pn.widgets.FloatInput(name="learning_rate", value=1e-3, step=1e-4)
     num_steps     = pn.widgets.IntInput(name="num_steps", value=101, start=1)
@@ -149,32 +151,3 @@ def format_scores_df(scores: dict) -> pd.DataFrame:
 
 
 
-# We want to show progress of training in the panel UI
-# but it's looping through epoch inside the perch_hoplite training function, 
-# with a tdqm progress bar.
-# So, we modify tqdm to update a panel progress bar instead.
-
-
-class TqdmCallback(tqdm.tqdm):
-    """A custom tqdm class that updates a Panel progress bar."""
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.progress_bar = None
-
-    def update(self, n=1):
-        super().update(n)
-        if self.progress_bar:
-            # Update the Panel progress bar with the current percentage
-            self.progress_bar.value = int(self.n / self.total * 100)
-
-@contextmanager
-def patch_tqdm(progress_bar: pn.widgets.Progress):
-    """A context manager to temporarily replace tqdm.tqdm with our callback version."""
-    original_tqdm = tqdm.tqdm
-    TqdmCallback.progress_bar = progress_bar
-    tqdm.tqdm = TqdmCallback
-    try:
-        yield
-    finally:
-        tqdm.tqdm = original_tqdm
-        TqdmCallback.progress_bar = None

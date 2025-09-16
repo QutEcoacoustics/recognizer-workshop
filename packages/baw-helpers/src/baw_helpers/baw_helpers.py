@@ -195,14 +195,15 @@ def get_embeddings(
     return result
 
 
-def get_events_for_sites(baw_api, filter_params, tags=None):
+def get_events_for_sites_old(baw_api, filter_params, tags=None):
     """Get any audio recordings that have events for a specific region.
     region_index is the index of the region in the regions list.
     @param num: maximum number of audio recordings to get.
 
     This we can only use site_ids, so we need to get those if project or region ids are provided.
     """
-
+    
+    # 
     site_id = filter_params.get("site_id")
     project_id = filter_params.get("project_id")
     region_id = filter_params.get("region_id")
@@ -233,6 +234,29 @@ def get_events_for_sites(baw_api, filter_params, tags=None):
 
 
     return response.get("data", [])
+
+
+def get_events_for_sites(baw_api, filter_params, tags=None):
+    """Get any audio recordings that have events for a specific region.
+    region_index is the index of the region in the regions list.
+    @param num: maximum number of audio recordings to get.
+
+    This we can only use site_ids, so we need to get those if project or region ids are provided.
+    """
+    
+    ae_filter = filter_params.copy()
+
+    if tags is not None:
+        if isinstance(tags, str):
+            tags = [tags]
+        ae_filter['tags.text'] = { "in": tags }
+
+    response = baw_api.post("/audio_events/filter?disable_paging=true", data={"filter": ae_filter})
+    # maybe site by site? or if not then paging, but that is complicated
+
+
+    return response.get("data", [])
+
 
 
 def get_verifications_for_sites(api, event_ids=None, filter_params=None):

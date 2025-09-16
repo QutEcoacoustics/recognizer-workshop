@@ -1,6 +1,7 @@
 import panel as pn
 from pathlib import Path
-from recognizer_workshop.ui.panel.utils import resolve_query_uri, parse_target_score
+from recognizer_workshop.app.services.search import resolve_query_uri
+from recognizer_workshop.ui.panel.utils.utils import parse_target_score
 from recognizer_workshop.ui.panel.components.native.label_picker import build_active_label_picker
 
 def build(vm):
@@ -86,7 +87,9 @@ def build(vm):
         if not uri.value:
             return vm.notify("Please provide an ID, URL, or path.", "warn")
         try:
-            vm.ui.show_query_window_selector(uri.value)
+            # Normalize the query URI before passing it to the selector
+            resolved_uri = resolve_query_uri(uri.value, vm.eng.config.labeled_examples_folder)
+            vm.ui.show_query_window_selector(resolved_uri)
             vm.notify("Selector loaded.", "success")
         except Exception as e:
             vm.notify(f"Could not load remote: {e}", "error")

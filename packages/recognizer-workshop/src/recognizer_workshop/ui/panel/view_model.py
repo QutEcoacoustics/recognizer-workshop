@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from datetime import datetime
 import panel as pn
 import logging
-from recognizer_workshop.ui.panel.utils import PanelLogHandler
+from recognizer_workshop.ui.panel.utils.log_handler import PanelLogHandler
 
 
 
@@ -43,6 +43,7 @@ class ObservablesHub(dict):
 # but let's make it clearer by listing them here
 _observables_names = [
     "engine_state",  # any change to the engine so that status or other things can update
+    "config_state",  # config loaded/changed
     "target_labels", # active label selector updates when this changes
     "active_label", # when the active label is changed, so that the label selector can update the selected item
 ]

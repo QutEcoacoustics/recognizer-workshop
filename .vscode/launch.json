@@ -25,7 +25,7 @@
             "debug"
         ],
         "console": "integratedTerminal",
-        "justMyCode": true
+        "justMyCode": false
     },
     {
         "name": "JupyterLab: Launch and Debug Panel App",

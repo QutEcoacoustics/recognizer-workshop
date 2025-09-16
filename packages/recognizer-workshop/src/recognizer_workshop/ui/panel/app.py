@@ -1,28 +1,43 @@
-
 import os
 os.environ.setdefault("MPLBACKEND", "module://matplotlib_inline.backend_inline")
 
-
 import panel as pn
-from recognizer_workshop.ui.panel.view_model import ViewModel
-from recognizer_workshop.ui.panel.pages import config, labeled_examples, search, train, refine, inference, status
-
 import logging
-from recognizer_workshop.ui.panel.utils import PanelLogHandler
 
+from recognizer_workshop.ui.panel.view_model import ViewModel
+from recognizer_workshop.ui.panel.pages import config, create_database, labeled_examples, search, train, refine, inference, status
 from recognizer_workshop.ui.panel.adaptors import PanelUI
 
-# Without ipywidgets, might get blank panes or “unknown model” 
-# errors when embedding complex ipywidgets.
-# TODO: probably don't need this now that we use pure Panel components?
-pn.extension('ipywidgets', sizing_mode="stretch_width")
-print("Panel extension loaded.")
+# Load the tabulator extension for displaying DataFrames.
+
+pn.extension('tabulator', sizing_mode="stretch_width")
+
+# Don't think we need 'ipywidgets' anymore since we use pure Panel components
+#pn.extension('ipywidgets', 'tabulator', sizing_mode="stretch_width")
+
+error_banner = pn.pane.Alert(visible=False, sizing_mode="stretch_width")
+
+def global_exception_handler(ex):
+    # Log the full error to the server console for your own debugging
+    logging.error("An unhandled exception occurred", exc_info=ex)
+    # Display a user-friendly message in the app's UI
+    error_banner.object = (
+        "💥 **An unexpected error occurred!** Please try refreshing the page, "
+        "or click the 'Reset Session' button."
+    )
+    error_banner.alert_type = 'danger'
+    error_banner.visible = True
+
+pn.config.exception_handler = global_exception_handler
+
 
 def build_app(vm):
 
 
     tabs = pn.Tabs(
+
         ("Config",            config.build(vm)),
+        ("Database",          create_database.build(vm)),
         ("Labelled examples", labeled_examples.build(vm)),
         ("Search",            search.build(vm)),
         ("Train",             train.build(vm)),
@@ -33,7 +48,7 @@ def build_app(vm):
         sizing_mode="stretch_both",
     )
     return pn.Column(
-        "# Agile Modelling",
+        pn.Row("# Agile Modelling", error_banner),
         tabs,
         sizing_mode="stretch_both",
     )

@@ -1,6 +1,6 @@
 import panel as pn
 from pathlib import Path
-from recognizer_workshop.ui.panel.utils import resolve_query_uri, parse_target_score
+from recognizer_workshop.ui.panel.utils.utils import parse_target_score
 from recognizer_workshop.ui.panel.components.native.label_picker import build_active_label_picker
 
 def build(vm):

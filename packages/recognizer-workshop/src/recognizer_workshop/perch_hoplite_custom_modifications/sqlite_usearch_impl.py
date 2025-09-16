@@ -3,7 +3,8 @@ from perch_hoplite.db import interface
 
 
 import sqlite3
-from perch_hoplite.db.sqlite_usearch_impl import SQLiteUsearchDB, USEARCH_DTYPES, HOPLITE_FILENAME, UNDEX_FILENAME, USEARCH_CONFIG_KEY
+import perch_hoplite.db.interface as hoplite_interface
+from perch_hoplite.db.sqlite_usearch_impl import SQLiteUsearchDB, USEARCH_DTYPES, HOPLITE_FILENAME, USEARCH_CONFIG_KEY, UINDEX_FILENAME, _setup_sqlite_tables, _get_metadata, _insert_metadata
 
 from etils import epath
 from ml_collections import config_dict
@@ -83,11 +84,29 @@ class ThreadedSQLiteUsearchDB(SQLiteUsearchDB):
             db_path=db_path.as_posix(),
             db=db,
             ui=ui,
-            _ui_mem=ui_mem,
+            _ui_mem=ui_mem, 
             _ui_disk_view=ui_disk_view,
             embedding_dim=usearch_cfg.embedding_dim,
             embedding_dtype=usearch_cfg.dtype,
         )
+    
+
+    def update_label_type(self, embedding_id: int, label: str, new_type: hoplite_interface.LabelType):
+        """
+        Finds a label by its embedding_id and string, and updates its type.
+        """
+        cursor = self._get_cursor()
+        cursor.execute(
+            """
+            UPDATE hoplite_labels
+            SET type = ?
+            WHERE embedding_id = ? AND label = ?
+            """,
+            (new_type.value, embedding_id, label),
+        )
+
+
+
 
 
 

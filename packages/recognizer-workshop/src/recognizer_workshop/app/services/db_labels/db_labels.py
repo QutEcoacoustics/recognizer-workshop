@@ -107,7 +107,7 @@ def get_db_arids(db) -> set:
 
 
 
-def add_labels_to_db(db, config, items):
+def add_labels_to_db_old(db, config, items):
     """
     Add labels to the database.
     items is in the format:
@@ -161,6 +161,103 @@ def add_labels_to_db(db, config, items):
     print(f"Added {embedding_count} embeddings from {source_count} of {len(items.keys())} sources to the database.")
 
 
+import copy
+import logging
+log = logging.getLogger(__name__)
+
+def add_labels_to_db(db, config, items):
+    """
+    Add labels to the database.
+    items is in the format:
+    {
+        "source_id": {
+            "label_str": {
+                "pos": [offsets],
+                "neg": [offsets]
+    }
+    Returns:
+        A results dictionary in the same format as items, but with the offsets lists replaced by lists of dicts with offset and outcome.
+        The outcome can be one of:
+        - 'added': The label was successfully inserted.
+        - 'already_exists': The exact same label (including type) was already present.
+        - 'embedding_not_found': No embedding was found for the source/offset.
+        - 'replaced_type': A label with the same name but different type already exists, and the new type replaced it
+        - 'error': An unexpected database error occurred.
+    """
+
+    # results will be in the same format as the input items,
+    # but with the offsets lists replaced by lists of dicts with offset and outcome
+    results = copy.deepcopy(items)
+    
+
+    for source_id, labels_data in items.items():
+
+        # Query the database ONCE per source to get all its embeddings and offsets.
+        try:
+            source_embeddings = db.get_embeddings_by_source(
+                dataset_name=config.search_dataset_name,
+                source_id=source_id
+            )
+            # Create a fast lookup map of {offset: embedding_id}
+            offset_to_embedding_id = {
+                db.get_embedding_source(eid).offsets[0]: eid for eid in source_embeddings
+            }
+        except Exception as e:
+            log.error(f"Could not retrieve embeddings for source {source_id}: {e}")
+            offset_to_embedding_id = {} # Treat as if no embeddings were found
+
+        # --- Loop through the labels and offsets for this source ---
+        for label_str, type_data in labels_data.items():
+            for label_type_str, offsets in type_data.items():
+                
+                outcome_list = []
+                label_type = hoplite_interface.LabelType.POSITIVE if label_type_str == 'pos' else hoplite_interface.LabelType.NEGATIVE
+
+                for offset in offsets:
+                    outcome = "error" # Default outcome
+
+ 
+                    embedding_id = offset_to_embedding_id.get(offset)
+                    if embedding_id is None:
+                        outcome = "embedding_not_found"
+                    else:
+                        try:
+                            # check for duplicates. If the exact same label already exists, we skip it
+                            new_label = hoplite_interface.Label(embedding_id, label_str, label_type, config.annotator_id)
+                            existing_labels = db.get_labels(embedding_id)
+
+                            if new_label in existing_labels:
+                                outcome = "already_exists"
+                            else:
+                                # check if the label exists with a different type. 
+                                # if so, we replace it
+                                conflicting_label = next((l for l in existing_labels if l.label == new_label.label and l.type != new_label.type), None)
+                                if conflicting_label:
+                                    # --- REPLACE THE EXISTING LABEL ---
+                                    db.update_label_type(embedding_id, label_str, new_label.type)
+                                    outcome = "replaced_type"
+                                else:
+                                    # --- ADD THE NEW LABEL ---
+                                    db.insert_label(new_label)
+                                    outcome = "added"
+
+                        except Exception as e:
+                            log.error(f"Failed to insert label for embedding {embedding_id}: {e}")
+                            outcome = "error"
+
+                    outcome_list.append({'offset': offset, 'outcome': outcome})
+                
+
+                results[source_id][label_str][label_type_str] = outcome_list
+    
+
+    db.commit()
+    return results
+
+
+
+
+
 
 def labels_from_event_taggings(api, filter_params, target_labels):
     """
@@ -174,7 +271,11 @@ def labels_from_event_taggings(api, filter_params, target_labels):
     into the hoplite database as negative label for the target label.
     """
 
-    events = get_events_with_verifications_and_tags(api, filter_params, target_labels)
+    # convert our target label objects to baw tags:
+    tags = [l.get_baw_tags()[0] for l in target_labels]
+    
+    # all events, not just those with the target tags - we need these to determine negative labels
+    events = get_events_with_verifications_and_tags(api, filter_params, tags)
 
     # for each event, determine if it is trusted and its type (positive or negative)
 
@@ -207,7 +308,9 @@ def labels_from_event_taggings(api, filter_params, target_labels):
             if segment['start'] not in items[source]:
                 items[source][segment['start']] = {}
 
-            for label_str in target_labels:
+            for label in target_labels:
+                label_str = str(label) # the string representation of the label, e.g. "magpie (song)"
+                tag_str = label.get_baw_tags()[0] # the baw tag, e.g. "Magpie song"
                 if label_str not in items[source][segment['start']]:
                     items[source][segment['start']][label_str] = None
                 if label_str not in counts:
@@ -215,22 +318,25 @@ def labels_from_event_taggings(api, filter_params, target_labels):
 
                 for tagging in event.get('taggings', []):
                     if items[source][segment['start']][label_str] == 'pos':
-                        # this label for this source:offset is already positive, so we don't need to do anything
+                        # this label for this source:offset is already positive from a previous label or tagging, 
+                        # so we don't need to do anything
                         continue
 
-                    if tagging['tag']['text'] == label_str and tagging['type'] == 'positive':
+                    cur_label_matches_tag = (tagging['tag']['text'] == tag_str)
+
+                    if cur_label_matches_tag and tagging['type'] == 'positive':
                         items[source][segment['start']][label_str] = 'pos'
                         counts[label_str]['positive'] += 1
-                    elif tagging['tag']['text'] == label_str and tagging['type'] == 'negative':
+                    elif cur_label_matches_tag and tagging['type'] == 'negative':
                         items[source][segment['start']][label_str] = 'neg'
                         counts[label_str]['negative'] += 1
-                    elif tagging['tag']['text'] != label_str and tagging['type'] == 'positive':
+                    elif not cur_label_matches_tag and tagging['type'] == 'positive':
                         items[source][segment['start']][label_str] = 'neg'
                         counts[label_str]['negative'] += 1
                     
                     # Note: unverified taggings which require verification will not have a tagging['type'], so are ignored
                     # Note: we don't add a positive label for the true class where a tagging has been verified as FP (negative)
-                    #       because we don't have that information. 
+                    #       because we don't have that information (and we probably don't care)
     
     print(f'counts: {counts}')
 
@@ -251,20 +357,22 @@ def labels_from_event_taggings(api, filter_params, target_labels):
                         items_for_insert[source][label_str]['neg'].append(offset)
 
 
-    return items_for_insert
+    return items_for_insert, counts
 
 
 
-def get_events_with_verifications_and_tags(api, filter_params, target_labels=None):
+def get_events_with_verifications_and_tags(api, filter_params, target_tags=None):
     """
-    For the target label, get all events that have that tag.
+    Get all events for the given filter params (site, project, region etc). 
+    We don't filter by tags here, because we want to get non-target events too, to use as negative examples.
     Then get all verifications for those events, and attach them to the taggings. 
     """
 
-    if target_labels is None:
-        target_labels = []
-    elif isinstance(target_labels, str):
-        target_labels = [target_labels]
+
+    if target_tags is None:
+        target_tags = []
+    elif isinstance(target_tags, str):
+        target_tags = [target_tags]
 
     # these are non-taxonomic tags that have been used to describe something
     # which should be included as a negative example for the targets
@@ -316,7 +424,7 @@ def get_events_with_verifications_and_tags(api, filter_params, target_labels=Non
         # remove non-taxonomic taggings except for the target labels
         event['taggings'] = [tagging 
                             for tagging in event.get('taggings', []) 
-                            if tagging['tag']['text'] in target_labels + special_tags or tagging['tag'].get('is_taxonomic', False)]
+                            if tagging['tag']['text'] in target_tags + special_tags or tagging['tag'].get('is_taxonomic', False)]
         
         print(f"Event {event_id} has {len(event.get('taggings', []))} taggings after filtering.")
 

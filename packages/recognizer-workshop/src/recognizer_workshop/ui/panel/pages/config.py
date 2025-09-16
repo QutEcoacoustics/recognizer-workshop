@@ -1,14 +1,14 @@
+"""Configuration page for the recognizer workshop UI."""
+
+# Standard library imports
 from functools import partial
 from pathlib import Path
-from tkinter import dialog
+
+# Third-party imports
 import panel as pn
 
-from datetime import datetime
-
-
+# Local imports
 from recognizer_workshop.app.agile_engine import AgileConfig, agile_state, get_recent_files
-from recognizer_workshop.ui.panel.adaptors import PanelUI
-from recognizer_workshop.ui.panel.utils import ppath
 
 # TODO: tidy this up
 try:
@@ -22,6 +22,14 @@ except ImportError:
 
 
 def build(vm):
+    """Build the configuration page UI.
+    
+    Args:
+        vm: The view model containing application state
+        
+    Returns:
+        Panel Column containing the configuration interface
+    """
     # --- WIDGETS ---
 
     # config_path_widget = pn.widgets.TextInput(
@@ -56,57 +64,141 @@ def build(vm):
 
 
 
-    # text inputs for config fields, with values coming from the loaded config
-    annotator_id = pn.widgets.TextInput(name="Annotator", value=vm.config.annotator_id)
-    db_path = pn.widgets.TextInput(name="DB path (Directory)", value=str(vm.config.db_path or ""))
-    labeled_dir = pn.widgets.TextInput(name="Labeled examples folder", value=str(vm.config.labeled_examples_folder or ""))
-    models_dir = pn.widgets.TextInput(name="Models folder", value=str(vm.config.models_folder or ""))
-    preds_dir = pn.widgets.TextInput(name="Predictions folder", value=str(vm.config.predictions_folder or ""))
-    domain = pn.widgets.TextInput(name="Workbench API domain", value=vm.config.baw_config.get("domain", ""))
-    auth_token = pn.widgets.TextInput(name="Workbench API token", value=vm.config.baw_config.get("auth_token", ""))
-
     # --- BUTTONS ---
     btn_start_engine = pn.widgets.Button(name="Start Engine", button_type="primary")
 
     # Label editor populated only after the engine has started successfully.
     labels_editor_placeholder = pn.Column(sizing_mode="stretch_width")
 
+    # Default values for new configurations
+    default_paths = {
+        'db_path': Path("db"),
+        'labeled_examples_folder': Path("labeled_examples"),
+        'models_folder': Path("models"),
+        'predictions_folder': Path("predictions"),
+    }
+    
+    default_api_domain = "https://api.ecosounds.org"
+
+    # text inputs for config fields, with values coming from the loaded config
+    annotator_id = pn.widgets.TextInput(name="Annotator", value=vm.config.annotator_id)
+    domain = pn.widgets.TextInput(name="Workbench API domain", value=vm.config.baw_config.get("domain", ""))
+    auth_token = pn.widgets.TextInput(name="Workbench API token", value=vm.config.baw_config.get("auth_token", ""))
+
+    # Advanced path configuration (hidden by default)
+    db_path = pn.widgets.TextInput(name="DB path (Directory)", value=str(vm.config.db_path or ""))
+    labeled_dir = pn.widgets.TextInput(name="Labeled examples folder", value=str(vm.config.labeled_examples_folder or ""))
+    models_dir = pn.widgets.TextInput(name="Models folder", value=str(vm.config.models_folder or ""))
+    preds_dir = pn.widgets.TextInput(name="Predictions folder", value=str(vm.config.predictions_folder or ""))
+    
+    # Advanced section toggle
+    show_advanced = pn.widgets.Checkbox(name="Show Advanced Path Settings", value=False)
+    advanced_section = pn.Column(visible=False, sizing_mode="stretch_width")
+
+    def _print_paths(prefix=""):
+        print(f'{prefix} Config paths: {vm.config.db_path}, {vm.config.labeled_examples_folder}, {vm.config.models_folder}, {vm.config.predictions_folder}')
+
+    def set_default_paths_if_empty():
+        """Set default relative paths and other default values if they're not already set."""
+        # Set relative paths as defaults - these will be resolved to absolute when saved/loaded
+        if not vm.config.db_path:
+            vm.config.db_path = default_paths['db_path']
+        if not vm.config.labeled_examples_folder:
+            vm.config.labeled_examples_folder = default_paths['labeled_examples_folder']
+        if not vm.config.models_folder:
+            vm.config.models_folder = default_paths['models_folder']
+        if not vm.config.predictions_folder:
+            vm.config.predictions_folder = default_paths['predictions_folder']
+            
+        # Set default API domain if not already set
+        if not vm.config.baw_config.get("domain"):
+            vm.config.baw_config["domain"] = default_api_domain
+
+    def toggle_advanced_visibility(*_):
+        """Toggle visibility of advanced path settings."""
+        advanced_section.visible = show_advanced.value
+
+    def _has_custom_paths():
+        """Check if any custom paths are set in the config."""
+        return bool(
+            str(vm.config.db_path) == str(default_paths['db_path']) or
+            str(vm.config.labeled_examples_folder) == str(default_paths['labeled_examples_folder']) or
+            str(vm.config.models_folder) == str(default_paths['models_folder']) or
+            str(vm.config.predictions_folder) == str(default_paths['predictions_folder'])
+        )
+    
+
     def sync_config_to_ui():
         """Updates all UI widgets from the current vm.config object."""
-        annotator_id.value = vm.config.annotator_id
-        db_path.value = str(vm.config.db_path or "")
-        labeled_dir.value = str(vm.config.models_folder)
-        models_dir.value = str(vm.config.models_folder)
-        preds_dir.value = str(vm.config.predictions_folder)
-        path_str = str(vm.config.config_path) if vm.config.config_path else "Unsaved Configuration"
-        current_config_path_display.value = f"<b>Current File:</b> {path_str}"
-        btn_start_engine.disabled = not vm.config.config_path
+        # Use a flag to prevent autosave feedback loop
+        if hasattr(sync_config_to_ui, '_syncing'):
+            return  # Prevent recursive calls
+            
+        sync_config_to_ui._syncing = True
+        try:
+            annotator_id.value = vm.config.annotator_id
+            domain.value = vm.config.baw_config.get("domain", default_api_domain)
+            auth_token.value = vm.config.baw_config.get("auth_token", "")
+            _print_paths("1.")
+            
+            # Capture all path values at once to avoid side effects from individual access
+            db_path_val = str(vm.config.db_path or "")
+            labeled_dir_val = str(vm.config.labeled_examples_folder or "")
+            models_dir_val = str(vm.config.models_folder or "")
+            preds_dir_val = str(vm.config.predictions_folder or "")
+            _print_paths("2.")
+            
+            # Update advanced path fields with captured values
+            db_path.value = db_path_val
+            labeled_dir.value = labeled_dir_val
+            models_dir.value = models_dir_val
+            preds_dir.value = preds_dir_val
+            
+            # Show advanced section if any paths are customized (non-default)
+            has_custom_paths = _has_custom_paths()
+            show_advanced.value = has_custom_paths
+            advanced_section.visible = has_custom_paths
+            
+            path_str = str(vm.config.config_path) if vm.config.config_path else "Unsaved Configuration"
+            current_config_path_display.value = f"<b>Current File:</b> {path_str}"
+            btn_start_engine.disabled = not vm.config.config_path
+        finally:
+            del sync_config_to_ui._syncing
 
     def sync_ui_to_config():
         """Updates the vm.config object from all UI widgets."""
         vm.config.annotator_id = annotator_id.value
+        vm.config.baw_config["domain"] = domain.value
+        vm.config.baw_config["auth_token"] = auth_token.value
+        
+        # Always update paths from widgets (they contain default values when not advanced)
         vm.config.db_path = Path(db_path.value) if db_path.value else None
         vm.config.labeled_examples_folder = Path(labeled_dir.value) if labeled_dir.value else None
         vm.config.models_folder = Path(models_dir.value) if models_dir.value else None
         vm.config.predictions_folder = Path(preds_dir.value) if preds_dir.value else None
-        vm.config.baw_config["domain"] = domain.value
-        vm.config.baw_config["auth_token"] = auth_token.value
 
 
-    def _autosave(*events):
-        """Syncs UI to the config object and saves it if a path exists."""
+    def _autosave(*_events):
+        """Syncs UI to the config object and saves it if a config path exists."""
+        # Don't autosave if we're currently syncing config to UI (prevents feedback loop)
+        if hasattr(sync_config_to_ui, '_syncing'):
+            return
+            
         sync_ui_to_config()
         if vm.config.config_path:
             try:
                 vm.config.save()
                 vm.notify("Autosaved.", "info")
-            except Exception as e:
+            except (FileNotFoundError, PermissionError, OSError) as e:
                 vm.notify(f"Autosave failed: {e}", "error")
+        # will trigger watchers of the config_state
+        vm.obs.bump("config_state")
 
 
-    def _on_new_click(_):
+    def _on_new_click(_event):
         """Resets the current configuration to a blank, unsaved state."""
         vm.config.reset()
+        set_default_paths_if_empty()  # Set default relative paths for new config
         sync_config_to_ui()
         vm.notify("New configuration created. Fill in the details and 'Save As'.", "info")
 
@@ -150,7 +242,8 @@ def build(vm):
         btn_open.on_click(_on_open)
 
         dialog = Dialog(
-            pn.Column(dialog_content, pn.Row(btn_cancel, btn_open)),
+            pn.Column(dialog_content, 
+                      pn.Row(btn_cancel, btn_open)),
             title="Open Configuration File"
         )
         dialogs_container[:] = [dialog]
@@ -186,6 +279,7 @@ def build(vm):
             try:
                 sync_ui_to_config()
                 vm.config.save_as(save_path)
+                set_default_paths_if_empty()  # Set default paths after saving
                 sync_config_to_ui()  # Update path display and enable engine button
                 vm.notify(f"Saved new file: {save_path.name}", "success")
             except Exception as ex:
@@ -211,14 +305,23 @@ def build(vm):
 
     def open_file_selector(target_widget, is_directory, event):
         """Opens a file selector dialog and updates the target widget."""
-        start_val = (target_widget.value or "").strip()
+        def update_target(value):
+            target_widget.value = str(Path(value))
+        return open_file_selector_dialog(update_target, is_directory, target_widget.value, event)
+
+
+    def open_file_selector_dialog(select_callback, 
+                           is_directory,
+                           start_value="",
+                           event=None):
+        """Opens a file selector dialog and updates the target widget."""
+        start_val = start_value.strip()
         start_path = Path(start_val).expanduser() if start_val else Path.home()
         start_dir = start_path if start_path.is_dir() else start_path.parent
 
         file_selector = pn.widgets.FileSelector(
             directory=str(start_dir),
-            only_files=not is_directory,
-            height=300,
+            only_files=not is_directory
         )
 
         btn_cancel = pn.widgets.Button(name="Cancel", button_type="danger")
@@ -230,21 +333,71 @@ def build(vm):
         def _on_select(evt):
             if file_selector.value:
                 # For directories, take the selected directory; for files, take the selected file.
-                target_widget.value = file_selector.value[0]
+                select_callback(file_selector.value[0])
             dialog.open = False
+            
 
         btn_cancel.on_click(_on_cancel)
         btn_select.on_click(_on_select)
 
+        dialog_content = pn.Column(
+            file_selector,
+        )
+
         dialog = Dialog(
-            pn.Column(
-                pn.pane.Markdown(f"### Select {'Directory' if is_directory else 'File'}"),
-                file_selector,
-                pn.Row(btn_cancel, btn_select),
-            ),
+            pn.Column(dialog_content, 
+                      pn.Row(btn_cancel, btn_select)),
             title=f"Select {'Directory' if is_directory else 'File'}",
         )
+
+
+        dialogs_container[:] = [dialog]
         dialog.open = True
+
+
+    # Set up advanced section with path widgets now that open_file_selector is defined
+    advanced_section.objects = [
+        pn.pane.Markdown("Configure custom paths for database and folders. When left empty, defaults relative to config file will be used."),
+        pn.Row(
+            db_path, 
+            pn.widgets.Button(
+                name="📂", 
+                width=50,
+                on_click=partial(open_file_selector, db_path, True)
+            ),
+            sizing_mode="stretch_width"
+        ),
+        pn.Row(
+            labeled_dir, 
+            pn.widgets.Button(
+                name="📂", 
+                width=50,
+                on_click=partial(open_file_selector, labeled_dir, True)
+            ),
+            sizing_mode="stretch_width"
+        ),
+        pn.Row(
+            models_dir, 
+            pn.widgets.Button(
+                name="📂", 
+                width=50,
+                on_click=partial(open_file_selector, models_dir, True)
+            ),
+            sizing_mode="stretch_width"
+        ),
+        pn.Row(
+            preds_dir, 
+            pn.widgets.Button(
+                name="📂", 
+                width=50,
+                on_click=partial(open_file_selector, preds_dir, True)
+            ),
+            sizing_mode="stretch_width"
+        ),
+    ]
+
+    # Connect the toggle checkbox to show/hide advanced section
+    show_advanced.param.watch(toggle_advanced_visibility, 'value')
 
 
     def _make_engine(_):
@@ -272,10 +425,10 @@ def build(vm):
             tags_success = vm.eng.fetch_workbench_tags()
             if tags_success:
                 vm.notify("Tags fetched successfully", "success")
-                labels_editor_placeholder.objects = [vm.ui.view_target_labels(vm.eng)]
             else:
                 vm.notify("Failed to fetch tags", "error")
 
+            # Create labels editor regardless of tag fetch success
             labels_editor_placeholder.objects = [vm.ui.view_target_labels(vm.eng)]
 
             print("before", vm.obs)
@@ -291,7 +444,7 @@ def build(vm):
 
 
     # --- BINDINGS ---
-    config_widgets = [annotator_id, db_path, labeled_dir, models_dir, preds_dir, domain, auth_token]
+    config_widgets = [annotator_id, domain, auth_token, show_advanced, db_path, labeled_dir, models_dir, preds_dir]
     for widget in config_widgets:
         widget.param.watch(_autosave, 'value')
     btn_new.on_click(_on_new_click)
@@ -299,44 +452,71 @@ def build(vm):
     btn_save.on_click(_autosave) 
     btn_save_as.on_click(_on_save_as_click)
     btn_start_engine.on_click(_make_engine)
+    
+    # Set up advanced section toggle
+    show_advanced.param.watch(toggle_advanced_visibility, 'value')
 
+    # Initialize default paths for new configurations
+    _print_paths("0.0")
+    if is_new_unsaved_config:
+        set_default_paths_if_empty()
+    _print_paths("0.1")
     sync_config_to_ui()
 
     if is_new_unsaved_config:
         vm.notify("Welcome! Please configure your project and click 'Save As' to begin.", "warn")
     else:
-        vm.notify(f"Loaded recent project: {vm.config.config_path.name}", "success")
+        # Safe access to config_path.name
+        config_name = vm.config.config_path.name if vm.config.config_path else "Unknown"
+        vm.notify(f"Loaded recent project: {config_name}", "success")
 
     # --- LAYOUT ---
-
-    file_buttons = pn.Row(btn_new, btn_open, btn_save, btn_save_as, current_config_path_display)
+    file_buttons = pn.Row(btn_new, btn_open, btn_save, btn_save_as, sizing_mode="stretch_width")
+    config_status = pn.Row(current_config_path_display, save_status, sizing_mode="stretch_width")
 
     return pn.Column(
-        "## Config",
-        pn.Row(file_buttons, save_status, annotator_id, sizing_mode="stretch_width"),
+        "## Configuration",
+        pn.pane.Markdown(
+            "Configure your project settings, database paths, and API connections. "
+            "Click 'Start Engine' when ready to begin."
+        ),
+        
+        # File operations section
+        "### Project File",
+        file_buttons,
+        config_status,
+        
+        # Configuration sections
         pn.Row(
-            pn.Column("## Workbench Connection", domain, auth_token, 
-                      #btn_test_connection
-                      ),
+            # Left column - Workbench connection
             pn.Column(
-                "## Database",
-                pn.Row(db_path, pn.widgets.Button(name="Select...", on_click=partial(open_file_selector, db_path, False))),
-                #btn_init_db,
-                "## Output Folders",
-                pn.Row(labeled_dir, pn.widgets.Button(name="Select...", on_click=partial(open_file_selector, labeled_dir, False))),
-                pn.Row(models_dir, pn.widgets.Button(name="Select...", on_click=partial(open_file_selector, models_dir, False))),
-                pn.Row(preds_dir, pn.widgets.Button(name="Select...", on_click=partial(open_file_selector, preds_dir, False)))
-            )
+                "### 🌐 Workbench Connection", 
+                annotator_id,
+                domain, 
+                auth_token,
+                width=400,
+                sizing_mode="stretch_width"
+            ),
+            
+            # Right column - Basic settings
+            pn.Column(
+                "### 📁 Folder Configuration",
+                show_advanced,
+                advanced_section,
+                sizing_mode="stretch_width"
+            ),
+            sizing_mode="stretch_width"
         ),
+        
+        # Engine initialization
+        "### 🚀 Engine",
         pn.Row(btn_start_engine, sizing_mode="stretch_width"),
+        
+        # Labels configuration (appears after engine start)
         pn.layout.Divider(),
-        pn.pane.Markdown("## 3. Define Target Labels"),
-        pn.pane.Alert(
-            "Define one or more target species. For each species, you can optionally specify distinct call types. "
-            "If no call types are given, all sounds for that species will be treated as a single class.",
-            alert_type="info"
-        ),
         labels_editor_placeholder,
+        
+        # Hidden dialogs container
         dialogs_container,
         sizing_mode="stretch_both",
     )

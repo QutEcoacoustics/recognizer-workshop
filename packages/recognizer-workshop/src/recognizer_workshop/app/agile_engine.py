@@ -697,23 +697,28 @@ class agile_state:
         This is saved as hoplite db metadata and is used to get events from the workbench for
         adding labels to embeddings
         """
-
-        baw_filters = self.db.get_metadata('baw_filters')
+        try:
+            baw_filters = self.db.get_metadata('baw_filters')
+        except KeyError:
+            baw_filters = None
 
         if not baw_filters:
             log.warning("No baw_filters found in db metadata")
             return None
-
-        return baw_filters
+        
+        return baw_filters.get('filters', None)
     
 
-    def set_baw_filters(self, baw_filters):
+    def set_baw_filters(self, baw_filters: list):
         """returns a list of audio_recording filter critera used to create the database
         This is saved as hoplite db metadata and is used to get events from the workbench for
         adding labels to embeddings
         """
 
-        self.db.insert_metadata('baw_filters', baw_filters)
+        # db metadata needs to be a config dict
+        metadata = config_dict.ConfigDict({'filters': baw_filters})
+
+        self.db.insert_metadata('baw_filters', metadata)
         self.db.commit()
 
 
@@ -725,11 +730,13 @@ class agile_state:
             return "no_baw_filters"
         
         all_results = []
-        
+
+        # baw_filters is a list, so repeat the process for each one
         for filter_params in baw_filters:
-            labels = labels_from_event_taggings(self.baw_api, filter_params, self.config.target_labels)
+            labels, counts = labels_from_event_taggings(self.baw_api, filter_params, self.config.target_labels)
             all_results.append({
                 "filter_params": filter_params,
+                "counts": counts,
                 "labels": labels
             })
 
@@ -777,10 +784,11 @@ class agile_state:
                     if not provided, it will just show a link with a placeholder. 
 
         """
-        
+        #todo: maybe project id or current date too
         upload_name = f"Agile Modelling: {self.get_target_label_description()}"
-        upload_detections(csv_path=csv_path, upload_name=upload_name, 
+        success_status, link = upload_detections(csv_path=csv_path, upload_name=upload_name, 
                           project_id=project_id, limit=limit, baw_api=self.baw_api)
+        return success_status, link
         
 
 
