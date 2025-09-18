@@ -5,7 +5,10 @@ from holoviews import opts, streams
 from bokeh.palettes import Category20
 # The service now handles all the backend logic
 from recognizer_workshop.app.services import umap_service
-
+import colorcet as cc
+from holoviews.operation import datashader
+from holoviews.operation.datashader import dynspread
+import datashader as ds
 # HoloViews extension is now loaded in app.py to prevent conflicts
 
 def build(vm):
@@ -131,13 +134,20 @@ def build(vm):
         # Add background layer if there are unlabeled points
         if not unlabeled_df.empty:
             # Create points for unlabeled data with small, subtle styling
-            unlabeled_styled = unlabeled_points.opts(
-                size=2, alpha=0.3, color='lightgray',
-                tools=['pan', 'wheel_zoom', 'reset'],
-                width=1000, height=700  # Reduced height from 800 to 700
-            )
-            plot_elements.append(unlabeled_styled)
-        
+            # unlabeled_styled = unlabeled_points.opts(
+            #     size=2, alpha=0.3, color='lightgray',
+            #     tools=['pan', 'wheel_zoom', 'reset'],
+            #     width=1000, height=700  # Reduced height from 800 to 700
+            # )
+            # plot_elements.append(unlabeled_styled)
+            
+            background = datashader.datashade(unlabeled_points, aggregator=ds.count(), cmap=cc.gray)
+
+            spread_background = dynspread(background, threshold=0.7, max_px=5)
+            
+            plot_elements.append(spread_background)
+
+
         # Add interactive layer if there are labeled points (for visual distinction)
         # These need to be added AFTER the background so they appear on top
         if not labeled_df.empty:

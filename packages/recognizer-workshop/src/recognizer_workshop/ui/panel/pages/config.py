@@ -68,7 +68,7 @@ def build(vm):
 
 
     # --- BUTTONS ---
-    btn_start_engine = pn.widgets.Button(name="Start Engine", button_type="primary")
+    btn_start_engine = pn.widgets.Button(name="🚀 Start Engine", button_type="primary")
     
     def update_engine_button():
         """Update the engine button text and state based on current engine status."""
@@ -372,12 +372,12 @@ def build(vm):
 
     # Set up advanced section with path widgets now that open_file_selector is defined
     advanced_section.objects = [
-        pn.pane.Markdown("Configure custom paths for database and folders. When left empty, defaults relative to config file will be used."),
+        pn.pane.Markdown("Configure custom paths for database and folders."),
         pn.Row(
             db_path, 
             pn.widgets.Button(
                 name="📂", 
-                width=50,
+                width=60,
                 on_click=partial(open_file_selector, db_path, True)
             ),
             sizing_mode="stretch_width"
@@ -386,7 +386,7 @@ def build(vm):
             labeled_dir, 
             pn.widgets.Button(
                 name="📂", 
-                width=50,
+                width=70,
                 on_click=partial(open_file_selector, labeled_dir, True)
             ),
             sizing_mode="stretch_width"
@@ -395,7 +395,7 @@ def build(vm):
             models_dir, 
             pn.widgets.Button(
                 name="📂", 
-                width=50,
+                width=60,
                 on_click=partial(open_file_selector, models_dir, True)
             ),
             sizing_mode="stretch_width"
@@ -404,7 +404,7 @@ def build(vm):
             preds_dir, 
             pn.widgets.Button(
                 name="📂", 
-                width=50,
+                width=70,
                 on_click=partial(open_file_selector, preds_dir, True)
             ),
             sizing_mode="stretch_width"
@@ -493,8 +493,8 @@ def build(vm):
             _make_engine(None)
 
     # --- LAYOUT ---
-    file_buttons = pn.Row(btn_new, btn_open, btn_save, btn_save_as, sizing_mode="stretch_width")
-    config_status = pn.Row(current_config_path_display, save_status, sizing_mode="stretch_width")
+    file_buttons = pn.Row(btn_new, btn_open, btn_save, btn_save_as, sizing_mode="fixed")
+    config_status = pn.Row(current_config_path_display, save_status, sizing_mode="fixed")
 
     return pn.Column(
         "## Configuration",
@@ -516,27 +516,24 @@ def build(vm):
                 annotator_id,
                 domain, 
                 auth_token,
-                width=400,
-                sizing_mode="stretch_width"
+                show_advanced,
+                advanced_section,
+                width=300,
+                sizing_mode="fixed"
             ),
             
             # Right column - Basic settings
             pn.Column(
-                "### 📁 Folder Configuration",
-                show_advanced,
-                advanced_section,
+                labels_editor_placeholder,
                 sizing_mode="stretch_width"
             ),
             sizing_mode="stretch_width"
         ),
         
         # Engine initialization
-        "### 🚀 Engine",
         pn.Row(btn_start_engine, sizing_mode="stretch_width"),
         
-        # Labels configuration (appears after engine start)
-        pn.layout.Divider(),
-        labels_editor_placeholder,
+       
         
         # Hidden dialogs container
         dialogs_container,
