@@ -105,6 +105,15 @@ class ThreadedSQLiteUsearchDB(SQLiteUsearchDB):
             (new_type.value, embedding_id, label),
         )
 
+    def get_all_labels(self) -> list[tuple]:
+        """
+        Efficiently fetches all labels (embedding_id, label, type) 
+        from the database in a single query.
+        """
+        cursor = self._get_cursor()
+        cursor.execute("SELECT embedding_id, label, type FROM hoplite_labels")
+        return cursor.fetchall()
+
 
 
 

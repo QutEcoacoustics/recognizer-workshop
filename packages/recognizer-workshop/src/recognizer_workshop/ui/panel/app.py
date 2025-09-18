@@ -5,12 +5,16 @@ import panel as pn
 import logging
 
 from recognizer_workshop.ui.panel.view_model import ViewModel
-from recognizer_workshop.ui.panel.pages import config, create_database, labeled_examples, search, train, refine, inference, status
+from recognizer_workshop.ui.panel.pages import config, create_database, labeled_examples, search, explore, train, refine, inference, status
 from recognizer_workshop.ui.panel.adaptors import PanelUI
 
 # Load the tabulator extension for displaying DataFrames.
 
 pn.extension('tabulator', sizing_mode="stretch_width")
+
+# Load HoloViews extension upfront to prevent conflicts when explore page loads
+import holoviews as hv
+hv.extension('bokeh')
 
 # Don't think we need 'ipywidgets' anymore since we use pure Panel components
 #pn.extension('ipywidgets', 'tabulator', sizing_mode="stretch_width")
@@ -40,6 +44,7 @@ def build_app(vm):
         ("Database",          create_database.build(vm)),
         ("Labelled examples", labeled_examples.build(vm)),
         ("Search",            search.build(vm)),
+        ("Explore",           explore.build(vm)),
         ("Train",             train.build(vm)),
         ("Refine",            refine.build(vm)),
         ("Inference",         inference.build(vm)),

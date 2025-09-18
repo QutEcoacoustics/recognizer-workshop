@@ -10,11 +10,15 @@ def build(vm):
     btn_fetch = pn.widgets.Button(name="Fetch labels from server", button_type="primary")
     btn_add   = pn.widgets.Button(name="Add fetched labels to DB", button_type="success", disabled=True)
     log       = pn.pane.Markdown("")
-    summary_table = pn.pane.DataFrame(sizing_mode="stretch_width")
-    outcomes_table = pn.pane.DataFrame(sizing_mode="stretch_width")
+    # Initialize tables with empty DataFrames to prevent None value errors
+    summary_table = pn.pane.DataFrame(pd.DataFrame(), sizing_mode="stretch_width")
+    outcomes_table = pn.pane.DataFrame(pd.DataFrame(), sizing_mode="stretch_width")
     
     # Details table - shows ALL outcomes, sortable and filterable
+    # Initialize with empty DataFrame that has the expected columns
+    empty_details_df = pd.DataFrame(columns=['Filter', 'Species', 'Type', 'Source', 'Offset', 'Outcome'])
     details_table = pn.widgets.Tabulator(
+        value=empty_details_df,
         sizing_mode="stretch_width", 
         pagination='remote', 
         page_size=50,
@@ -382,7 +386,7 @@ def build(vm):
                 # Configure the DataFrame to not show index
                 summary_table.object = summary_df.style.hide(axis='index')
             else:
-                summary_table.object = None
+                summary_table.object = pd.DataFrame()  # Use empty DataFrame instead of None
             
             total_labels = sum(len(rs['labels']) for rs in result)
             log.object = f"Successfully fetched **{total_labels}** labels across {len(result)} result sets."
@@ -390,7 +394,7 @@ def build(vm):
             vm.notify("Fetch successful. Ready to add to DB.", "success")
         except Exception as e:
             log.object = f"Error: {e}"
-            summary_table.object = None
+            summary_table.object = pd.DataFrame()  # Use empty DataFrame instead of None
             vm.notify(f"Fetch failed: {e}", "error")
 
     def _add(_):
@@ -430,11 +434,11 @@ def build(vm):
                 details_table.value = details_df
                 details_title.object = f"### All Outcome Details ({len(details_df)} records)"
             else:
-                details_table.value = pd.DataFrame()
+                details_table.value = pd.DataFrame(columns=['Filter', 'Species', 'Type', 'Source', 'Offset', 'Outcome'])
                 details_title.object = "### No outcome details available"
         else:
-            outcomes_table.object = None
-            details_table.value = pd.DataFrame()
+            outcomes_table.object = pd.DataFrame()  # Use empty DataFrame instead of None
+            details_table.value = pd.DataFrame(columns=['Filter', 'Species', 'Type', 'Source', 'Offset', 'Outcome'])
             details_title.object = ""
 
 

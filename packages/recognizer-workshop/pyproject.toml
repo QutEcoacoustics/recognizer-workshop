@@ -45,7 +45,20 @@ dependencies = [
   "jupyter_bokeh",
 
   # allows serving the app through a notebook
-  "jupyter-server-proxy"
+  "jupyter-server-proxy",
+
+  "umap-learn",
+
+  "joblib",
+
+  "holoviews",
+
+  "datashader",
+
+  "pyarrow"
+
+
+
 ]
 
 

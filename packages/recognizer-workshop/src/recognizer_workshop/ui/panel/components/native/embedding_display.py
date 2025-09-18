@@ -64,7 +64,7 @@ class PanelQuerySelector(pn.Column):
         # here we inline to keep this class self-contained:
         from librosa import display as librosa_display
         librosa_display.specshow(
-            spec, sr=self.qd.sample_rate_hz, y_axis='mel', x_axis='time',
+            np.flipud(spec), sr=self.qd.sample_rate_hz, y_axis='mel', x_axis='time',
             hop_length=self.qd.sample_rate_hz // self.qd.frame_rate, cmap='Greys', ax=ax
         )
         if draw_window:
@@ -174,7 +174,17 @@ class PanelEmbeddingDisplay(pn.Column):
         # --- UI elements ---
         self._status = pn.pane.Markdown("", sizing_mode="stretch_width")
 
+        # Start with a loading message instead of empty matplotlib pane
+        loading_msg = pn.pane.HTML(
+            "<div style='text-align: center; padding: 60px; color: #666;'>"
+            "<div style='font-size: 16px;'>🔄 Loading spectrogram...</div>"
+            "</div>", 
+            height=240, 
+            sizing_mode="stretch_width"
+        )
         self._spec_pane = pn.pane.Matplotlib(tight=True, height=240, sizing_mode="stretch_width")
+        # Use a Column to switch between loading and spec
+        self._spec_container = pn.Column(loading_msg, sizing_mode="stretch_width")
         self._audio_pane = pn.pane.Audio(name="audio", sizing_mode="stretch_width", sample_rate=self.sample_rate_hz)
 
         # metadata line
@@ -190,7 +200,7 @@ class PanelEmbeddingDisplay(pn.Column):
         # assemble
         card = pn.Card(
             meta,
-            self._spec_pane,
+            self._spec_container,
             pn.Row(self._audio_pane, sizing_mode="stretch_width"),
             self._buttons_grid,
             self._status,
@@ -239,7 +249,14 @@ class PanelEmbeddingDisplay(pn.Column):
             if not self._audio.size:
                 self._status.object = f"❌ Audio loaded an empty segment for URI: {self.uri}"
                 # Clear any old spectrogram that might be showing.
-                self._spec_pane.object = None
+                error_msg = pn.pane.HTML(
+                    "<div style='text-align: center; padding: 60px; color: #d32f2f;'>"
+                    "<div style='font-size: 16px;'>❌ Failed to load audio</div>"
+                    "</div>", 
+                    height=240, 
+                    sizing_mode="stretch_width"
+                )
+                self._spec_container[:] = [error_msg]
                 return
 
             # compute window spectrogram
@@ -250,7 +267,7 @@ class PanelEmbeddingDisplay(pn.Column):
                 spec = self._spec.T
                 import librosa.display as lrd
                 lrd.specshow(
-                    spec,
+                    np.flipud(spec),
                     sr=self.sample_rate_hz,
                     y_axis='mel',
                     x_axis='time',
@@ -263,6 +280,8 @@ class PanelEmbeddingDisplay(pn.Column):
             
             fig = await asyncio.to_thread(_create_plot)
             self._spec_pane.object = fig
+            # Replace loading message with actual spectrogram
+            self._spec_container[:] = [self._spec_pane]
 
             # audio panes
             self._audio_pane.object = self._audio
@@ -378,4 +397,3 @@ class PanelEmbeddingDisplayGroup(pn.Column):
         # Enable/disable nav
         self._prev.disabled = (self._page == 0)
         self._next.disabled = (self._page >= self._pages())
-

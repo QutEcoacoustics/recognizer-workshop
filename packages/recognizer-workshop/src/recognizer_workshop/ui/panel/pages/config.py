@@ -45,14 +45,17 @@ def build(vm):
             # Try to load the most recent file
             vm.config = AgileConfig.load(recent_files[0])
             is_new_unsaved_config = False
+            should_auto_start_engine = True
         except FileNotFoundError:
             # If the recent file was moved/deleted, start with a new one
             vm.config = AgileConfig()
             is_new_unsaved_config = True
+            should_auto_start_engine = False
     else:
         # If no recent files, start with a new, default config
         vm.config = AgileConfig()
         is_new_unsaved_config = True
+        should_auto_start_engine = False
     
     save_status = pn.pane.Markdown("")
 
@@ -66,6 +69,16 @@ def build(vm):
 
     # --- BUTTONS ---
     btn_start_engine = pn.widgets.Button(name="Start Engine", button_type="primary")
+    
+    def update_engine_button():
+        """Update the engine button text and state based on current engine status."""
+        if vm.eng:
+            btn_start_engine.name = "Restart Engine"
+            btn_start_engine.button_type = "warning"
+        else:
+            btn_start_engine.name = "Start Engine"
+            btn_start_engine.button_type = "primary"
+        btn_start_engine.disabled = not vm.config.config_path
 
     # Label editor populated only after the engine has started successfully.
     labels_editor_placeholder = pn.Column(sizing_mode="stretch_width")
@@ -161,7 +174,7 @@ def build(vm):
             
             path_str = str(vm.config.config_path) if vm.config.config_path else "Unsaved Configuration"
             current_config_path_display.value = f"<b>Current File:</b> {path_str}"
-            btn_start_engine.disabled = not vm.config.config_path
+            update_engine_button()
         finally:
             del sync_config_to_ui._syncing
 
@@ -233,6 +246,8 @@ def build(vm):
                     vm.config = AgileConfig.load(path)
                     sync_config_to_ui()
                     vm.notify(f"Loaded config from {Path(path).name}", "success")
+                    # Auto-start engine after loading config
+                    _make_engine(None)
                 except Exception as ex:
                     vm.notify(f"Failed to load config: {ex}", "error")
             dialog.open = False
@@ -436,6 +451,9 @@ def build(vm):
             # this will trigger anything observing these observables to update
             vm.obs.bump("engine_state")
             vm.obs.bump("target_labels")
+            
+            # Update button state after successful engine creation
+            update_engine_button()
 
             print("after", vm.obs)
 
@@ -469,6 +487,10 @@ def build(vm):
         # Safe access to config_path.name
         config_name = vm.config.config_path.name if vm.config.config_path else "Unknown"
         vm.notify(f"Loaded recent project: {config_name}", "success")
+        
+        # Auto-start engine for loaded configurations
+        if should_auto_start_engine:
+            _make_engine(None)
 
     # --- LAYOUT ---
     file_buttons = pn.Row(btn_new, btn_open, btn_save, btn_save_as, sizing_mode="stretch_width")

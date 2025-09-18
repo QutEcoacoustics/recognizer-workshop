@@ -62,7 +62,8 @@ class PanelUI(param.Parameterized):
         "search.query_selector", 
         "search.results",
         "refine.results",
-        "status.main"
+        "status.main",
+        "explore.selected_embedding",
     ]
 
 
@@ -343,6 +344,29 @@ class PanelUI(param.Parameterized):
         )
         self._regions[results_region].state["group"] = group
         self.render(group, results_region)
+
+
+    def show_selected_embedding(self, eng, embedding_id, region_name="explore.selected_embedding"):
+        """Creates and renders a PanelEmbeddingDisplay for a given embedding_id."""
+        self.render(pn.pane.Markdown(f"Loading embedding `{embedding_id}`..."), region_name)
+        
+        try:
+            source = eng.db.get_embedding_source(embedding_id)
+            
+            display_widget = PanelEmbeddingDisplay(
+                embedding_id=embedding_id,
+                dataset_name=source.dataset_name,
+                uri=source.source_id,
+                offset_s=source.offsets[0],
+                score=0.0, # No score in this context
+                labels=eng.get_target_labels(), # Or however you get your full label list
+                sample_rate_hz=eng.db_model_config.model_config.sample_rate,
+                audio_loader=eng.audio_filepath_loader,
+            )
+            self.render(display_widget, region_name)
+        except Exception as e:
+            self.render(pn.pane.Alert(f"Could not load embedding `{embedding_id}`: {e}", alert_type="danger"), region_name)
+
 
 
     def harvest_labels(self, eng, *, results_region: str):
