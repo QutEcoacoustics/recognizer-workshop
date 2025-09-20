@@ -277,7 +277,12 @@ class baw_api:
             req_for_log = getattr(getattr(e, "response", None), "request", None) or prepared_request
             self._print_request_details(req_for_log, response_obj=getattr(e, "response", None), error_context=True)
             try:
-                return e.response.json() if e.response is not None else None
+                if e.response is None:
+                    return None
+                if return_json:
+                    return e.response.json()
+                else:
+                    return e.response
             except (requests.exceptions.JSONDecodeError, ValueError):
                 if self.debug:
                     print("Error response was not JSON.")

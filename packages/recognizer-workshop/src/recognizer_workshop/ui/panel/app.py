@@ -12,6 +12,7 @@ from recognizer_workshop.ui.panel.view_model import ViewModel
 from recognizer_workshop.ui.panel.pages import config, create_database, labeled_examples, search, explore, train, refine, inference, status
 from recognizer_workshop.ui.panel.adaptors import PanelUI
 
+
 # Load the tabulator extension for displaying DataFrames.
 
 pn.extension('tabulator', sizing_mode="stretch_width")
@@ -85,10 +86,27 @@ def build_app(vm):
 
     header_pane = pn.pane.HTML(header_html, sizing_mode="stretch_width")
 
-    return pn.Column(
+    # Create dynamic help panel that changes based on help_system.visible
+    def create_help_panel(visible):
+        return vm.help_system.get_current_panel()
+    
+    help_panel = pn.bind(create_help_panel, vm.help_system.param.visible)
+
+    # Main content area with tabs
+    main_content = pn.Column(
         header_pane,
         error_banner,
         tabs,
+        sizing_mode="stretch_both",
+    )
+
+    
+    vm.main_content = main_content
+
+    # Root layout: main content + help panel
+    return pn.Row(
+        main_content,
+        help_panel,
         sizing_mode="stretch_both",
     )
 
@@ -103,4 +121,5 @@ def create_app_session():
 
 # Serve the app for interactive development
 if __name__.startswith("bokeh"):
-    create_app_session().servable()
+    app, vm = create_app_session()
+    app.servable()

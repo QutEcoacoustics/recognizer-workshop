@@ -10,6 +10,7 @@ import panel as pn
 # Local imports
 from recognizer_workshop.app.agile_engine import AgileConfig, agile_state, get_recent_files
 
+
 # TODO: tidy this up
 try:
     from panel_material_ui import Dialog
@@ -97,6 +98,15 @@ def build(vm):
     annotator_id = pn.widgets.TextInput(name="Annotator", value=vm.config.annotator_id)
     domain = pn.widgets.TextInput(name="Workbench API domain", value=vm.config.baw_config.get("domain", ""))
     auth_token = pn.widgets.TextInput(name="Workbench API token", value=vm.config.baw_config.get("auth_token", ""))
+
+    # Create help buttons for key fields
+    annotator_help_btn = vm.help_system.create_help_button("help-annotator-id", "Help: Annotator ID")
+    domain_help_btn = vm.help_system.create_help_button("help-api-domain", "Help: API Domain")
+    token_help_btn = vm.help_system.create_help_button("help-api-token", "Help: API Token")
+    folder_help_btn = vm.help_system.create_help_button("help-folder-config", "Help: Folder Configuration")
+    engine_help_btn = vm.help_system.create_help_button("help-engine", "Help: Engine")
+    project_help_btn = vm.help_system.create_help_button("help-project-file", "Help: Project Files")
+    labels_help_btn = vm.help_system.create_help_button("help-target-labels", "Help: Target Labels")
 
     # Advanced path configuration (hidden by default)
     db_path = pn.widgets.TextInput(name="DB path (Directory)", value=str(vm.config.db_path or ""))
@@ -504,7 +514,7 @@ def build(vm):
         ),
         
         # File operations section
-        "### Project File",
+        pn.Row("### Project File", pn.Spacer(), project_help_btn),
         file_buttons,
         config_status,
         
@@ -512,11 +522,11 @@ def build(vm):
         pn.Row(
             # Left column - Workbench connection
             pn.Column(
-                "### 🌐 Workbench Connection", 
-                annotator_id,
-                domain, 
-                auth_token,
-                show_advanced,
+                pn.Row("### 🌐 Workbench Connection", pn.Spacer(), domain_help_btn),
+                pn.Row(annotator_id, annotator_help_btn, sizing_mode="stretch_width"),
+                domain,
+                pn.Row(auth_token, token_help_btn, sizing_mode="stretch_width"),
+                pn.Row(show_advanced, folder_help_btn, sizing_mode="stretch_width"),
                 advanced_section,
                 width=300,
                 sizing_mode="fixed"
@@ -524,6 +534,7 @@ def build(vm):
             
             # Right column - Basic settings
             pn.Column(
+                pn.Row("### 🎯 Target Labels", pn.Spacer(), labels_help_btn),
                 labels_editor_placeholder,
                 sizing_mode="stretch_width"
             ),
@@ -531,6 +542,7 @@ def build(vm):
         ),
         
         # Engine initialization
+        pn.Row("### 🚀 Engine", pn.Spacer(), engine_help_btn),
         pn.Row(btn_start_engine, sizing_mode="stretch_width"),
         
        

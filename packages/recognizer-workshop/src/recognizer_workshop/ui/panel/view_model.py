@@ -5,6 +5,7 @@ import panel as pn
 import logging
 from recognizer_workshop.ui.panel.utils.log_handler import PanelLogHandler
 
+from recognizer_workshop.ui.panel.help import HelpSystem
 
 
 
@@ -67,7 +68,11 @@ class ViewModel(SimpleNamespace):
             css_classes=['log-pane']  # A class for clean CSS styling
         )
         self._setup_logging()
-        
+
+
+        self.help_system = HelpSystem()
+     
+
         # initialise the observables hub with pre-defined names
         self.obs = ObservablesHub()
         for name in _observables_names:
