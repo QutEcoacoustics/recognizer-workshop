@@ -86,9 +86,9 @@ def build_app(vm):
 
     header_pane = pn.pane.HTML(header_html, sizing_mode="stretch_width")
 
-    # Create dynamic help panel that changes based on help_system.visible
+    # Create dynamic help panel that properly responds to visibility changes
     def create_help_panel(visible):
-        return vm.help_system.get_current_panel()
+        return vm.help_system.get_panel()
     
     help_panel = pn.bind(create_help_panel, vm.help_system.param.visible)
 
