@@ -1,0 +1,119 @@
+.help-container {
+    padding: 20px;
+    font-family: Arial, sans-serif;
+}
+
+.help-title {
+    font-size: 1.5em;
+    margin-bottom: 15px;
+}
+
+.quick-nav {
+    background-color: #f8f9fa;
+    padding: 15px;
+    border-radius: 8px;
+    margin: 20px 0;
+}
+
+.quick-nav h3 {
+    margin-top: 0;
+}
+
+.quick-nav ul {
+    columns: 2;
+    column-gap: 30px;
+}
+
+.help-section {
+    margin-top: 40px;
+    padding-left: 20px;
+}
+
+.help-section-config {
+    border-left: 4px solid #007bff;
+}
+
+.help-section-database {
+    border-left: 4px solid #28a745;
+}
+
+.help-section-labeled-examples {
+    border-left: 4px solid #ffc107;
+}
+
+.help-section-search {
+    border-left: 4px solid #17a2b8;
+}
+
+.help-section-explore {
+    border-left: 4px solid #6f42c1;
+}
+
+.help-section-train {
+    border-left: 4px solid #dc3545;
+}
+
+.help-section-refine {
+    border-left: 4px solid #fd7e14;
+}
+
+.help-section-inference {
+    border-left: 4px solid #20c997;
+}
+
+.help-section-general {
+    border-left: 4px solid #6c757d;
+}
+
+.help-section h2 {
+    margin-top: 0;
+    font-size: 1.3em;
+}
+
+.help-subsection {
+    margin-top: 20px;
+}
+
+.help-subsection-alt {
+    margin-top: 25px;
+}
+
+.help-subsection h4 {
+    margin-bottom: 10px;
+    font-size: 1.1em;
+}
+
+.help-subsection ul {
+    margin: 10px 0;
+    padding-left: 20px;
+}
+
+.help-subsection li {
+    margin-bottom: 5px;
+}
+
+.help-tip {
+    font-style: italic;
+}
+
+.help-footer {
+    margin-top: 40px;
+    padding: 20px;
+    background-color: #e9ecef;
+    border-radius: 8px;
+    text-align: center;
+}
+
+.help-footer h3 {
+    margin-top: 0;
+}
+
+.help-footer ul {
+    text-align: left;
+    display: inline-block;
+    margin: 10px 0;
+}
+
+.help-footer li {
+    margin-bottom: 5px;
+}

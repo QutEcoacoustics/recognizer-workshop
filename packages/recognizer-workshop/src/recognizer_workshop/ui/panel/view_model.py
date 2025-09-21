@@ -69,14 +69,14 @@ class ViewModel(SimpleNamespace):
         )
         self._setup_logging()
 
-
-        self.help_system = HelpSystem()
-     
-
         # initialise the observables hub with pre-defined names
         self.obs = ObservablesHub()
         for name in _observables_names:
             self.obs.ensure(name)
+
+    def setup_help_system(self):
+        """Initializes the help system with the given template."""
+        self.help_system = HelpSystem()
 
 
     def _setup_logging(self):

@@ -522,9 +522,9 @@ def build(vm):
         pn.Row(
             # Left column - Workbench connection
             pn.Column(
-                pn.Row("### 🌐 Workbench Connection", pn.Spacer(), domain_help_btn),
+                pn.Row("### 🌐 Workbench Connection", pn.Spacer()),
                 pn.Row(annotator_id, annotator_help_btn, sizing_mode="stretch_width"),
-                domain,
+                pn.Row(domain, domain_help_btn, sizing_mode="stretch_width"),
                 pn.Row(auth_token, token_help_btn, sizing_mode="stretch_width"),
                 pn.Row(show_advanced, folder_help_btn, sizing_mode="stretch_width"),
                 advanced_section,

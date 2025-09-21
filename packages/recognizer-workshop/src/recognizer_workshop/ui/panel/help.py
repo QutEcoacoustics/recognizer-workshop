@@ -1,183 +1,138 @@
-"""Help system for the recognizer workshop UI."""
-
 import panel as pn
 import param
-from .help_content import HELP_HTML
+from pathlib import Path
 
-
-class HelpSystem(param.Parameterized):
-    """Global help system for the application."""
+class HelpSystem(pn.custom.JSComponent):
+    """Manages the application's help sidebar."""
     
-    # Global state for help panel visibility
-    visible = param.Boolean(default=False, doc="Whether the help panel is visible")
-    current_section = param.String(default="", doc="Current section to scroll to")
+    visible = param.Boolean(default=False, doc="Whether the help panel is visible.")
+    scroll_to = param.String(default="", doc="The ID of the help section to scroll to.")
+    #sidebar_open = param.Boolean(default=True, doc="Whether the sidebar is open.")
+    sidebar_bump = param.Integer(default=0, doc="Bump to trigger sidebar open/close.")
+        
+
+    _esm = """
+    export function render({ model }) {
+        console.log('HelpSystem JSComponent initialized');
+        model.on('sidebar_bump', () => {
+            // Always open the sidebar when bumped
+            openNav();
+        });
+
+        model.on('scroll_to', () => {
+            console.log('scroll_to changed to:', model.scroll_to);
+            if (model.scroll_to) {
+                // Wait a bit for the sidebar to finish opening
+                setTimeout(() => {
+                    // First try normal document
+                    let element = document.getElementById(model.scroll_to);
+                    console.log('Found in main document:', element);
+                    
+                    // If not found, look in shadow roots
+                    if (!element) {
+                        console.log('Looking in shadow roots...');
+                        const htmlElements = document.querySelectorAll('.bk-panel-models-markup-HTML');
+                        
+                        for (const htmlEl of htmlElements) {
+                            if (htmlEl.shadowRoot) {
+                                console.log('Checking shadow root:', htmlEl.shadowRoot);
+                                element = htmlEl.shadowRoot.getElementById(model.scroll_to);
+                                if (element) {
+                                    console.log('Found in shadow root:', element);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    
+                    if (element) {
+                        element.scrollIntoView({ 
+                            behavior: 'smooth', 
+                            block: 'start',
+                            inline: 'nearest'
+                        });
+                        
+                        // Optional: highlight the section briefly
+                        element.style.transition = 'background-color 0.5s';
+                        element.style.backgroundColor = '#fff3cd';
+                        setTimeout(() => { 
+                            element.style.backgroundColor = ''; 
+                        }, 2000);
+                    } else {
+                        console.log('Element not found anywhere with ID:', model.scroll_to);
+                    }
+                }, 300);
+            }
+        });
+    }
+    """
+
     
     def __init__(self, **params):
         super().__init__(**params)
-        self._help_content = self._create_help_content()
-        self._js_executor = None
+        self.content = self._create_help_content()
+
+    def _load_help_css(self):
+        """Load the CSS styles for the help content."""
+        css_file_path = Path(__file__).parent / "help_content.css"
+        try:
+            with open(css_file_path, 'r', encoding='utf-8') as f:
+                return f.read()
+        except FileNotFoundError:
+            return ""
+        except Exception as e:
+            print(f"Warning: Error loading help CSS: {e}")
+            return ""
+
+    def _load_help_html(self):
+        """Load the help content from the HTML file."""
+        help_file_path = Path(__file__).parent / "help_content.html"
+        try:
+            with open(help_file_path, 'r', encoding='utf-8') as f:
+                html_content = f.read()
+            
+            # Load CSS and wrap it in a style tag
+            css_content = self._load_help_css()
+            if css_content:
+                styled_content = f"<style>{css_content}</style>{html_content}"
+                return styled_content
+            else:
+                return html_content
+                
+        except FileNotFoundError:
+            return "<div>Help content not found. Please check the help_content.html file.</div>"
+        except Exception as e:
+            return f"<div>Error loading help content: {e}</div>"
     
     def _create_help_content(self):
-        """Create the main help content with proper HTML IDs for scrolling."""
-        # Create scrollable content with JavaScript injection
-        content_pane = pn.pane.HTML(HELP_HTML, sizing_mode="stretch_width")
+        help_html = self._load_help_html()
+        return pn.pane.HTML(help_html, sizing_mode="stretch_width")
         
-        # JavaScript to handle scrolling - improved to work with Panel's scroll containers
-        scroll_js = """
-        <script>
-        window.scrollToSection = function(sectionId) {
-            console.log('Attempting to scroll to:', sectionId);
-            setTimeout(function() {
-                const element = document.getElementById(sectionId);
-                if (!element) {
-                    console.log('Section not found:', sectionId);
-                    return;
-                }
-                
-                // Find the scrollable container (Panel creates divs with overflow)
-                let scrollContainer = element.closest('[style*="overflow"]');
-                if (!scrollContainer) {
-                    // Fallback: look for common Panel scroll container classes/attributes
-                    scrollContainer = element.closest('.bk-root') || 
-                                    element.closest('[data-root-id]') ||
-                                    document.querySelector('.bk-root') ||
-                                    window;
-                }
-                
-                // Calculate position relative to the scroll container
-                const elementRect = element.getBoundingClientRect();
-                const containerRect = scrollContainer === window ? 
-                    {top: 0, left: 0} : scrollContainer.getBoundingClientRect();
-                
-                if (scrollContainer === window) {
-                    // Standard document scroll
-                    element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                } else {
-                    // Scroll within the container
-                    const targetScrollTop = scrollContainer.scrollTop + 
-                        (elementRect.top - containerRect.top) - 20; // 20px offset
-                    
-                    scrollContainer.scrollTo({
-                        top: targetScrollTop,
-                        behavior: 'smooth'
-                    });
-                }
-                
-                // Add highlight effect
-                element.style.transition = 'background-color 0.5s ease';
-                element.style.backgroundColor = '#fff3cd';
-                element.style.padding = '10px';
-                element.style.borderRadius = '8px';
-                
-                // Remove highlight after 3 seconds
-                setTimeout(function() {
-                    element.style.backgroundColor = '';
-                    element.style.padding = '';
-                }, 3000);
-                
-            }, 300); // Increased delay to ensure Panel rendering is complete
-        };
-        </script>
-        """
-        
-        self._js_executor = pn.pane.HTML(scroll_js, width=0, height=0)
-        
-        return pn.Column(self._js_executor, content_pane, sizing_mode="stretch_width")
-
+    
     def show_help_section(self, section_id):
-        """Show the help panel and scroll to a specific section."""
-        # Make help visible first
         self.visible = True
-        
-        # Set the current section for tracking
-        self.current_section = section_id
-        
-        # Create a new JavaScript execution pane to trigger the scroll
-        js_code = f"""
-        <script>
-        setTimeout(function() {{
-            if (window.scrollToSection) {{
-                window.scrollToSection('{section_id}');
-            }} else {{
-                console.log('scrollToSection function not available yet');
-                // Fallback: try direct scrollIntoView
-                setTimeout(function() {{
-                    const element = document.getElementById('{section_id}');
-                    if (element) {{
-                        element.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
-                    }}
-                }}, 100);
-            }}
-        }}, 500); // Longer delay to ensure help panel is fully rendered
-        </script>
-        """
-        
-        # Create a temporary execution pane that will run the JavaScript
-        temp_js = pn.pane.HTML(js_code, width=0, height=0)
-        
-        # Add it temporarily to trigger execution, then remove it
-        if hasattr(self, '_help_content') and self._help_content:
-            self._help_content.append(temp_js)
-            # Remove it after a short delay
-            def remove_temp():
-                if temp_js in self._help_content:
-                    self._help_content.remove(temp_js)
-            pn.state.add_periodic_callback(remove_temp, period=1000, count=1)
+        self.scroll_to = section_id
 
-    def _toggle_help(self, event=None):
-        """Toggle the help panel visibility."""
-        self.visible = not self.visible
-    
-    def get_panel(self):
-        """Get the help panel - returns empty Column when hidden, full panel when visible."""
-        if not self.visible:
-            # Return a minimal toggle button when hidden
-            toggle_button = pn.widgets.Button(
-                name="❓ Help",
-                button_type="primary",
-                width=100,
-                margin=(5, 5)
-            )
-            toggle_button.on_click(self._toggle_help)
-            
-            return pn.Column(
-                toggle_button,
-                width=110,
-                margin=(5, 5)
-            )
-        else:
-            # Return full help panel when visible
-            toggle_button = pn.widgets.Button(
-                name="❌ Hide Help",
-                button_type="primary",
-                width=120,
-                margin=(5, 5)
-            )
-            toggle_button.on_click(self._toggle_help)
-            
-            return pn.Column(
-                toggle_button,
-                pn.Spacer(height=10),
-                pn.pane.HTML("<h3>Workshop Help</h3>", margin=(0, 10)),
-                self._help_content,
-                width=400,
-                margin=(5, 10),
-                scroll=True,
-                height=600
-            )
-    
     def create_help_button(self, section_id, tooltip="Get help"):
-        """Create a small help button that scrolls to a specific help section."""
-        button = pn.widgets.Button(
-            name="❓",
-            width=30,
-            height=30,
-            button_type="light",
-            description=tooltip
-        )
+        """
+        Creates a ? button that opens the sidebar and triggers a scroll.
+        NOTE: Now requires the 'vm' object to be passed in.
+        """
+        button = pn.widgets.Button(name="?", width=40, button_type='light', description=tooltip)
         
-        def on_click(event):
-            self.show_help_section(section_id)
+        def open_and_scroll(_):
+            # Tell the ViewModel which section to scroll to
+            self.scroll_to = section_id
+
+            print("Opening help sidebar...")
+            print(f"Current sidebar_bump state: {self.sidebar_bump}")
+            self.sidebar_bump += 1
+            # self.template.sidebar_open = True
+            # self.template.collapsed_sidebar = False
+            # print(self.template.param.params_in_synch())
+            # if hasattr(self.template, 'sidebar'):
+            #     self.template.sidebar.visible = True
+         
         
-        button.on_click(on_click)
+        button.on_click(open_and_scroll)
         return button
