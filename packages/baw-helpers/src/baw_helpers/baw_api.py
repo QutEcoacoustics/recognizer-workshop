@@ -5,7 +5,6 @@ import json
 import os
 import io
 import sys
-import pytest
 import requests
 import re
 from pathlib import Path

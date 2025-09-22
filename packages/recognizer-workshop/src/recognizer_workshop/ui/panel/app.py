@@ -46,7 +46,7 @@ def build_app(vm):
     vm.setup_help_system()
 
     template = pn.template.FastListTemplate(
-        title="Agile Recognizer Workshop",
+        title="Recognizer Workshop",
         sidebar_width=400,
         sidebar=[vm.help_system, vm.help_system.content]  # Pass components directly
     )
@@ -66,17 +66,21 @@ def build_app(vm):
     # template.param.watch(sync_template_to_vm, 'collapsed_sidebar')
 
 
-
+    # seems to be problematic to do a relative src to the image files in the html, but
+    # we can read and encode them here. TODO: maybe cache this for load time improvement?
     app_dir = Path(__file__).parent
     qut_logo_path = app_dir / "assets" / "qut_logo_2.png"
     ardc_logo_path = app_dir / "assets" / "ardc_logo_2.png"
+    perch_logo_path = app_dir / "assets" / "perch_humpback2.png"
     qut_logo_base64 = encode_png_to_base64(qut_logo_path)
     ardc_logo_base64 = encode_png_to_base64(ardc_logo_path)
+    perch_logo_base64 = encode_png_to_base64(perch_logo_path)
 
     header_logos = pn.pane.HTML(f"""
-    <div style="display: flex; align-items: center; gap: 20px;">
+    <div style="display: flex; align-items: center;  justify-content: space-between; width: 290px; gap: 20px; background: white; padding: 5px 10px; border-radius: 2px;">
         <img src="{qut_logo_base64}" style="height: 40px; width: auto;">
         <img src="{ardc_logo_base64}" style="height: 40px; width: auto;">
+        <img src="{perch_logo_base64}" style="height: 40px; width: auto;">
     </div>
     """)
     
