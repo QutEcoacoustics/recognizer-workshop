@@ -3,6 +3,7 @@ import pandas as pd
 from ..view_model import ViewModel
 
 from recognizer_workshop.app.services.db_labels.db_labels import LabelCounts, DatabaseSummary
+from recognizer_workshop.app.services.version import get_git_commit_short
 
 def _build_status_view(vm: ViewModel):
     """Helper function to construct the main status view based on the current vm state."""
@@ -11,6 +12,10 @@ def _build_status_view(vm: ViewModel):
         return pn.pane.Markdown("### ℹ️ Engine not initialized. Please create the engine in the 'Config' tab first.")
 
     status_data = vm.eng.get_status()
+
+    # Get version info
+    commit_hash = get_git_commit_short()
+    commit_display = commit_hash if commit_hash else "unknown"
 
     # General Status Section
     general_status_view = pn.Column(
@@ -22,6 +27,10 @@ def _build_status_view(vm: ViewModel):
         pn.Row(
             pn.pane.Markdown("**Embedding Model Loaded:**", width=200),
             pn.pane.Markdown("✅ Yes" if status_data['embedding_model_loaded'] else "❌ No")
+        ),
+        pn.Row(
+            pn.pane.Markdown("**Version:**", width=200),
+            pn.pane.Markdown(f"`{commit_display}`")
         ),
         pn.layout.Divider()
     )
