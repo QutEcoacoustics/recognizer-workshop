@@ -10,6 +10,11 @@ import panel as pn
 from recognizer_workshop.ui.panel.utils.patch_tqdm import patch_tqdm
 
 def build(vm):
+    # Create help buttons
+    train_help_btn = vm.help_system.create_help_button("help-train-overview", "Help: Training")
+    algorithm_params_help_btn = vm.help_system.create_help_button("help-training-algorithm-params", "Help: Algorithm Parameters")
+    labeled_data_params_help_btn = vm.help_system.create_help_button("help-labeled-data-params", "Help: Labeled Data Parameters")
+
     learning_rate = pn.widgets.FloatInput(name="learning_rate", value=1e-3, step=1e-4)
     num_steps     = pn.widgets.IntInput(name="num_steps", value=101, start=1)
     batch_size    = pn.widgets.IntInput(name="batch_size", value=32, start=1)
@@ -89,14 +94,16 @@ def build(vm):
 
     # training params
     hyperparameters = pn.Card(
+        pn.Row("Algorithm Parameters", pn.Spacer(), algorithm_params_help_btn),
         pn.Row(learning_rate, num_steps, batch_size, train_ratio),
+        pn.Row("Labeled Data Parameters", pn.Spacer(), labeled_data_params_help_btn),
         pn.Row(weak_neg_weight, weak_negs_batch),
         title="Hyperparameters",
         collapsible=False
     )
 
     return pn.Column(
-        pn.pane.Markdown("## Train Classifier"),
+        pn.Row("## Train Classifier", pn.Spacer(), train_help_btn),
         hyperparameters,
         pn.Row(btn_train),
         progress_bar,

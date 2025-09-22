@@ -6,6 +6,9 @@ from recognizer_workshop.ui.panel.components.native.label_picker import build_ac
 
 def build(vm):
 
+    # Create help button
+    search_help_btn = vm.help_system.create_help_button("help-search-overview", "Help: Search")
+
     print("[search.build] vm.id:", id(vm), "vm.ui.id:", id(vm.ui))
     # regions for query and for results
     selector_box = vm.ui.get_region_box("search.query_selector")
@@ -121,7 +124,7 @@ def build(vm):
 
 
     return pn.Column(
-        "## Search (single example)",
+        pn.Row("## Search (single example)", pn.Spacer(), search_help_btn),
         input_tabs, # tab for choosing between xeno canto and file upload
         selector_box,
         pn.Row(active_label_picker, num_results, target_score, btn_search, btn_save, sizing_mode="stretch_width"),

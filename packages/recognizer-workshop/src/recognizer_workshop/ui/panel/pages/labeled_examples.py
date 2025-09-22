@@ -7,6 +7,10 @@ from recognizer_workshop.app.services.db_labels.db_labels import add_labels_to_d
 
 def build(vm):
 
+    # Create help buttons
+    labeled_examples_help_btn = vm.help_system.create_help_button("help-labeled-examples-overview", "Help: Labeled Examples")
+    filter_help_btn = vm.help_system.create_help_button("help-recordings-filter-labelled-examples", "Help: Recording Filters")
+
     btn_fetch = pn.widgets.Button(name="Fetch labels from server", button_type="primary")
     btn_add   = pn.widgets.Button(name="Add fetched labels to DB", button_type="success", disabled=True)
     log       = pn.pane.Markdown("")
@@ -458,14 +462,19 @@ def build(vm):
         _update_filter_display()
 
     return pn.Column(
-        pn.pane.Markdown("## Labelled examples"),
+        pn.Row("## Labelled examples", pn.Spacer(), labeled_examples_help_btn),
         pn.pane.Alert(
             "Define a set of Ecosounds recordings by Project, Region, or Site IDs. "
             "Labels will be fetched from annotations within these recordings.",
             alert_type="info"
         ),
 
-        editor_container,
+        pn.Row(
+            pn.Column(
+                pn.Row("Recording Filter Settings", pn.Spacer(), filter_help_btn),
+                editor_container
+            )
+        ),
         pn.layout.Divider(),
         pn.Row(btn_fetch, btn_add),
         log,

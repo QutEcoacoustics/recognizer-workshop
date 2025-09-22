@@ -5,6 +5,10 @@ from recognizer_workshop.ui.panel.components.native.label_picker import build_ac
 
 def build(vm):
 
+    # Create help buttons
+    refine_help_btn = vm.help_system.create_help_button("help-refine-overview", "Help: Refine")
+    active_learning_help_btn = vm.help_system.create_help_button("help-active-learning", "Help: Active Learning")
+
     results_box  = vm.ui.get_region_box("refine.results")
 
     # inputs for how many results to fetch, target score
@@ -48,7 +52,8 @@ def build(vm):
 
 
     return pn.Column(
-        "## Search (single example)",
+        pn.Row("## Refine Model", pn.Spacer(), refine_help_btn),
+        pn.Row("Active Learning Search", pn.Spacer(), active_learning_help_btn),
         pn.Row(active_label_picker, num_results, target_score, btn_search, btn_save, sizing_mode="stretch_width"),
         results_box,
         sizing_mode="stretch_both",

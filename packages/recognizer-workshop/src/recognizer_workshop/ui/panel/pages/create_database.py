@@ -13,6 +13,11 @@ def build(vm):
     if not vm.config or not vm.config.db_path:
         return pn.pane.Alert(...)
 
+    # Create help buttons
+    database_help_btn = vm.help_system.create_help_button("help-database-overview", "Help: Database Overview")
+    db_settings_help_btn = vm.help_system.create_help_button("help-db-creation-settings", "Help: Database Creation Settings")
+    recordings_filter_help_btn = vm.help_system.create_help_button("help-recordings-filter", "Help: Recordings Filter")
+
     page_state = {'filters': []}
     max_files = pn.widgets.IntInput(name="Max Recordings to Scan", value=1000, start=-1)
     max_embeddings = pn.widgets.IntInput(name="Max Embeddings to Ingest", value=200_000, start=-1)
@@ -91,10 +96,20 @@ def build(vm):
     )
 
     return pn.Column(
-        pn.pane.Markdown("## Create New Database from BAW"),
+        pn.Row("## Create New Database from BAW", pn.Spacer(), database_help_btn),
         pn.pane.Alert("This tool will build a new database in the directory specified in your current project configuration.", alert_type="info"),
-        settings_card,
-        filter_editor,
+        pn.Row(
+            pn.Column(
+                pn.Row("Creation Settings", pn.Spacer(), db_settings_help_btn),
+                settings_card
+            )
+        ),
+        pn.Row(
+            pn.Column(
+                pn.Row("Recording Filters", pn.Spacer(), recordings_filter_help_btn),
+                filter_editor
+            )
+        ),
         pn.layout.Divider(),
         pn.Row(btn_create),
         dialog_container,

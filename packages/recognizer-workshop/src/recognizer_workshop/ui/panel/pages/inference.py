@@ -4,6 +4,12 @@ from pathlib import Path
 from recognizer_workshop.app.agile_modeling_helpers import make_inference_subset
 
 def build(vm):
+    # Create help buttons
+    inference_help_btn = vm.help_system.create_help_button("help-inference-overview", "Help: Inference")
+    batch_inference_help_btn = vm.help_system.create_help_button("help-batch-inference", "Help: Batch Processing")
+    result_review_help_btn = vm.help_system.create_help_button("help-result-review", "Help: Result Review")
+    export_results_help_btn = vm.help_system.create_help_button("help-export-results", "Help: Export Results")
+
     out_filename = pn.widgets.TextInput(name="Output filename", value="output.csv")
     threshold    = pn.widgets.FloatInput(name="Threshold", value=0.0, step=0.1)
     subset       = pn.widgets.FloatInput(name="Subset proportion (0..1)", value=0.001, step=0.001)
@@ -263,8 +269,8 @@ Uploaded file: `{upload_file.name}`
     _check_file_availability()
 
     return pn.Column(
-        "## Inference",
-        "### 1. Run Inference",
+        pn.Row("## Inference", pn.Spacer(), inference_help_btn),
+        pn.Row("### 1. Run Inference", pn.Spacer(), batch_inference_help_btn),
         pn.pane.Markdown(
             "Run the trained classifier on the database embeddings to generate predictions. "
             "This will create a CSV file with detections above the specified threshold."
@@ -274,7 +280,9 @@ Uploaded file: `{upload_file.name}`
         pn.Row(btn_run, sizing_mode="stretch_width"),
         
         # Dynamic sections that appear when files exist
+        pn.Row("### 2. Create Subset (Optional)", pn.Spacer(), result_review_help_btn) if section2.objects else None,
         section2,
+        pn.Row("### 3. Upload Detections", pn.Spacer(), export_results_help_btn) if section3.objects else None,
         section3,
         
         "### Log",

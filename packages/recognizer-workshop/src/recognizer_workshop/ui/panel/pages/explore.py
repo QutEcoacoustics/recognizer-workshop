@@ -12,6 +12,10 @@ import datashader as ds
 # HoloViews extension is now loaded in app.py to prevent conflicts
 
 def build(vm):
+    # Create help buttons
+    explore_help_btn = vm.help_system.create_help_button("help-explore-overview", "Help: Explore")
+    umap_help_btn = vm.help_system.create_help_button("help-umap-visualization", "Help: UMAP Visualization")
+
     # --- Widgets and Placeholders ---
     btn_generate = pn.widgets.Button(name="Generate/Update UMAP Cache", button_type="primary", icon="pixels", sizing_mode="stretch_width", margin=(5, 5))
     btn_refresh = pn.widgets.Button(name="Refresh Plot", icon="refresh")
@@ -236,22 +240,34 @@ def build(vm):
     _update_status()
 
     return pn.Column(
-        pn.pane.Markdown("## Explore Embeddings with UMAP"),
+        pn.Row("## Explore Embeddings with UMAP", pn.Spacer(), explore_help_btn),
         pn.Row(
             # Left column: Controls and embedding display (1/3 width)
             pn.Column(
                 pn.Card(
-                    status_pane,  # Status message on top
-                    btn_generate,  # Button below status
-                    pn.Row(fit_subset_size, transform_batch_size),  # Parameters on bottom row
-                    title="UMAP Cache Control",
+                    fit_subset_size,  
+                    transform_batch_size,  
+                    pn.FlexBox(
+                        pn.Column(btn_generate, sizing_mode="fixed", width=200),
+                        status_pane,
+                        flex_direction="row",
+                        flex_wrap="wrap",
+                        align_items="center",
+                        gap="10px",
+                        sizing_mode="stretch_width"
+                    ),
                     sizing_mode="stretch_width",
-                    margin=5,  # Reduce margins
-                    max_height=200  # Limit the card height
+                    margin=5,  
+                    max_height=320  
                 ),
-                embedding_display_container,
-                sizing_mode="stretch_width",  # Changed from stretch_both to prevent excess height
-                max_width=500  # Constrain to roughly 1/3 of typical screen width
+                pn.Row(
+                    pn.Column(
+                        pn.Row("Selected Embedding", pn.Spacer(), umap_help_btn),
+                        embedding_display_container
+                    )
+                ),
+                sizing_mode="stretch_width",  
+                max_width=500  
             ),
             # Right column: Plot (2/3 width)
             pn.Column(
