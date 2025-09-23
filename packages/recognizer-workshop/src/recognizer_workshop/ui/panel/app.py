@@ -128,16 +128,19 @@ def start_app_from_notebook():
         tuple: (app, vm) - The Panel app object and view model
     """
 
-
     print(f"--- KERNEL PROCESS ID: {os.getpid()} ---")
     
     # Create the app
     app, vm = create_app_session()
     
-    # Detect how we're being run
-    if 'bokeh' in sys.modules or __name__.startswith('bokeh'):
+    # Better detection logic for how we're being run
+    is_bokeh_server = 'bokeh' in sys.modules and hasattr(sys.modules['bokeh'], 'server')
+    is_panel_serve = __name__.startswith('bokeh') or 'bokeh_app' in globals()
+    
+    if is_panel_serve:
         # We're being served by Panel's server (panel serve command)
         print("Running via Panel server")
+        print("📱 The app should be available at the server URL provided by Panel serve")
         app.servable(title="Recognizer Workshop")
     else:
         # We're running interactively in Jupyter
