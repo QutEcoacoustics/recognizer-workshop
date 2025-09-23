@@ -11,8 +11,11 @@ from recognizer_workshop.ui.panel.components.native.filter_editor import build_f
 from recognizer_workshop.ui.panel.utils import patch_tqdm
 
 def build(vm):
-    if not vm.config or not vm.config.db_path:
-        return pn.pane.Alert(...)
+    if not hasattr(vm, 'config') or not vm.config or not vm.config.db_path:
+        return pn.pane.Alert(
+            "Configuration not available. Please configure your project on the Config tab first.",
+            alert_type="warning"
+        )
 
     # Create help buttons
     database_help_btn = vm.help_system.create_help_button("help-database-overview", "Help: Database Overview")

@@ -109,7 +109,7 @@ def build(vm):
     def _save(_):
         if not vm.eng:
             return vm.notify("Initialize first.", "error")
-        labels = list(vm.ui.harvest_labels(vm.eng))  # <-- pass eng now
+        labels = list(vm.ui.harvest_labels(vm.eng, results_region="search.results"))
         if not labels:
             return vm.notify("No labels to save.", "warn")
         try:
