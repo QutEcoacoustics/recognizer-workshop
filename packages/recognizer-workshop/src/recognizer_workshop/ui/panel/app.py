@@ -1,19 +1,18 @@
 import base64
 import os
+import sys
 
-os.environ.setdefault("MPLBACKEND", "module://matplotlib_inline.backend_inline")
-
+import holoviews as hv
 import panel as pn
-import logging
-from pathlib import Path
 
 from recognizer_workshop.ui.panel.view_model import ViewModel
 from recognizer_workshop.ui.panel.pages import config, create_database, labeled_examples, search, explore, train, refine, inference, status
 from recognizer_workshop.ui.panel.adaptors import PanelUI
 
+os.environ.setdefault("MPLBACKEND", "module://matplotlib_inline.backend_inline")
+
 # Load necessary extensions
 pn.extension('tabulator', sizing_mode="stretch_width")
-import holoviews as hv
 hv.extension('bokeh')
 
 # --- Global Error Handling Setup ---
@@ -115,6 +114,42 @@ def create_app_session():
     vm.ui = PanelUI()
     app = build_app(vm)
     return app, vm
+
+
+def start_app_from_notebook():
+    """
+    Creates and starts the Panel app from a Jupyter notebook.
+    Automatically detects whether we're running via 'panel serve' or interactive Jupyter.
+    
+    Returns:
+        tuple: (app, vm) - The Panel app object and view model
+    """
+
+
+    print(f"--- KERNEL PROCESS ID: {os.getpid()} ---")
+    
+    # Create the app
+    app, vm = create_app_session()
+    
+    # Detect how we're being run
+    if 'bokeh' in sys.modules or __name__.startswith('bokeh'):
+        # We're being served by Panel's server (panel serve command)
+        print("Running via Panel server")
+        app.servable(title="Recognizer Workshop")
+    else:
+        # We're running interactively in Jupyter
+        print("Running in Jupyter - starting Panel server...")
+        app.show(port=0)
+        print("👆 Click the URL above to open your Recognizer Workshop app")
+        
+        # Also make it servable for flexibility
+        app.servable(title="Recognizer Workshop")
+    
+    return app, vm
+
+
+
+
 
 
 # Serve the app for interactive development

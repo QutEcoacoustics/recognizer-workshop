@@ -1,9 +1,9 @@
-import panel as pn
 import pandas as pd
-from ..view_model import ViewModel
+import panel as pn
 
 from recognizer_workshop.app.services.db_labels.db_labels import LabelCounts, DatabaseSummary
 from recognizer_workshop.app.services.version import get_git_commit_short
+from recognizer_workshop.ui.panel.view_model import ViewModel
 
 def _build_status_view(vm: ViewModel):
     """Helper function to construct the main status view based on the current vm state."""

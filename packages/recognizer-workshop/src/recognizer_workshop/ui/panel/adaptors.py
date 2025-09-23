@@ -1,30 +1,19 @@
 from __future__ import annotations
-from functools import partial
-from turtle import st
-from typing import Iterable, Literal, Optional, Sequence
-from pathlib import Path
-import numpy as np
 from dataclasses import dataclass, field
-from typing import Any
+from functools import partial
+from pathlib import Path
+from typing import Any, Iterable, Literal, Optional, Sequence
 
+import numpy as np
 import panel as pn
 import param
-from matplotlib import pyplot as plt
 
-from perch_hoplite import audio_io
 from perch_hoplite.db import interface as hoplite_interface
 
-# Optional: if you want to fetch tags from BAW
-# and to build ecosounds audio URLs for examples
-from baw_helpers import baw_utils
-
-# import QueryDisplay
-
 from recognizer_workshop.app.agile_engine import AgileConfig, agile_state, LabelName
-#from recognizer_workshop.ui.panel.components.ipy_widgets.query_selector import QuerySelector
 from recognizer_workshop.perch_hoplite_custom_modifications.embedding_display import QueryDisplay
-
 from recognizer_workshop.ui.panel.components.native.embedding_display import PanelQuerySelector, PanelEmbeddingDisplay, PanelEmbeddingDisplayGroup
+
 
 @dataclass
 class Region():

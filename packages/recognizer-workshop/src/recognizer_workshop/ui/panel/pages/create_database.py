@@ -1,13 +1,14 @@
-import panel as pn
 import asyncio
-from pathlib import Path
 import hashlib
 import json
+from pathlib import Path
+
+import panel as pn
+from panel_material_ui import Dialog
 
 from recognizer_workshop.app.create_database.create_database import create_database_from_baw
 from recognizer_workshop.ui.panel.components.native.filter_editor import build_filter_editor
 from recognizer_workshop.ui.panel.utils import patch_tqdm
-from panel_material_ui import Dialog
 
 def build(vm):
     if not vm.config or not vm.config.db_path:

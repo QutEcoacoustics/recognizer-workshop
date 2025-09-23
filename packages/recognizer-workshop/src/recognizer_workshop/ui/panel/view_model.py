@@ -1,15 +1,17 @@
 from __future__ import annotations
-from types import SimpleNamespace
+
 from datetime import datetime
-import panel as pn
+from types import SimpleNamespace
+
 import logging
-from recognizer_workshop.ui.panel.utils.log_handler import PanelLogHandler
+import panel as pn
+import param
 
 from recognizer_workshop.ui.panel.help import HelpSystem
+from recognizer_workshop.ui.panel.utils.log_handler import PanelLogHandler
 
 
 
-import param
 # we want some UI elements to be reactive. 
 # 1. Generic Observable class to represent a value that ui elements react to
 #    when changed

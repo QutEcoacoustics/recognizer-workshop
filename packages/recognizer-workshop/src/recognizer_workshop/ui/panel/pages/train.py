@@ -1,13 +1,13 @@
 import asyncio
+from contextlib import contextmanager
+
+import numpy as np
 import pandas as pd
 import panel as pn
-import numpy as np
-
 import tqdm
-from contextlib import contextmanager
-import panel as pn
 
 from recognizer_workshop.ui.panel.utils.patch_tqdm import patch_tqdm
+
 
 def build(vm):
     # Create help buttons

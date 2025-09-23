@@ -1,6 +1,8 @@
+from pathlib import Path
+
 import panel as pn
 import param
-from pathlib import Path
+
 
 class HelpSystem(pn.custom.JSComponent):
     """Manages the application's help sidebar."""

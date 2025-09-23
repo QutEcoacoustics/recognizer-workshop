@@ -1,15 +1,16 @@
-import panel as pn
 import asyncio
-import holoviews as hv
-from holoviews import opts, streams
-from bokeh.palettes import Category20
-# The service now handles all the backend logic
-from recognizer_workshop.app.services import umap_service
+
 import colorcet as cc
+import datashader as ds
+import holoviews as hv
+import panel as pn
+from bokeh.palettes import Category20
+from holoviews import opts, streams
 from holoviews.operation import datashader
 from holoviews.operation.datashader import dynspread
-import datashader as ds
-# HoloViews extension is now loaded in app.py to prevent conflicts
+
+from recognizer_workshop.app.services import umap_service
+
 
 def build(vm):
     # Create help buttons

@@ -1,7 +1,8 @@
-import panel as pn
-import pandas as pd
-import json
 import copy
+import json
+
+import pandas as pd
+import panel as pn
 
 from recognizer_workshop.app.services.db_labels.db_labels import add_labels_to_db
 

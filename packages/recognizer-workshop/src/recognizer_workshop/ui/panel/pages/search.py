@@ -1,8 +1,11 @@
-import panel as pn
 from pathlib import Path
+
+import panel as pn
+
 from recognizer_workshop.app.services.search import resolve_query_uri
 from recognizer_workshop.ui.panel.utils.utils import parse_target_score
 from recognizer_workshop.ui.panel.components.native.label_picker import build_active_label_picker
+
 
 def build(vm):
 
@@ -115,13 +118,9 @@ def build(vm):
         except Exception as e:
             vm.notify(f"Save failed: {e}", "error")
 
-
-
     btn_load_uri.on_click(_load_remote)
     btn_search.on_click(_search)
     btn_save.on_click(_save)
-
-
 
     return pn.Column(
         pn.Row("## Search (single example)", pn.Spacer(), search_help_btn),

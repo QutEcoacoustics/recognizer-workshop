@@ -1,7 +1,10 @@
-import panel as pn
-import pandas as pd
 from pathlib import Path
+
+import pandas as pd
+import panel as pn
+
 from recognizer_workshop.app.agile_modeling_helpers import make_inference_subset
+
 
 def build(vm):
     # Create help buttons

@@ -1,9 +1,10 @@
-import pandas as pd
-import umap
 import logging
 from pathlib import Path
-import joblib # For saving/loading the UMAP model
+
+import joblib
 import numpy as np
+import pandas as pd
+import umap
 from tqdm import tqdm
 
 log = logging.getLogger(__name__)

@@ -47,6 +47,8 @@ dependencies = [
   # allows serving the app through a notebook
   "jupyter-server-proxy",
 
+  "panel_material_ui",
+
   "umap-learn",
 
   "joblib",
@@ -55,9 +57,17 @@ dependencies = [
 
   "datashader",
 
-  "pyarrow"
+  "pyarrow",
 
+  "pandas",           
+  "numpy",            
+  "matplotlib",      
 
+  "tqdm",  
+
+  # Used for palettes in explore page of panel ui
+  "bokeh",             
+  "colorcet",        
 
 ]
 
