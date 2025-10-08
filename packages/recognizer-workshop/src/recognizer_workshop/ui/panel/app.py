@@ -44,7 +44,9 @@ def encode_png_to_base64(path: Path) -> str:
 
 def build_app(vm):
     """Builds the main application layout using a Panel template."""
-    
+
+    vm.ui = PanelUI()
+
     vm.setup_help_system()
 
     template = pn.template.FastListTemplate(
@@ -114,7 +116,6 @@ def build_app(vm):
 def create_app_session():
     """Creates a complete, isolated application session."""
     vm = ViewModel()
-    vm.ui = PanelUI()
     app = build_app(vm)
     return app, vm
 

@@ -21,61 +21,78 @@ classifiers = [
   "Programming Language :: Python :: Implementation :: CPython",
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
-# dependencies = [
-#   "baw-helpers @ {root:parent:uri}/baw-helpers",
-#   "perch-hoplite @ {root:parent:parent:uri}/libs/perch-hoplite",
-#   "ipywidgets>=8.1.0"
-# ]
-
-# dependencies = [
-#   "baw-helpers = { path = \"../baw-helpers\", editable = true }",
-#   "perch-hoplite @ git+https://github.com/google-research/perch-hoplite.git@c151c7b8be0f829973a1213555aefe732225a089",
-#   "ipywidgets>=8.1.0"
-# ]
 
 
 dependencies = [
-  "ipywidgets>=8.1.0",
-  "panel>=0.14.0",
 
-  # allows restoring nested dataclass objects saved as json to their correct classes
-  "dacite",
+  "panel",
 
-  # allows serving the app through a notebook
-  "jupyter_bokeh",
-
-  # allows serving the app through a notebook
-  "jupyter-server-proxy",
-
-  "panel_material_ui",
-
-  "umap-learn",
-
-  "joblib",
-
+  # High-level plotting library tightly integrated with Panel
+  # used in the explore page for the umap plot
   "holoviews",
 
+  # For large-scale data rasterization & efficient visualization (e.g. UMAP plots)
+  # used in the explore page for the umap plot
   "datashader",
 
+  # Needed to read/write Parquet files and work with arrow tables
+  # used for hoplie db creation from parquet files
   "pyarrow",
 
-  "pandas",           
-  "numpy",            
-  "matplotlib",      
+  "pandas",
+  "numpy",
 
-  "tqdm",  
+  "matplotlib",
 
+  "tqdm",
+
+  # Caching, parallel computation, or model persistence
+  # used for umap generation and caching
+  "joblib",
+
+  # utility for reconstructing nested dataclasses from JSON
+  # Used for loading agile config
+  "dacite",
+
+  # Color palettes for datashader/holoviews visualizations
   # Used for palettes in explore page of panel ui
-  "bokeh",             
-  "colorcet",        
+  "colorcet",
 
+  # Material UI component styling for Panel dashboards
+  "panel_material_ui",
 ]
+
+
+[project.optional-dependencies]
+jupyter = [
+
+  # Required for interactive widgets in Jupyter notebooks
+  "ipywidgets>=8.1.0",
+
+  # Bridges Panel/Bokeh objects to render nicely inside notebooks
+  "jupyter_bokeh",
+
+  # Note: we intentionally do NOT include jupyter-server, jupyterlab,
+  # or jupyter-server-proxy here. Those are provided by TLJH on the server,
+  # and pinning them here risks version conflicts.
+]
+
+
+
+
+
+
+
+
 
 
 [project.urls]
 Documentation = "https://github.com/QutEcoacoustics/recognizer-workshop#readme"
 Issues = "https://github.com/QutEcoacoustics/recognizer-workshop/issues"
 Source = "https://github.com/QutEcoacoustics/recognizer-workshop"
+
+[project.scripts]
+recognizer-workshop-serve = "recognizer_workshop.ui.panel.serve:main"
 
 
 [tool.hatch.metadata]

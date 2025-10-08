@@ -28,3 +28,18 @@ This will:
   - use hatch to run the tests in an isolated environment
   - print verbose as the test run AND capture the output so it will be dumped at the end for failed tests
     - this is useful if something is hanging due to staging server timeouts. 
+
+
+# Running in jupyterhub
+
+The recognizer workshop package doesn't need jupyter or jupyterhub to run, but it's built with deployment in a jupyterhub server in mind. 
+
+To run in jupyterhub, some extra dependencies are needed:
+
+- jupyter-server
+- jupyter_bokeh
+- ipywidgets (??) 
+
+
+
+
