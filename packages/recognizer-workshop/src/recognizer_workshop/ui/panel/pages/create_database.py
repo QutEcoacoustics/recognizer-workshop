@@ -53,7 +53,8 @@ def build(vm):
         progress_bar.value = 0
         log.object = f"🚀 Starting database creation in `{db_dir}`..."
         try:
-            with patch_tqdm(progress_bar):
+            # Use the correct context manager from the patch_tqdm module
+            with patch_tqdm.patch_tqdm(progress_bar):
                 await asyncio.to_thread(
                     create_database_from_baw, db_path=db_dir, filelist_path=filelist_path,
                     client=vm.eng.baw_api if vm.eng else None, filter=filters[0],
@@ -67,7 +68,9 @@ def build(vm):
     async def _create_db(_):
         db_dir = vm.config.db_path.expanduser()
         if db_dir.exists() and any(db_dir.iterdir()) and not list(db_dir.glob("_source_arids_*.json")):
-             return vm.notify(f"Directory '{db_dir}' is not empty.", "error")
+            # TODO: this is triggering for ds_store and things like that, we need to fix it
+            print(f"Directory '{db_dir}' is not empty.")
+             #return vm.notify(f"Directory '{db_dir}' is not empty.", "error")
         filters = get_page_filters()
         if not filters or not filters[0]: return vm.notify("Please define at least one filter.", "warn")
         filter_hash = _hash_filters(filters)

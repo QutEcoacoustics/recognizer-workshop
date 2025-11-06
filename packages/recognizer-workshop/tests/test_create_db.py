@@ -91,7 +91,8 @@ def make_fake_api(
     source_base: str = "https://api.ecosounds.org",
 ):
     """
-    Factory returning a FakeAPI with configurable shape/dtype.
+    Factory returning a FakeAPI to provide anaysis result parquet files
+    with configurable shape/dtype.
 
     - n_rows: number of frames per ARID
     - n_features: number of feature columns (f0..f{n_features-1})

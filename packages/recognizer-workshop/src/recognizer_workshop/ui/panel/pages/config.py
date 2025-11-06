@@ -1,15 +1,9 @@
 """Configuration page for the recognizer workshop UI."""
 
-# Standard library imports
 from functools import partial
 from pathlib import Path
-
-# Third-party imports
 import panel as pn
-
-# Local imports
 from recognizer_workshop.app.agile_engine import AgileConfig, agile_state, get_recent_files
-
 
 # TODO: tidy this up
 try:
@@ -31,12 +25,6 @@ def build(vm):
     Returns:
         Panel Column containing the configuration interface
     """
-    # --- WIDGETS ---
-
-    # config_path_widget = pn.widgets.TextInput(
-    #     name="Config Save Path",
-    #     value=str(ppath("~/agile_config.json"))
-    # )
 
     dialogs_container = pn.Column()  
 
@@ -66,19 +54,18 @@ def build(vm):
     btn_save_as = pn.widgets.Button(name="Save As...")
     current_config_path_display = pn.widgets.StaticText()
 
-
-
-    # --- BUTTONS ---
     btn_start_engine = pn.widgets.Button(name="🚀 Start Engine", button_type="primary")
     
     def update_engine_button():
         """Update the engine button text and state based on current engine status."""
         if vm.eng:
-            btn_start_engine.name = "Restart Engine"
+            btn_start_engine.name = "🔄 Restart Engine"
             btn_start_engine.button_type = "warning"
         else:
-            btn_start_engine.name = "Start Engine"
+            btn_start_engine.name = "🚀 Start Engine"
             btn_start_engine.button_type = "primary"
+
+        # button is disabled until a config path is set
         btn_start_engine.disabled = not vm.config.config_path
 
     # Label editor populated only after the engine has started successfully.
@@ -149,7 +136,6 @@ def build(vm):
             str(vm.config.models_folder) == str(default_paths['models_folder']) or
             str(vm.config.predictions_folder) == str(default_paths['predictions_folder'])
         )
-    
 
     def sync_config_to_ui():
         """Updates all UI widgets from the current vm.config object."""

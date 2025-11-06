@@ -1,3 +1,4 @@
+from unittest import result
 import pytest
 import numpy as np
 
@@ -12,6 +13,8 @@ from perch_hoplite.db import interface as hoplite_interface
 
 # Functions to test
 from recognizer_workshop.app.services.db_labels import db_labels
+
+from recognizer_workshop.app.services.db_labels.dataclasses import LabelCounts
 
 # This is a constant we will use across our tests
 TEST_ANNOTATOR_ID = "test_suite_annotator"
@@ -90,10 +93,9 @@ def test_add_labeled_audio_examples(db_with_path, audio_files_folder, mock_embed
     assert len(labels) > 0
 
 
-def test_print_label_counts(db_with_path, capsys):
+def test_get_label_counts(db_with_path):
     """
-    Tests that the label count summary is printed correctly.
-    'capsys' is a special pytest fixture to capture printed output.
+    Tests that the label count summary is generated correctly, and that the LabelCounts dataclass works.
     """
     db_connection, _ = db_with_path
     # Arrange: Add some data to the database first
@@ -102,9 +104,10 @@ def test_print_label_counts(db_with_path, capsys):
     db_labels.add_embedding_to_db(db_connection, "d1", embedding, "s2", "BirdA", TEST_ANNOTATOR_ID)
     
     # Act: Run the function that prints to the console
-    db_labels.print_label_counts(db_connection)
+    result = db_labels.get_label_counts(db_connection)
     
-    # Assert: Check what was printed
-    captured = capsys.readouterr()
-    assert "Label counts:" in captured.out
-    assert "BirdA: 2 positive, 0 negative" in captured.out
+    assert len(result) == 1
+    assert "BirdA" in result
+    assert isinstance(result["BirdA"], LabelCounts)
+    assert result["BirdA"].positive == 2
+    assert result["BirdA"].negative == 0

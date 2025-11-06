@@ -209,7 +209,7 @@ def build(vm):
             
             # Only show embedding if the click is reasonably close to a point
             min_distance = distances.min()
-            if min_distance < 5.0:  # Adjust this threshold as needed
+            if min_distance < 5.0: 
                 embedding_id = df_plot.loc[nearest_idx, 'embedding_id']
                 vm.ui.show_selected_embedding(vm.eng, embedding_id)
                 # Hide placeholder and show embedding when something is selected
@@ -249,7 +249,7 @@ def build(vm):
                     fit_subset_size,  
                     transform_batch_size,  
                     pn.FlexBox(
-                        pn.Column(btn_generate, sizing_mode="fixed", width=200),
+                        pn.Column(btn_generate,btn_refresh,sizing_mode="fixed", width=200),
                         status_pane,
                         flex_direction="row",
                         flex_wrap="wrap",

@@ -104,9 +104,8 @@ class AgileConfig:
         """
         log.info("Running validation...")
 
-        # convert all paths
+        # convert all path strings to Path objects
         for file_name in self._PATH_FIELDS:
-            # convert the filename property to a Path object
             setattr(self, file_name, Path(getattr(self, file_name)) if getattr(self, file_name) is not None else None)
 
         # Check if essential paths exist
@@ -509,11 +508,11 @@ class agile_state:
         if self.search_results is None:
             self.search_results = {} # dict for each target label
 
-        self.search_results[target_label] = results
+        self.search_results[str(target_label)] = results
         if getattr(self, "search_scores", None) is None:
             self.search_scores = {}
 
-        self.search_scores[target_label] = all_scores
+        self.search_scores[str(target_label)] = all_scores
 
 
 

@@ -91,7 +91,7 @@ def create_database_from_baw(
 
 
 def convert_parquet(
-    db_path: str,
+    db_path: str | Path,
     *,
     parquet_source: str | list | Path,
     config: str | Path | None = None,
@@ -113,9 +113,9 @@ def convert_parquet(
         "max_size": max_size,
         "source_map_fn": source_map_fn
     }
-   
-    if not (Path(db_path).exists() and any(Path(db_path).iterdir())):
-
+    db_path = Path(db_path).expanduser()
+    has_sqlite = db_path.exists() and any(db_path.glob("*.sqlite"))
+    if not has_sqlite:
         db, model_config = create_empty_db(
             db_path=db_path,
             parquet_source=parquet_source,

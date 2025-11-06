@@ -89,7 +89,7 @@ def get_filter_result(
             data = None  # corrupted cache; caller can decide what to do
         return data, out_file
 
-    # Miss or bypass: call API
+
     data = api.baw_filter(model, payload, qsp=qsp)
     if data is None:
         # API layer already handled/logged; return path so caller knows where it would be

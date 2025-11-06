@@ -185,14 +185,14 @@ def add_labels_to_db(db, config, items):
         - 'error': An unexpected database error occurred.
     """
 
-    # results will be in the same format as the input items,
+    # results (of adding) will be in the same format as the input items,
     # but with the offsets lists replaced by lists of dicts with offset and outcome
     results = copy.deepcopy(items)
     
 
     for source_id, labels_data in items.items():
 
-        # Query the database ONCE per source to get all its embeddings and offsets.
+        # Query the database ONCE per source to get all its embeddings and offsets for this source
         try:
             source_embeddings = db.get_embeddings_by_source(
                 dataset_name=config.search_dataset_name,

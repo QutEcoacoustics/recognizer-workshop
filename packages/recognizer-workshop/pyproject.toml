@@ -25,15 +25,15 @@ classifiers = [
 
 dependencies = [
 
-  "panel",
+  "panel>=1.7.0",
 
   # High-level plotting library tightly integrated with Panel
   # used in the explore page for the umap plot
-  "holoviews",
+  "holoviews>=1.19.0",
 
   # For large-scale data rasterization & efficient visualization (e.g. UMAP plots)
   # used in the explore page for the umap plot
-  "datashader",
+  "datashader>=0.16.0",
 
   # Needed to read/write Parquet files and work with arrow tables
   # used for hoplie db creation from parquet files

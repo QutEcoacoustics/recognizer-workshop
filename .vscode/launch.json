@@ -5,7 +5,17 @@
   "version": "0.2.0",
   "configurations": [
 
-
+    {
+        // use the serve module in the recognizer_workshop package
+        // to run the panel app 
+        "name": "Panel: recognizer-workshop-serve (local)",
+        "type": "python",
+        "request": "launch",
+        "module": "recognizer_workshop.ui.panel.serve",
+        "args": ["--port", "5006", "--address", "127.0.0.1", "--autoreload"],
+        "console": "integratedTerminal",
+        "justMyCode": false
+    }
     {
         "name": "Panel: Debug Notebook App",
         "type": "python",

@@ -29,15 +29,25 @@ ANALYSIS_FILENAME_MAP = {
 
 
 class baw_api:
-    """Generic wrapper for the BAW API"""
+    """Generic client for the BAW API"""
 
+    # defaults
     base_url = "https://api.ecosounds.org"
     debug = False
     token = None
 
 
-
     def __init__(self, token=None, base_url=None, debug=False, allow_prompt=None):
+        """
+        Initializes the BAW API client.
+        Args:
+            token (str): API authentication token. If None, will look for BAW_AUTH_TOKEN in environment variables.
+            base_url (str): Base URL for the BAW API. If None, will use the BAW_API_BASE_URL environment variable or default to ecosounds.
+            debug (bool): If True, enables debug mode with verbose logging.
+            allow_prompt (bool): If True, allows prompting the user for a token if none is provided or found. 
+                                 If None, defaults to True if running in an interactive terminal.
+        
+        """
 
        
         if not base_url:
@@ -53,9 +63,9 @@ class baw_api:
         self._tls = threading.local()
         self._lr_lock = threading.Lock()
 
-        # we don't always want to prompt for a token, e.g. non interactive tests
-        # if allow_prompt is not specified in either an arg or env var, default to True, 
-        # but only if we detect an interactive terminal
+        # we don't always want to prompt for a token, e.g. non interactive tests or panel app
+        # if allow_prompt is not specified in either an arg or env var,
+        # default to True but only if we detect an interactive terminal
         if allow_prompt is None:
             env = os.getenv("BAW_ALLOW_PROMPT")
             if env is not None:
@@ -92,6 +102,7 @@ class baw_api:
         """
         Build headers per request from current token.
         If content_type is None, we omit Content-Type (needed for multipart/form-data).
+        Only adds Authorization header if token is set, otherwise we make unauthenticated requests in anonymous mode.
         """
         h = {}
         if content_type is not None:
@@ -482,59 +493,170 @@ class baw_api:
             print(message)
         
         return is_valid
+
+
+    
+
+    def update_token(self, 
+                     token=None, 
+                     allow_prompt=True, 
+                     require_auth=False):
+        """
+        Validate and set authentication token.
+        
+        Args:
+            token: Explicit token to use
+            save_to_env: Whether to save valid tokens to .env
+            allow_prompt: Whether to interactively prompt for token
+            require_auth: If True, raises error when no valid token available
+        """
+        print("\nUpdating BAW API token...")
         
 
-    def update_token(self, token=None, save_to_env=True, allow_prompt=True):
-        """
-        sets the token to the supplied value
-        tests the connection. 
-        if can't connect, looks for a token in the env. 
-        If found, tests it
-        if not prompts the user to enter a token
-        tests the resulting token
-        updates the environment variable if successful
-        """
+        supplied_token = token if token else None
 
-        print("\nUpdating BAW API token...")
+        # token not supplied, see if it's in the environment already
+        if supplied_token is None:
+            supplied_token = os.getenv('BAW_AUTH_TOKEN')
 
-        self.token = token
+        # no token in the environment (and not supplied)
+        # try loading from dotenv
+        env_file = find_dotenv(usecwd=True)
+        if not env_file:
+            # if there is no env file, we still create a default path
+            # because in some situations we will save a inputted token there
+            env_file = os.path.join(os.getcwd(), '.env')
 
-        if not self.test_token():
-
-            print("\nAuthentication token is missing or invalid.")
-            env_file = find_dotenv(usecwd=True)
-            if not env_file:
-                env_file = os.path.join(os.getcwd(), '.env')
-                print("No .env file found. A new one will be created if a token is provided.")
-                config = {}
-            else:
-                print(f"Found .env file: {env_file}")
+        if supplied_token is None:
+            if os.path.exists(env_file):
                 config = dotenv_values(env_file)
+                supplied_token = config.get('BAW_AUTH_TOKEN', None)
+                supplied_token = supplied_token if supplied_token else None
+
+        # any empty strings should be converted to None
+        if not supplied_token:
+            supplied_token = None
+
+        # we have a token, so test it. 
+        if supplied_token is not None:
+            self.token = supplied_token
+            if self.test_token():
+                return True 
+            else:
+                self.token = None
+        else:
+            print("No token supplied in arguments or environment.")
+        
+        # if we reach here, we have no valid token
+        # if we don't require it, just succeed in anonymous mode with a message
+        # if we do require it, either prompt or fail
+        if require_auth:
+            if not allow_prompt:
+                print("Authentication required but no valid token available")
+                return False  # Fail explicitly
+            else:
+                self._prompt_for_token(env_file=env_file)
+                if self.token is None:
+                    print("No valid token provided, exiting.")
+                    return False  # Fail explicitly
+            
+        if self.token is None:
+            print("\n💡 No Valid Token supplied, creating anonymous client")
+            print("\n💾 For authenticated access initialize the client with a token or:")
+            print("   Option A: Add to your .env file:")
+            print("             BAW_AUTH_TOKEN=your-token-here")
+            print("   Option B: Export as environment variable:")
+            print("             export BAW_AUTH_TOKEN=your-token-here")
+
+                
+        # Will have already returned false if require_auth and no valid token
+        # or if a token was supplied but was invalid. 
+        return True
+
+
+
+    def _prompt_for_token(self, env_file = None):
+        """
+        Prompts the user to enter a token interactively.
+        Sets self.token if it's valid. 
+        
+        """
+        new_token = None
+        while True:
+            print("\nPlease enter a valid token to proceed. (Type 'quit' to to proceed in anonymous mode)")
+            new_token = getpass.getpass(f"Enter your BAW_AUTH_TOKEN for {self.base_url}: ")
+            
+            if new_token.lower() in ['quit', 'q']:
+                return
+
+            self.token = new_token 
+            if self.test_token():
+                if env_file is not None:
+                    # promt to save to env
+                    save = input(f"Do you want to save the token to {env_file} for future use? (y/n): ").strip().lower()
+                    if save in ['y', 'yes']:
+                        set_key(env_file, 'BAW_AUTH_TOKEN', new_token)
+                return
+            else:
+                print("The token you entered is invalid. Please try again.")
+        
+        
+
+
+
+    # def update_token(self, token=None, save_to_env=True, allow_prompt=True):
+    #     """
+    #     sets the token to the supplied value
+    #     tests the connection. 
+    #     if can't connect, looks for a token in the env. 
+    #     If found, tests it
+    #     if not prompts the user to enter a token
+    #     tests the resulting token
+    #     updates the environment variable if successful
+    #     """
+
+    #     print("\nUpdating BAW API token...")
+
+    #     self.token = token
+
+    #     if not self.test_token():
+
+    #         print("\nAuthentication token is missing or invalid.")
+    #         env_file = find_dotenv(usecwd=True)
+    #         if not env_file:
+    #             env_file = os.path.join(os.getcwd(), '.env')
+    #             print("No .env file found. A new one will be created if a token is provided.")
+    #             config = {}
+    #         else:
+    #             print(f"Found .env file: {env_file}")
+    #             config = dotenv_values(env_file)
 
             
-            self.token = config.get('BAW_AUTH_TOKEN', None)
+    #         self.token = config.get('BAW_AUTH_TOKEN', None)
 
-            if not self.test_token():
+    #         if not self.test_token():
 
-                if not allow_prompt:
-                    print("No valid token found and prompting is disabled. Please provide a valid token or set one in the environment.")
-                    return
+    #             if not allow_prompt:
+    #                 print("No valid token found and prompting is disabled. Please provide a valid token or set one in the environment.")
+    #                 return
 
-                # Loop until the user provides a valid token or quits
-                while allow_prompt:
-                    print("\nPlease enter a valid token to proceed. (Type 'quit' to exit)")
-                    new_token = getpass.getpass(f"Enter your BAW_AUTH_TOKEN for {self.base_url}: ")
+    #             # Loop until the user provides a valid token or quits
+    #             while allow_prompt:
+    #                 print("\nPlease enter a valid token to proceed. (Type 'quit' to exit)")
+    #                 new_token = getpass.getpass(f"Enter your BAW_AUTH_TOKEN for {self.base_url}: ")
                     
-                    if new_token.lower() in ['quit', 'q']:
-                        break
+    #                 if new_token.lower() in ['quit', 'q']:
+    #                     break
 
-                    self.token = new_token 
-                    if self.test_token():
-                        if save_to_env:
-                            set_key(env_file, 'BAW_AUTH_TOKEN', new_token)
-                        break 
-        else:
-            print("\nExisting token from .env file is valid.")
+    #                 self.token = new_token 
+    #                 if self.test_token():
+    #                     if save_to_env:
+    #                         set_key(env_file, 'BAW_AUTH_TOKEN', new_token)
+    #                     break 
+    #     else:
+    #         print("\nExisting token from .env file is valid.")
+
+
 
 
     @staticmethod
