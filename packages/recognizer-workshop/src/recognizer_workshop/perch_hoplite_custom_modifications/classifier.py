@@ -1,3 +1,4 @@
+import logging
 import numpy as np
 import tqdm
 from etils import epath
@@ -101,4 +102,4 @@ def write_inference_csv(
       kept_idxes = batch_idxes[keep_rows]
       executor.submit(csv_worker_fn, kept_idxes, logits, state)
       detection_count += detections.sum()
-  print(f'Wrote {detection_count} detections to {output_filepath}')
+  log.info(f'Wrote {detection_count} detections to {output_filepath}')

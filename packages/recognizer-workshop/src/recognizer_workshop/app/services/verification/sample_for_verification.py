@@ -6,9 +6,12 @@ Calculate an asymmetric Gaussian distribution shape based on the min and max val
 Then sample a number of unique items from the scores that match this distribution shape.
 
 """
+import logging
 import numpy as np
 import random
 import matplotlib.pyplot as plt
+
+log = logging.getLogger(__name__)
 
 def calculate_sigmas(min_val, max_val, neg_target_y=0.05, pos_target_y=0.05):
     """
@@ -58,8 +61,8 @@ def _internal_sampler(numbers, original_indices, k, min_val, max_val, neg_target
         
     # Define the target probability distribution function (PDF)
     sigma_neg, sigma_pos = calculate_sigmas(min_val, max_val, neg_target_y, pos_target_y)
-    print(f"Calculated σ_neg: {sigma_neg:.4f} (for x={min_val}, y={neg_target_y})")
-    print(f"Calculated σ_pos: {sigma_pos:.4f} (for x={max_val}, y={pos_target_y})\n")
+    log.debug(f"Calculated σ_neg: {sigma_neg:.4f} (for x={min_val}, y={neg_target_y})")
+    log.debug(f"Calculated σ_pos: {sigma_pos:.4f} (for x={max_val}, y={pos_target_y})\n")
 
     def asymmetric_gaussian_pdf(x):
         sigma = np.where(x < 0, sigma_neg, sigma_pos)
@@ -81,10 +84,10 @@ def _internal_sampler(numbers, original_indices, k, min_val, max_val, neg_target
     selected_original_indices = []
     available_items = list(zip(numbers, original_indices))
     
-    print(f"Starting to map {k} ideal samples to available data points...")
+    log.debug(f"Starting to map {k} ideal samples to available data points...")
     for ideal_val in ideal_samples:
         if not available_items:
-            print("Warning: Ran out of available items to sample from.")
+            log.warning("Warning: Ran out of available items to sample from.")
             break
         
         # Find the closest available real number to the current ideal sample
@@ -98,7 +101,7 @@ def _internal_sampler(numbers, original_indices, k, min_val, max_val, neg_target
         # Add its original index to our results
         selected_original_indices.append(chosen_item[1])
             
-    print(f"Successfully selected {len(selected_original_indices)} unique items.")
+    log.debug(f"Successfully selected {len(selected_original_indices)} unique items.")
     return np.array(selected_original_indices)
 
 
@@ -225,8 +228,8 @@ def demonstrate_sampling():
     # Get the actual values of the sampled scores using the returned indices
     sampled_values = my_scores[sampled_indices]
     
-    print(f"\nSample of 10 chosen indices: {sampled_indices[:10]}")
-    print(f"Corresponding values: {sampled_values[:10]}")
+    log.info(f"\nSample of 10 chosen indices: {sampled_indices[:10]}")
+    log.info(f"Corresponding values: {sampled_values[:10]}")
 
     plot_sampling_results(
         original_scores=my_scores,

@@ -2,11 +2,14 @@
 # from the old workshop
 
 from pathlib import Path
+import logging
 import requests
 import zipfile
 from tqdm import tqdm
 import ipywidgets as widgets
 from IPython.display import display
+
+log = logging.getLogger(__name__)
 
 def download_embeddings(dataset_name, 
                         embeddings_dir, 
@@ -80,7 +83,7 @@ def download_embeddings(dataset_name,
 
     if already_unzipped:
 
-      print(f"Embeddings already downloaded and extracted at {embeddings_dir.resolve()}.")
+      log.info(f"Embeddings already downloaded and extracted at {embeddings_dir.resolve()}.")
       download_again_button()
 
       if already_downloaded:
@@ -93,7 +96,7 @@ def download_embeddings(dataset_name,
       # This can happen if they interrupt during download. 
       # (in this case they probably don't want to unzip without downloading)
       # TODO: (phil) check if the zip is complete, e.g. comparing file size to the response headers
-      print(f"Embeddings already downloaded to {zip_path} but not unzipped.")
+      log.info(f"Embeddings already downloaded to {zip_path} but not unzipped.")
       download_again_button()
       unzip_again_button("Unzip existing downloaded file?")
 
@@ -158,13 +161,13 @@ def download_file(url: str, dest: str | Path, max_retries: int = 5, description:
             if dest.exists():
                 existing_size = dest.stat().st_size
                 if existing_size == total_size:
-                    print(f"File already completely downloaded ({existing_size} bytes)")
+                    log.info(f"File already completely downloaded ({existing_size} bytes)")
                     return True
                 elif supports_resume and existing_size < total_size:
-                    print(f"Resuming download from byte {existing_size}")
+                    log.info(f"Resuming download from byte {existing_size}")
                     headers['Range'] = f'bytes={existing_size}-'
                 else:
-                    print("Cannot resume download - starting from beginning")
+                    log.info("Cannot resume download - starting from beginning")
                     existing_size = 0
             
             dest.parent.mkdir(parents=True, exist_ok=True)
@@ -194,10 +197,10 @@ def download_file(url: str, dest: str | Path, max_retries: int = 5, description:
             
             # Verify complete download
             if dest.stat().st_size == total_size:
-                print("Download completed successfully")
+                log.info("Download completed successfully")
                 return True
             else:
-                print(f"Download incomplete, retrying... (Attempt {attempt + 1}/{max_retries})")
+                log.warning(f"Download incomplete, retrying... (Attempt {attempt + 1}/{max_retries})")
                 time.sleep(2)
                 continue
                 
@@ -206,8 +209,8 @@ def download_file(url: str, dest: str | Path, max_retries: int = 5, description:
                 requests.exceptions.ReadTimeout) as e:
             if attempt < max_retries - 1:
                 wait_time = 2 ** attempt
-                print(f"Download failed, retrying in {wait_time} seconds... (Attempt {attempt + 1}/{max_retries})")
-                print(f"Error: {str(e)}")
+                log.warning(f"Download failed, retrying in {wait_time} seconds... (Attempt {attempt + 1}/{max_retries})")
+                log.warning(f"Error: {str(e)}")
                 time.sleep(wait_time)
                 continue
             else:

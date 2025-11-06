@@ -1,4 +1,5 @@
 import dataclasses
+import logging
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -11,6 +12,7 @@ from baw_helpers import baw_helpers
 from recognizer_workshop.app.services.verification import sample_for_verification
 
 
+log = logging.getLogger(__name__)
 
 # name of the baw provenance to attach to detection events 
 PROVENANCE_NAME = "perch-detection"
@@ -48,8 +50,8 @@ def list_audio_files(path, recursive=True, quiet=False, extensions=(".wav", ".fl
     ]
 
     if not quiet:
-        print(f"Found {len(audio_files)} audio files in {str(path)}")
-        print("\n".join([f"{i}: {f}" for i, f in enumerate(audio_files)]))
+        log.info(f"Found {len(audio_files)} audio files in {str(path)}")
+        log.debug("\n".join([f"{i}: {f}" for i, f in enumerate(audio_files)]))
     return audio_files
 
 
@@ -187,10 +189,10 @@ def get_or_create_workshop_provenance(api):
     baw_api.baw_api.print_response(existing_provenances)
 
     if len(existing_provenances) > 0:
-        print(f"Provenance {PROVENANCE_NAME} already exists. Using existing provenance.")
+        log.info(f"Provenance {PROVENANCE_NAME} already exists. Using existing provenance.")
         return existing_provenances[0]
     else:
-        print(f"Creating new provenance {PROVENANCE_NAME}.")
+        log.info(f"Creating new provenance {PROVENANCE_NAME}.")
 
         provenance_data = {
             "name": PROVENANCE_NAME,
@@ -239,6 +241,6 @@ def make_inference_subset(inference_csv, subset_csv, limit=100):
     subset_df = df.loc[all_indices].reset_index(drop=True)
     subset_df.to_csv(subset_csv, index=False)
 
-    print(f"Successfully created a random subset of {len(subset_df)} rows ({limit} for each of {len(labels)} labels) from '{inference_csv}'.")
-    print(f"Output saved to '{subset_csv}'")
+    log.info(f"Successfully created a random subset of {len(subset_df)} rows ({limit} for each of {len(labels)} labels) from '{inference_csv}'.")
+    log.info(f"Output saved to '{subset_csv}'")
 

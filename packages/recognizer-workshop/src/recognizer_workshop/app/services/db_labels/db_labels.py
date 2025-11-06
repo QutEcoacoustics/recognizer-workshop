@@ -1,4 +1,6 @@
+import copy
 from pathlib import Path
+import logging
 import numpy as np
 import dataclasses
 from typing import Any, Dict, List, Optional
@@ -13,6 +15,7 @@ from recognizer_workshop.app.services.db_labels.dataclasses import LabelCounts, 
 from baw_helpers.baw_helpers import get_events_for_sites, get_verifications_for_sites
 from recognizer_workshop.app.agile_modeling_helpers import get_embeddings_by_source
 
+log = logging.getLogger(__name__)
 
 def add_labeled_audio_examples(
         db,
@@ -33,7 +36,7 @@ def add_labeled_audio_examples(
 
     for example_source in labeled_examples:
 
-        print(f'Adding {label} example to db:{dataset_name}: {example_source}')
+        log.info(f'Adding {label} example to db:{dataset_name}: {example_source}')
 
         audio = audio_io.load_audio(example_source, sample_rate_hz)
         # choose the middle 5s of the audio
@@ -43,7 +46,7 @@ def add_labeled_audio_examples(
     
         embedding = embedding_model.embed(audio).embeddings[0, 0]
         add_embedding_to_db(db, dataset_name, embedding, example_source, label, annotator_id=annotator_id)
-        print('done')
+        log.info('done')
 
 
 # previously: add_query_to_db
@@ -143,7 +146,7 @@ def add_labels_to_db_old(db, config, items):
                 if len(embeddings) != len(offsets):
                     # if there are zero embeeddings returned, it means that the source is not in the database or the offsets are not in the database
                     # which might happen due to floating point errors (this shoudld have been fixed). 
-                    print(f"Warning: {len(embeddings)} embeddings found for {len(offsets)} offsets for source {source} and label {label_str} ({label_type_str}).")
+                    log.warning(f"Warning: {len(embeddings)} embeddings found for {len(offsets)} offsets for source {source} and label {label_str} ({label_type_str}).")
           
                 label_type = hoplite_interface.LabelType.POSITIVE if label_type_str == 'pos' else hoplite_interface.LabelType.NEGATIVE
 
@@ -158,12 +161,9 @@ def add_labels_to_db_old(db, config, items):
                     embedding_count += len(embeddings)
                     
     # sources on ecosounds might not have been added to the database.      
-    print(f"Added {embedding_count} embeddings from {source_count} of {len(items.keys())} sources to the database.")
+    log.info(f"Added {embedding_count} embeddings from {source_count} of {len(items.keys())} sources to the database.")
 
 
-import copy
-import logging
-log = logging.getLogger(__name__)
 
 def add_labels_to_db(db, config, items):
     """
@@ -338,7 +338,7 @@ def labels_from_event_taggings(api, filter_params, target_labels):
                     # Note: we don't add a positive label for the true class where a tagging has been verified as FP (negative)
                     #       because we don't have that information (and we probably don't care)
     
-    print(f'counts: {counts}')
+    log.info(f'counts: {counts}')
 
     # reshape into the format that is best for inserting into the hoplite database
     items_for_insert = {}
@@ -380,7 +380,7 @@ def get_events_with_verifications_and_tags(api, filter_params, target_tags=None)
 
 
     events = get_events_for_sites(api, filter_params)
-    print(f"Found {len(events)} events for: {filter_params}")
+    log.info(f"Found {len(events)} events for: {filter_params}")
     # remove events that have no taggings
     # this is only applicable if target_label is None
     events_without_taggings = [event for event in events if 'taggings' not in event or len(event['taggings']) == 0]
@@ -400,9 +400,9 @@ def get_events_with_verifications_and_tags(api, filter_params, target_tags=None)
     }).get('data', [])
 
     if len(tags) != len(tag_ids):
-        print(f"Warning: {len(tags)} tags found for {len(tag_ids)} tag ids. Some tags may not exist in the database.")
+        log.warning(f"Warning: {len(tags)} tags found for {len(tag_ids)} tag ids. Some tags may not exist in the database.")
         tags_with_invalid_ids = [tag for tag in tags if tag['id'] not in tag_ids]
-        print(f"Invalid tags: {tags_with_invalid_ids}")
+        log.warning(f"Invalid tags: {tags_with_invalid_ids}")
 
     # convert tags to a dictionary for easy lookup
     tags_dict = {tag['id']: tag for tag in tags}
@@ -426,15 +426,15 @@ def get_events_with_verifications_and_tags(api, filter_params, target_tags=None)
                             for tagging in event.get('taggings', []) 
                             if tagging['tag']['text'] in target_tags + special_tags or tagging['tag'].get('is_taxonomic', False)]
         
-        print(f"Event {event_id} has {len(event.get('taggings', []))} taggings after filtering.")
+        log.debug(f"Event {event_id} has {len(event.get('taggings', []))} taggings after filtering.")
 
     # remove events that have no taggings
     events_without_taxonomic_taggings = [event for event in events if len(event['taggings']) == 0]
     events = [event for event in events if len(event['taggings']) > 0]
 
-    print(f"Found {len(events)} events with taxonomic taggings after filtering.")
-    print(f"Found {len(events_without_taxonomic_taggings)} events with only non-taxonomic taggings.")
-    print(f"Found {len(events_without_taggings)} events without taggings.")
+    log.info(f"Found {len(events)} events with taxonomic taggings after filtering.")
+    log.info(f"Found {len(events_without_taxonomic_taggings)} events with only non-taxonomic taggings.")
+    log.info(f"Found {len(events_without_taggings)} events without taggings.")
         
     # we now have 
     # - 1 or more taxonomig taggings for each event

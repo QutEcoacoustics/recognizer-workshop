@@ -2,8 +2,11 @@
 
 from functools import partial
 from pathlib import Path
+import logging
 import panel as pn
 from recognizer_workshop.app.agile_engine import AgileConfig, agile_state, get_recent_files
+
+log = logging.getLogger(__name__)
 
 # TODO: tidy this up
 try:
@@ -106,7 +109,7 @@ def build(vm):
     advanced_section = pn.Column(visible=False, sizing_mode="stretch_width")
 
     def _print_paths(prefix=""):
-        print(f'{prefix} Config paths: {vm.config.db_path}, {vm.config.labeled_examples_folder}, {vm.config.models_folder}, {vm.config.predictions_folder}')
+        log.debug(f'{prefix} Config paths: {vm.config.db_path}, {vm.config.labeled_examples_folder}, {vm.config.models_folder}, {vm.config.predictions_folder}')
 
     def set_default_paths_if_empty():
         """Set default relative paths and other default values if they're not already set."""
@@ -442,7 +445,7 @@ def build(vm):
             # Create labels editor regardless of tag fetch success
             labels_editor_placeholder.objects = [vm.ui.view_target_labels(vm.eng)]
 
-            print("before", vm.obs)
+            log.debug("before %s", vm.obs)
 
             # this will trigger anything observing these observables to update
             vm.obs.bump("engine_state")
@@ -451,7 +454,7 @@ def build(vm):
             # Update button state after successful engine creation
             update_engine_button()
 
-            print("after", vm.obs)
+            log.debug("after %s", vm.obs)
 
         except Exception as e:
             vm.notify(f"Failed to start engine: {e}", "error")

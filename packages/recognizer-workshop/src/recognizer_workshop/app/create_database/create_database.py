@@ -1,5 +1,4 @@
-
-
+import logging
 import sys
 from pathlib import Path
 from etils import epath
@@ -26,6 +25,9 @@ from baw_helpers.baw_helpers import get_filter_result, simple_filter, get_random
 from baw_helpers.baw_utils import extract_arid_and_domain
 
 from recognizer_workshop.app.create_database.embedding_config_loader import load_baw_embedding_config
+
+    
+log = logging.getLogger(__name__)
 
 PARQUET_METADATA_COLUMNS = ('source', 'channel', 'offset',)
 
@@ -159,7 +161,7 @@ def iter_parquet_dataframes(
     skip_arids_in = set() if skip_arids_in is None else {int(x) for x in skip_arids_in}
 
     def warn(source, exc):
-        print(f"[WARN] skipping {source}: {exc}", file=sys.stderr)
+        log.warning(f"skipping {source}: {exc}")
 
     if prefetch < 0:
         raise ValueError("prefetch must be non-negative")
@@ -236,11 +238,11 @@ def iter_parquet_dataframes(
             try:
                 _, arid_from_name = extract_arid_and_domain(path)
             except ValueError as e:
-                print(f"Can't determine arid of {path}: {e}", file=sys.stderr)
+                log.warning(f"Can't determine arid of {path}: {e}")
                 arid_from_name = None
 
             if arid_from_name is not None and arid_from_name in skip_arids_in:
-                print(f"Skipping existing ARID: {arid_from_name} ({path})")
+                log.info(f"Skipping existing ARID: {arid_from_name} ({path})")
                 continue
 
             # Now actually read this fragment
@@ -440,9 +442,9 @@ def add_parquet_to_db(
         
     db.commit()
     num_embeddings = db.count_embeddings()
-    print('\n\nTotal embeddings : ', num_embeddings)
+    log.info(f'Total embeddings: {num_embeddings}')
     hours_equiv = num_embeddings / 60 / 60 * hop_size_s
-    print(f'\n\nHours of audio equivalent : {hours_equiv:.2f}')
+    log.info(f'Hours of audio equivalent: {hours_equiv:.2f}')
 
     return db
 

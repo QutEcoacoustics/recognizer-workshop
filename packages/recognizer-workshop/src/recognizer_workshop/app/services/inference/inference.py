@@ -1,10 +1,13 @@
 from pathlib import Path
+import logging
 
 from recognizer_workshop.perch_hoplite_custom_modifications import brutalism
 from recognizer_workshop.app.services.inference.helpers import make_site_map
 from baw_helpers import baw_utils
 
 from recognizer_workshop.perch_hoplite_custom_modifications import classifier as classifier_mod
+
+log = logging.getLogger(__name__)
 
 def run_inference(classifier,
                   db, 
@@ -38,7 +41,7 @@ def run_inference(classifier,
     # else:
     #     embedding_ids = all_embedding_ids
 
-    print(f'classifying {len(embedding_ids)} ({round(subset*100,0)}%) embeddings from dataset {dataset} ({round(len(embedding_ids) / 12 / 60, 2)} hours) with threshold {threshold}')
+    log.info(f'classifying {len(embedding_ids)} ({round(subset*100,0)}%) embeddings from dataset {dataset} ({round(len(embedding_ids) / 12 / 60, 2)} hours) with threshold {threshold}')
 
     Path(output_filepath).parent.mkdir(parents=True, exist_ok=True)
 

@@ -1,4 +1,5 @@
 from pathlib import Path
+import logging
 
 import panel as pn
 
@@ -6,17 +7,18 @@ from recognizer_workshop.app.services.search import resolve_query_uri
 from recognizer_workshop.ui.panel.utils.utils import parse_target_score
 from recognizer_workshop.ui.panel.components.native.label_picker import build_active_label_picker
 
+log = logging.getLogger(__name__)
 
 def build(vm):
 
     # Create help button
     search_help_btn = vm.help_system.create_help_button("help-search-overview", "Help: Search")
 
-    print("[search.build] vm.id:", id(vm), "vm.ui.id:", id(vm.ui))
+    log.debug("vm.id: %s, vm.ui.id: %s", id(vm), id(vm.ui))
     # regions for query and for results
     selector_box = vm.ui.get_region_box("search.query_selector")
     results_box  = vm.ui.get_region_box("search.results")
-    print("[search.build] selector_box.id:", id(selector_box), "results_box.id:", id(results_box))
+    log.debug("selector_box.id: %s, results_box.id: %s", id(selector_box), id(results_box))
 
     # text field to input the query (XC id or URL) and a button to load it
     uri = pn.widgets.TextInput(name="Query (XC id / URL )", placeholder="e.g. XC979796 or https://...")

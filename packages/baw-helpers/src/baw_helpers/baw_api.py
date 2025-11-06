@@ -2,6 +2,7 @@
 from __future__ import annotations 
 from fileinput import filename
 import json
+import logging
 import os
 import io
 import sys
@@ -28,22 +29,23 @@ ANALYSIS_FILENAME_MAP = {
 }
 
 
+log = logging.getLogger(__name__)
+
+
 class baw_api:
     """Generic client for the BAW API"""
 
     # defaults
     base_url = "https://api.ecosounds.org"
-    debug = False
     token = None
 
 
-    def __init__(self, token=None, base_url=None, debug=False, allow_prompt=None):
+    def __init__(self, token=None, base_url=None, allow_prompt=None):
         """
         Initializes the BAW API client.
         Args:
             token (str): API authentication token. If None, will look for BAW_AUTH_TOKEN in environment variables.
             base_url (str): Base URL for the BAW API. If None, will use the BAW_API_BASE_URL environment variable or default to ecosounds.
-            debug (bool): If True, enables debug mode with verbose logging.
             allow_prompt (bool): If True, allows prompting the user for a token if none is provided or found. 
                                  If None, defaults to True if running in an interactive terminal.
         
@@ -54,11 +56,7 @@ class baw_api:
             # If base_url is not provided, use the environment variable or default to ecosounds
             base_url = os.environ.get("API_BASE_URL", "https://api.ecosounds.org")
 
-        debug_level = int(os.environ.get("DEBUG_LEVEL", "0"))
-        debug = debug_level > 0
-
         self.base_url = base_url
-        self.debug = debug
 
         self._tls = threading.local()
         self._lr_lock = threading.Lock()
@@ -190,7 +188,7 @@ class baw_api:
         params: dict | list[tuple[str, str]] | None = None,
         stream: bool = False,
         timeout: float | tuple | None = None,
-        content_type: str | None = None,  # CHANGED: allow override; None for multipart
+        content_type: str | None = None,
     ):
         """
         Prepare and send an HTTP request using the thread-local Session.
@@ -232,11 +230,11 @@ class baw_api:
             response = sess.send(prepared_request, timeout=timeout, **settings)
             return response, prepared_request
         except requests.exceptions.ConnectionError as e:
-            print(f"--- CONNECTION ERROR OCCURRED: {e} ---")
+            log.error(f"CONNECTION ERROR OCCURRED: {e}")
             self._print_request_details(prepared_request, response_obj=None, error_context=True)
             return None, prepared_request
         except requests.exceptions.RequestException as e:
-            print(f"--- UNEXPECTED REQUESTS ERROR OCCURRED: {e} ---")
+            log.error(f"UNEXPECTED REQUESTS ERROR OCCURRED: {e}")
             self._print_request_details(prepared_request, response_obj=None, error_context=True)
             return None, prepared_request
         
@@ -271,7 +269,7 @@ class baw_api:
         )
 
         if response is None:
-            print("No response received.")
+            log.warning("No response received.")
             return None
         
         self._tls.last_response = response
@@ -281,8 +279,8 @@ class baw_api:
         try:
             response.raise_for_status()
         except requests.exceptions.HTTPError as e:
-            print("--- HTTP ERROR OCCURRED ---")
-            print(f"Error: {e}")
+            log.error("HTTP ERROR OCCURRED")
+            log.error(f"Error: {e}")
             # Prefer the failing response.request; fallback to prepared_request if missing
             req_for_log = getattr(getattr(e, "response", None), "request", None) or prepared_request
             self._print_request_details(req_for_log, response_obj=getattr(e, "response", None), error_context=True)
@@ -294,13 +292,11 @@ class baw_api:
                 else:
                     return e.response
             except (requests.exceptions.JSONDecodeError, ValueError):
-                if self.debug:
-                    print("Error response was not JSON.")
+                log.debug("Error response was not JSON.")
                 return None
             
-        if self.debug:
-            print("Request was successful!") 
-            self._print_request_details(response.request, response_obj=response, error_context=False)
+        log.debug("Request was successful!") 
+        self._print_request_details(response.request, response_obj=response, error_context=False)
 
         if stream or not return_json:
             return response
@@ -308,8 +304,7 @@ class baw_api:
         try:
             return response.json()
         except (requests.exceptions.JSONDecodeError, ValueError):
-            if self.debug:
-                print("Warning: Successful request returned non-JSON content (expected JSON).")
+            log.debug("Warning: Successful request returned non-JSON content (expected JSON).")
             return None
 
 
@@ -360,9 +355,8 @@ class baw_api:
         if resp is None:
             return None
 
-        if self.debug:
-            print("File download started (streaming).")
-            self._print_request_details(resp.request, response_obj=resp, error_context=False)
+        log.info("File download started (streaming).")
+        self._print_request_details(resp.request, response_obj=resp, error_context=False)
 
         try:
 
@@ -381,11 +375,10 @@ class baw_api:
                     for chunk in resp.iter_content(chunk_size=chunk_size):
                         if chunk: 
                             f.write(chunk)
-                if self.debug:
-                    print(f"File successfully downloaded to: {save_path}")
+                log.info(f"File successfully downloaded to: {save_path}")
                 return save_path
         except IOError as io_e:
-            print(f"--- FILE SAVE ERROR: {io_e} ---")
+            log.error(f"FILE SAVE ERROR: {io_e}")
             # We still have resp.request for details
             self._print_request_details(resp.request, response_obj=resp, error_context=True)
             return None
@@ -398,55 +391,47 @@ class baw_api:
 
     def _print_request_details(self, request_obj, response_obj=None, error_context=False):
         """
-        Helper method to print details of the HTTP request and (optionally) response.
+        Helper method to log details of the HTTP request and (optionally) response.
         """
-        print("\n--- REQUEST/RESPONSE DEBUG INFO ---")
+        log.info("\n--- REQUEST/RESPONSE DEBUG INFO ---")
         if error_context:
-            print("--- CONTEXT: An HTTP ERROR occurred ---")
+            log.error("--- CONTEXT: An HTTP ERROR occurred ---")
         else:
-            print("--- CONTEXT: Debug mode is active (successful request) ---")
+            log.info("--- CONTEXT: successful request ---")
 
-        print("\n--- DETAILS OF THE REQUEST SENT ---")
-        print(f"Method: {request_obj.method}")
-        print(f"URL:    {request_obj.url}")
+        log.debug("\n--- DETAILS OF THE REQUEST SENT ---")
+        log.debug(f"Method: {request_obj.method}")
+        log.debug(f"URL:    {request_obj.url}")
 
-        print("\nHeaders Sent:")
+        log.debug("\nHeaders Sent:")
         for key, value in request_obj.headers.items():
-            # Hide sensitive Authorization header content if not in debug mode
-            if key.lower() == "authorization" and not self.debug:
-                print(f"  {key}: [HIDDEN]")
+            # Always hide sensitive Authorization header
+            if key.lower() == "authorization":
+                log.debug(f"  {key}: [HIDDEN]")
             else:
-                print(f"  {key}: {value}")
+                log.debug(f"  {key}: {value}")
 
-        print("\nBody/Payload Sent:")
+        log.debug("\nBody/Payload Sent:")
         if request_obj.body:
             try:
                 # Try to format it as pretty JSON
                 parsed_body = json.loads(request_obj.body.decode('utf-8'))
-                print(json.dumps(parsed_body, indent=2))
+                log.debug(json.dumps(parsed_body, indent=2))
             except json.JSONDecodeError:
                 # If it's not JSON, just print the raw text
-                print(request_obj.body.decode('utf-8'))
+                log.debug(request_obj.body.decode('utf-8'))
         else:
-            print("No body was sent.")
+            log.debug("No body was sent.")
 
         if response_obj is not None:
-            print("\n--- DETAILS OF THE SERVER'S RESPONSE ---")
-            print(f"Status Code: {response_obj.status_code}")
-            print("Response Headers:")
+            log.info("\n--- DETAILS OF THE SERVER'S RESPONSE ---")
+            log.info(f"Status Code: {response_obj.status_code}")
+            log.debug("Response Headers:")
             for key, value in response_obj.headers.items():
-                print(f"  {key}: {value}")
-
-            # Only print response body if it's likely text/JSON, not for large binary files
-            # content_type = response_obj.headers.get('Content-Type', '').split(';')[0].strip().lower()
-            # if content_type.startswith('application/json') or content_type.startswith('text/'):
-            #     print("Response Body:")
-            #     print(response_obj.text)
-            # else:
-            #     print(f"Response Body: (Content-Type: {content_type}, likely a file, not printed)")
+                log.debug(f"  {key}: {value}")
         else:
             if error_context:
-                print("\n--- RESPONSE DETAILS NOT AVAILABLE (e.g., ConnectionError) ---")
+                log.info("\n--- RESPONSE DETAILS NOT AVAILABLE (e.g., ConnectionError) ---")
 
 
     def test_connection(self, silent=True):
@@ -455,24 +440,22 @@ class baw_api:
             # This will use the request method, which has the debug logic
             response = self.request("GET", "/status", return_json=False)
             if not silent:
-                print("Connection successful:", response)
+                log.info(f"Connection successful: {response}")
             return response
         except requests.RequestException as e:
-            if self.debug: # Only print this generic message if debug is on
-                print(f"Error connecting to BAW API via test_connection: {e}")
+            log.error(f"Error connecting to BAW API via test_connection: {e}")
             return None
         
 
     def test_token(self, default=False):
         """Test the API token on the server for validity."""
         if not self.token:
-            if self.debug:
-                print("No API token provided. Please set the BAW_AUTH_TOKEN environment variable or pass a token to the baw_api constructor.")
+            log.warning("No API token provided. Please set the BAW_AUTH_TOKEN environment variable or pass a token to the baw_api constructor.")
             return False
         
         if self.token[:1] in {"'", '"'} and self.token[-1:] != self.token[:1]:
             # Token in env can be quoted or unquoted, but if it has a missing opening or closing quote, will include the quote in the value
-            print("Possibly unclosed quote in your token string")
+            log.warning("Possibly unclosed quote in your token string")
 
         r = self.test_connection(silent=True)
 
@@ -489,13 +472,10 @@ class baw_api:
         else:
             is_valid, message = default, "Token can't be verified, something went wrong."
         
-        if self.debug:
-            print(message)
+        log.info(message)
         
         return is_valid
 
-
-    
 
     def update_token(self, 
                      token=None, 
@@ -506,13 +486,11 @@ class baw_api:
         
         Args:
             token: Explicit token to use
-            save_to_env: Whether to save valid tokens to .env
             allow_prompt: Whether to interactively prompt for token
             require_auth: If True, raises error when no valid token available
         """
-        print("\nUpdating BAW API token...")
+        log.info("\nUpdating BAW API token...")
         
-
         supplied_token = token if token else None
 
         # token not supplied, see if it's in the environment already
@@ -545,28 +523,28 @@ class baw_api:
             else:
                 self.token = None
         else:
-            print("No token supplied in arguments or environment.")
+            log.info("No token supplied in arguments or environment.")
         
         # if we reach here, we have no valid token
         # if we don't require it, just succeed in anonymous mode with a message
         # if we do require it, either prompt or fail
         if require_auth:
             if not allow_prompt:
-                print("Authentication required but no valid token available")
+                log.error("Authentication required but no valid token available")
                 return False  # Fail explicitly
             else:
                 self._prompt_for_token(env_file=env_file)
                 if self.token is None:
-                    print("No valid token provided, exiting.")
+                    log.error("No valid token provided, exiting.")
                     return False  # Fail explicitly
             
         if self.token is None:
-            print("\n💡 No Valid Token supplied, creating anonymous client")
-            print("\n💾 For authenticated access initialize the client with a token or:")
-            print("   Option A: Add to your .env file:")
-            print("             BAW_AUTH_TOKEN=your-token-here")
-            print("   Option B: Export as environment variable:")
-            print("             export BAW_AUTH_TOKEN=your-token-here")
+            log.warning("\n💡 No Valid Token supplied, creating anonymous client")
+            log.info("\n💾 For authenticated access initialize the client with a token or:")
+            log.info("   Option A: Add to your .env file:")
+            log.info("             BAW_AUTH_TOKEN=your-token-here")
+            log.info("   Option B: Export as environment variable:")
+            log.info("             export BAW_AUTH_TOKEN=your-token-here")
 
                 
         # Will have already returned false if require_auth and no valid token
@@ -673,5 +651,5 @@ class baw_api:
             with open(file, 'w') as f:
                 f.write(formatted_response)
 
-        print(formatted_response)
+        log.info(formatted_response)
 

@@ -125,15 +125,7 @@ class HelpSystem(pn.custom.JSComponent):
         def open_and_scroll(_):
             # Tell the ViewModel which section to scroll to
             self.scroll_to = section_id
-
-            print("Opening help sidebar...")
-            print(f"Current sidebar_bump state: {self.sidebar_bump}")
             self.sidebar_bump += 1
-            # self.template.sidebar_open = True
-            # self.template.collapsed_sidebar = False
-            # print(self.template.param.params_in_synch())
-            # if hasattr(self.template, 'sidebar'):
-            #     self.template.sidebar.visible = True
          
         
         button.on_click(open_and_scroll)

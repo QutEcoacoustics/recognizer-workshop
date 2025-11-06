@@ -1,7 +1,10 @@
 from pathlib import Path
+import logging
 
 from recognizer_workshop.app.agile_modeling_helpers import get_or_create_workshop_provenance 
 from baw_helpers.baw_helpers import annotation_upload_csv
+
+log = logging.getLogger(__name__)
 
 def upload_detections(csv_path,
                       upload_name,
@@ -17,7 +20,7 @@ def upload_detections(csv_path,
     """
 
     if not Path(csv_path).exists():
-        print(f'CSV file {csv_path} does not exist. Please provide a valid path.')
+        log.error(f'CSV file {csv_path} does not exist. Please provide a valid path.')
         return False, None
     
 
@@ -29,7 +32,7 @@ def upload_detections(csv_path,
                                         commit='true')
     data = response.get('data', {})
     if not data:
-        print('Something went wrong with the upload. No data returned from the API.')
+        log.error('Something went wrong with the upload. No data returned from the API.')
         return False, None
     file_upload_id = data.get('id', None)
 
@@ -40,9 +43,9 @@ def upload_detections(csv_path,
     verification_url=f"https://www.ecosounds.org/projects/{project_id}/annotations/verify?importFiles={file_upload_id}"
 
 
-    print(f"Annotations uploaded successfully. You can view and verify them at the link below:")
+    log.info(f"Annotations uploaded successfully. You can view and verify them at the link below:")
 
     if project_id == 'placeholder_project_id':
-        print("You will need to replace the project_id in the URL with a valid one")
+        log.warning("You will need to replace the project_id in the URL with a valid one")
 
     return True, verification_url

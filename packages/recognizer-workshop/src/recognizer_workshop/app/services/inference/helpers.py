@@ -1,6 +1,10 @@
+import logging
+
 from recognizer_workshop.perch_hoplite_custom_modifications import sqlite_usearch_impl as sqlite_usearch_impl_mod
 import baw_helpers.baw_utils as baw_utils
 import pandas as pd
+
+log = logging.getLogger(__name__)
 
 def make_site_map(db, baw_client):
     """
@@ -37,7 +41,7 @@ def make_site_map(db, baw_client):
             src['site_id'] = rec['site_id']
             src['site_name'] = rec['sites.name']
         else:
-            print(f'No recording found for arid {arid} in the BAW API')
+            log.warning(f'No recording found for arid {arid} in the BAW API')
 
     return site_map
 

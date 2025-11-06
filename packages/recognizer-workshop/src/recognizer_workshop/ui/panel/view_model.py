@@ -81,18 +81,51 @@ class ViewModel(SimpleNamespace):
         self.help_system = HelpSystem()
 
 
-    def _setup_logging(self):
-        """Connects the ViewModel's log_view widget to the app's logger."""
-        # Get the root logger for our library
-        library_logger = logging.getLogger('recognizer_workshop')
-        library_logger.setLevel(logging.INFO)
+    # def _setup_logging(self):
+    #     """Connects the ViewModel's log_view widget to the app's logger."""
+    #     # Get the root logger for our library
+    #     library_logger = logging.getLogger('recognizer_workshop')
+    #     library_logger.setLevel(logging.INFO)
 
-        # Create an instance of our custom handler, pointing it to our widget
-        panel_handler = PanelLogHandler(pane=self.log_pane)
+    #     # Create an instance of our custom handler, pointing it to our widget
+    #     panel_handler = PanelLogHandler(pane=self.log_pane)
         
-        # Add the handler if one like it doesn't already exist
-        if not any(isinstance(h, PanelLogHandler) for h in library_logger.handlers):
-            library_logger.addHandler(panel_handler)
+    #     # Add the handler if one like it doesn't already exist
+    #     if not any(isinstance(h, PanelLogHandler) for h in library_logger.handlers):
+    #         library_logger.addHandler(panel_handler)
+
+
+    def _setup_logging(self):
+        """Connects the ViewModel's log_view widget to the app's loggers.
+
+        Note: we configure the global loggers to be at INFO level, but we set
+        different levels on the handlers to control what gets shown in the UI.
+        So that we don't block useful log messages from other handlers.
+        """
+        
+        # --- Handler for your App (`recognizer_workshop`) ---
+        # This handler will show INFO messages and up
+        app_panel_handler = PanelLogHandler(pane=self.log_pane)
+        app_panel_handler.setLevel(logging.INFO) 
+        
+        app_logger = logging.getLogger('recognizer_workshop')
+        app_logger.setLevel(logging.INFO)
+        
+        if not any(isinstance(h, PanelLogHandler) for h in app_logger.handlers):
+            app_logger.addHandler(app_panel_handler)
+
+        # --- Handler for `baw_helpers` ---
+        # This handler will ONLY show WARNING messages and up
+        baw_panel_handler = PanelLogHandler(pane=self.log_pane) # New instance, same pane
+        baw_panel_handler.setLevel(logging.WARNING) # This filter is strict
+        
+        baw_logger = logging.getLogger('baw_helpers')
+        baw_logger.setLevel(logging.INFO)  
+        
+        if not any(isinstance(h, PanelLogHandler) for h in baw_logger.handlers):
+            baw_logger.addHandler(baw_panel_handler)
+
+
 
     def _ts(self) -> str:
         # short timestamp for logs

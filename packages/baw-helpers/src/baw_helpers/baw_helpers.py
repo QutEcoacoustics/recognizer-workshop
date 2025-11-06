@@ -1,6 +1,7 @@
 """
 Helpers for BAW API interactions for agile modelling
 """
+import logging
 import random
 from . import baw_api
 import csv
@@ -10,6 +11,9 @@ import json
 from typing import Any, Union
 
 from baw_helpers.utils import stable_hash
+
+
+log = logging.getLogger(__name__)
 
 
 def simple_filter(
@@ -190,7 +194,7 @@ def get_embeddings(
 
     result = baw_api.download(path, destination_file)
 
-    print(result)
+    log.info(result)
 
     return result
 
@@ -309,7 +313,7 @@ def get_untagged_events(api, filter_params, save_path=None):
             writer.writeheader()
             for event in events_without_taggings:
                 writer.writerow(event)
-        print(f"Saved {len(events_without_taggings)} untagged events to {save_path}")
+        log.info(f"Saved {len(events_without_taggings)} untagged events to {save_path}")
     
     return events_without_taggings
 
@@ -346,7 +350,7 @@ def annotation_upload_csv(api, filepath_to_csv, provenance_id, import_name, comm
         if response and 'data' in response:
             import_id = response['data']['id']
         else:
-            print("Failed to create a new audio_event_import record.")
+            log.error("Failed to create a new audio_event_import record.")
             return
 
     event_file_upload_endpoint = f"/audio_event_imports/{import_id}/files"
@@ -363,7 +367,7 @@ def annotation_upload_csv(api, filepath_to_csv, provenance_id, import_name, comm
                 'commit': commit
             }
 
-            print(f"Uploading '{filepath_to_csv.name}' to the '{event_file_upload_endpoint}' endpoint...")
+            log.info(f"Uploading '{filepath_to_csv.name}' to the '{event_file_upload_endpoint}' endpoint...")
             
             # 5. Call the post_multipart method
             response = api.post_files(  
@@ -372,15 +376,15 @@ def annotation_upload_csv(api, filepath_to_csv, provenance_id, import_name, comm
                 params=params
             )
 
-            print("\n--- API Response ---")
+            log.info("\n--- API Response ---")
             if response:
                 api.print_response(response)
             else:
-                print("Upload failed. Check the error messages above.")
+                log.error("Upload failed. Check the error messages above.")
 
             return response
 
     except FileNotFoundError:
-        print(f"ERROR: The file was not found at the path: {filepath_to_csv}")
+        log.error(f"ERROR: The file was not found at the path: {filepath_to_csv}")
     except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+        log.error(f"An unexpected error occurred: {e}")

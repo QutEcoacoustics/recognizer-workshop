@@ -110,8 +110,6 @@ def load_umap_data(db, db_path: Path):
     df_cache = pd.read_parquet(cache_path)
 
     all_labels = db.get_all_labels()
-    # print("all_labels:", all_labels)
-    # print(f'num labels: {len(all_labels)}')
     if all_labels:
         df_labels = pd.DataFrame(all_labels, columns=['embedding_id', 'label', 'type'])
         df_labels = df_labels.drop_duplicates(subset='embedding_id', keep='last')
