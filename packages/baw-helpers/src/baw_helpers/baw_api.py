@@ -32,6 +32,11 @@ ANALYSIS_FILENAME_MAP = {
 log = logging.getLogger(__name__)
 
 
+class AuthenticationError(Exception):
+    """Raised when authentication is required but not provided or invalid."""
+    pass
+
+
 class baw_api:
     """Generic client for the BAW API"""
 
@@ -158,13 +163,13 @@ class baw_api:
         to_memory: bool | None = None,
     ):
         """
-        Fetch a an analysis result file.  Same mode rules as download(): exactly one of
+        Fetch a an analysis result file.  Same mode rules as download(): exactly one of    
         save_path or to_memory=True must be provided.
         """
 
         # raise if in anonumous mode, because results files always need auth
         if self.token is None:
-            raise ValueError("Authentication token is required to download analysis result files.")
+            raise AuthenticationError("Authentication token is required to download analysis result files.")
 
         if filename is None:
 

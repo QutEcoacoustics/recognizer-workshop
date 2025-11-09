@@ -21,6 +21,7 @@ from perch_hoplite.agile.convert_legacy import load_embedding_config
 
 from recognizer_workshop.perch_hoplite_custom_modifications import sqlite_usearch_impl as sqlite_usearch_impl_custom
 from baw_helpers import baw_api
+from baw_helpers.baw_api import AuthenticationError
 from baw_helpers.baw_helpers import get_filter_result, simple_filter, get_random_audio_recordings
 from baw_helpers.baw_utils import extract_arid_and_domain
 
@@ -140,9 +141,9 @@ def iter_parquet_dataframes(
     prefetch: int = 1,
     columns: list[str] | None = None,
     skip_arids_in: list[int] | tuple[int] | set[int] | None = None,
-    analysis_job_id: int = BAW_ANALYSIS_JOB_ID,
+    analysis_job_id: int = BAW_ANALYSIS_JOB_ID, # TODO: some sort of per-host defaults for different embeddings sources, or eventaully look it up on the host to see what's available
     analysis_name: str = DEFAULT_BAW_ANALYSIS_NAME,
-    max_auth_errors: int = 10,  # NEW: max consecutive auth errors before aborting
+    max_auth_errors: int = 3
 ):
     """
     Yield pandas DataFrames from local or downloaded files
@@ -223,21 +224,30 @@ def iter_parquet_dataframes(
                 submit_next()
                 try:
                     result = fut.result()
-                    consecutive_auth_errors = 0  # NEW: reset on success
+                    consecutive_auth_errors = 0  # reset on success
                     yield result
-                except Exception as e:
-                    # NEW: Check if it's an auth error by inspecting the exception or API response
-                    error_msg = str(e).lower()
-                    is_auth_error = "401" in error_msg or "unauthorized" in error_msg or "authentication" in error_msg
+                except AuthenticationError as e:
+                    # Direct authentication error from the API client
+                    consecutive_auth_errors += 1
+                    log.error(f"Authentication error ({consecutive_auth_errors}/{max_auth_errors}) for ARID {arid}: {e}")
                     
-                    if is_auth_error:
+                    if consecutive_auth_errors >= max_auth_errors:
+                        log.error(f"Aborting: {max_auth_errors} consecutive authentication errors. Check your API token.")
+                        pbar.close()
+                        raise RuntimeError(f"Aborted after {max_auth_errors} consecutive authentication errors")
+                except Exception as e:
+                    # Check if it's an HTTP 401 auth error by inspecting the exception message
+                    error_msg = str(e).lower()
+                    is_http_auth_error = "401" in error_msg or "unauthorized" in error_msg
+                    
+                    if is_http_auth_error:
                         consecutive_auth_errors += 1
                         log.error(f"Authentication error ({consecutive_auth_errors}/{max_auth_errors}) for ARID {arid}: {e}")
                         
                         if consecutive_auth_errors >= max_auth_errors:
                             log.error(f"Aborting: {max_auth_errors} consecutive authentication errors. Check your API token.")
                             pbar.close()
-                            raise RuntimeError(f"Aborted after {max_auth_errors} consecutive 401 authentication errors")
+                            raise RuntimeError(f"Aborted after {max_auth_errors} consecutive authentication errors")
                     else:
                         consecutive_auth_errors = 0  # Reset counter for non-auth errors
                         warn(arid, e)
