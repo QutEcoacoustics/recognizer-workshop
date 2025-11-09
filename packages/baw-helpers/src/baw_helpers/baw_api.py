@@ -162,6 +162,10 @@ class baw_api:
         save_path or to_memory=True must be provided.
         """
 
+        # raise if in anonumous mode, because results files always need auth
+        if self.token is None:
+            raise ValueError("Authentication token is required to download analysis result files.")
+
         if filename is None:
 
             # if the analysis_name matches the regex in the key of the filename map, set filename to the value of that key
