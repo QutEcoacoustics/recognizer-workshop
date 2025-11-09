@@ -136,12 +136,13 @@ def convert_parquet(
 def iter_parquet_dataframes(
     parquet_source: str | Path | list,
     *,
-    api_client=None,          # your module client; provides read_parquet(arid) etc.
-    prefetch: int = 1,    # how many remote reads to queue ahead (ARID mode only)
-    columns: list[str] | None = None,  # optional column projection
+    api_client=None,
+    prefetch: int = 1,
+    columns: list[str] | None = None,
     skip_arids_in: list[int] | tuple[int] | set[int] | None = None,
-    analysis_job_id: int = BAW_ANALYSIS_JOB_ID, # TODO: some sort of per-host defaults for different embeddings sources, or eventaully look it up on the host to see what's available
+    analysis_job_id: int = BAW_ANALYSIS_JOB_ID,
     analysis_name: str = DEFAULT_BAW_ANALYSIS_NAME,
+    max_auth_errors: int = 10,  # NEW: max consecutive auth errors before aborting
 ):
     """
     Yield pandas DataFrames from local or downloaded files
@@ -155,10 +156,13 @@ def iter_parquet_dataframes(
       - how many remote reads to queue ahead (ARID mode only). For efficiency, it will download the next few files while processing the current one.
     @param: columns
       - optional column projection
+    @param: max_auth_errors
+      - maximum number of consecutive 401 authentication errors before aborting
     """
 
   
     skip_arids_in = set() if skip_arids_in is None else {int(x) for x in skip_arids_in}
+    consecutive_auth_errors = 0  # NEW: track consecutive 401 errors
 
     def warn(source, exc):
         log.warning(f"skipping {source}: {exc}")
@@ -218,9 +222,26 @@ def iter_parquet_dataframes(
                 arid, fut = q.popleft()
                 submit_next()
                 try:
-                    yield fut.result()
+                    result = fut.result()
+                    consecutive_auth_errors = 0  # NEW: reset on success
+                    yield result
                 except Exception as e:
-                    warn(arid, e)
+                    # NEW: Check if it's an auth error by inspecting the exception or API response
+                    error_msg = str(e).lower()
+                    is_auth_error = "401" in error_msg or "unauthorized" in error_msg or "authentication" in error_msg
+                    
+                    if is_auth_error:
+                        consecutive_auth_errors += 1
+                        log.error(f"Authentication error ({consecutive_auth_errors}/{max_auth_errors}) for ARID {arid}: {e}")
+                        
+                        if consecutive_auth_errors >= max_auth_errors:
+                            log.error(f"Aborting: {max_auth_errors} consecutive authentication errors. Check your API token.")
+                            pbar.close()
+                            raise RuntimeError(f"Aborted after {max_auth_errors} consecutive 401 authentication errors")
+                    else:
+                        consecutive_auth_errors = 0  # Reset counter for non-auth errors
+                        warn(arid, e)
+                    
                 pbar.update(1)
             pbar.close()
 
