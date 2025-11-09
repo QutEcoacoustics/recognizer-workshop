@@ -34,6 +34,9 @@ dependencies = [
   # For large-scale data rasterization & efficient visualization (e.g. UMAP plots)
   # used in the explore page for the umap plot
   "datashader>=0.16.0",
+   
+   
+  "umap-learn>=0.5.3",
 
   # Needed to read/write Parquet files and work with arrow tables
   # used for hoplie db creation from parquet files
@@ -60,6 +63,8 @@ dependencies = [
 
   # Material UI component styling for Panel dashboards
   "panel_material_ui",
+
+
 ]
 
 

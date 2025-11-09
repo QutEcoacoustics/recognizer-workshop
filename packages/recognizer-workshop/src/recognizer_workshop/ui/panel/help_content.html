@@ -129,16 +129,26 @@
     <div id="help-labeled-examples-overview" class="help-section help-section-labeled-examples">
         <h2>🏷️ Labeled Examples Page</h2>
         <p> 
-            The Agile modelling workflow involves adding positive or negative labels to embedded audio examples in your database. This will be 
-            done in other sections by searching for similar examples to reference examples you provide, or by using the initial version of the classifier
-            to search and incrementally improve it. But, we can also download any existing labels from Ecosounds as a starting point. 
+            Your database of embedded audio segments can be used to train a classifier if some of those examples have labels.          
+            The Agile modelling workflow involves adding positive or negative labels to these embedded audio examples.
+        </p>
+        <p>
+            In the next sections you can do that through searching for similar examples to reference examples you provide, and then by using the initial version of the classifier
+            to search and incrementally improve it. 
+        </p>
+        <p>
+            But, we can also download any existing labels from Ecosounds as a starting point. 
         </p>
         
 
         <div id="help-recordings-filter-labelled-examples" class="help-subsection-alt">
-            <h4>🔧 Database Management</h4>
-            <p>Enter the project, region or site ids to search for any existing labelled examples.</p>
+            <h4>Dataset identifier</h4>
+            <p>Enter the project, region or site id to search Ecosounds for any existing labelled examples. This should match the projects or sites that your 
+                database of embeddings comes from. We can only add labels to examples that are already part of your database. This step does not add new examples to your database.</p>
             <p>These can be found in the Ecosounds web interface. Log in and search for your project to find the relevant ids.</p>
+            <p>Once you have entered the ids, can pull all the labels from your Ecosounds project or site. A summary of what was found will be displayed. 
+                labelled examples for tags that don't match your target labels will used as negative examples for your target labels. 
+            </p>
         </div>
 
     </div>
@@ -146,7 +156,7 @@
     <!-- SEARCH PAGE -->
     <div id="help-search-overview" class="help-section help-section-search">
         <h2>🔍 Search Page</h2>
-        <p>We can add labelled examples to our database by providing a refernce example and searching for similar examples in the database, 
+        <p>We can add labelled examples to our database by providing a reference example and searching for similar examples in the database, 
             then reviewing the results and labelling them as positive or negative examples. 
         </p>
         
@@ -189,11 +199,25 @@
             <h4>📊 UMAP Visualization</h4>
             <p>UMAP (Uniform Manifold Approximation and Projection) is a technique that takes the complex, 
                 high-dimensional audio embeddings and projects them onto a simple 2D plot that you can visualize. 
-                Sounds that are acoustically similar will be close together in the high-dimensional <i>embedding space</i>, but 
+                Sounds that are of similar call-type should be close together in the high-dimensional <i>embedding space</i>, but 
                 it's hard to draw a plot with 1280 dimensions. Umap figures out how to place each embedding on a 2d space, 
                 so that items that are close together in the high dimensional space are also, generally, close together in 
                 the 2dimensional projection.  This visualization helps you understand the 
                 natural groupings and patterns in your data that might not be obvious otherwise.</p>
+
+            <p>Creating the UMAP plot involves 3 steps
+                <ol>
+                    <li>Learning the function that maps high-dimensional points to the 2D space. This is very time and memory intensive, so we do this with a random subset of your database just once.</li>
+                    <li>Running all the data through that function, giving each and every audio clip a 2D position</li>
+                    <li>Rendering the positive and negative items for the labelled data</li>
+                </ol>
+
+                 If new labels are added you only need to redo step 3.
+
+            </p>
+
+            <p>The "generate UMAP model and cache" button performs steps 1 and 2 and 3</p>
+            <p>If new data audio clips are added, you need to redo step 2 (but not step 1) by clicking the </p>
 
             <p>The position within this projection of your labelled data is shown as colored points on the plot.</p>
             <p>Click on your labelled data or on unlabeled grey examples to hear them.</p>

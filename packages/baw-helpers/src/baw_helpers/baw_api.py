@@ -393,15 +393,15 @@ class baw_api:
         """
         Helper method to log details of the HTTP request and (optionally) response.
         """
-        log.info("\n--- REQUEST/RESPONSE DEBUG INFO ---")
+        log.debug("\n--- REQUEST/RESPONSE DEBUG INFO ---")
         if error_context:
             log.error("--- CONTEXT: An HTTP ERROR occurred ---")
         else:
-            log.info("--- CONTEXT: successful request ---")
+            log.debug("--- CONTEXT: successful request ---")
 
-        log.debug("\n--- DETAILS OF THE REQUEST SENT ---")
-        log.debug(f"Method: {request_obj.method}")
-        log.debug(f"URL:    {request_obj.url}")
+        log.info("\n--- DETAILS OF THE REQUEST SENT ---")
+        log.info(f"Method: {request_obj.method}")
+        log.info(f"URL:    {request_obj.url}")
 
         log.debug("\nHeaders Sent:")
         for key, value in request_obj.headers.items():
