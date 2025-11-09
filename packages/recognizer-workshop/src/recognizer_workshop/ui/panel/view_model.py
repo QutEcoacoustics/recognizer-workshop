@@ -81,20 +81,6 @@ class ViewModel(SimpleNamespace):
         self.help_system = HelpSystem()
 
 
-    # def _setup_logging(self):
-    #     """Connects the ViewModel's log_view widget to the app's logger."""
-    #     # Get the root logger for our library
-    #     library_logger = logging.getLogger('recognizer_workshop')
-    #     library_logger.setLevel(logging.INFO)
-
-    #     # Create an instance of our custom handler, pointing it to our widget
-    #     panel_handler = PanelLogHandler(pane=self.log_pane)
-        
-    #     # Add the handler if one like it doesn't already exist
-    #     if not any(isinstance(h, PanelLogHandler) for h in library_logger.handlers):
-    #         library_logger.addHandler(panel_handler)
-
-
     def _setup_logging(self):
         """Connects the ViewModel's log_view widget to the app's loggers.
 
@@ -105,7 +91,8 @@ class ViewModel(SimpleNamespace):
         
         # --- Handler for your App (`recognizer_workshop`) ---
         # This handler will show INFO messages and up
-        app_panel_handler = PanelLogHandler(pane=self.log_pane)
+        # Limit to 2000 lines to prevent performance issues
+        app_panel_handler = PanelLogHandler(pane=self.log_pane, max_lines=2000)
         app_panel_handler.setLevel(logging.INFO) 
         
         app_logger = logging.getLogger('recognizer_workshop')
@@ -116,8 +103,9 @@ class ViewModel(SimpleNamespace):
 
         # --- Handler for `baw_helpers` ---
         # Show INFO level for database creation progress
-        baw_panel_handler = PanelLogHandler(pane=self.log_pane)
-        baw_panel_handler.setLevel(logging.INFO)  # Changed from WARNING to INFO
+        # Share the same pane but with a separate handler instance
+        baw_panel_handler = PanelLogHandler(pane=self.log_pane, max_lines=2000)
+        baw_panel_handler.setLevel(logging.INFO)
         
         baw_logger = logging.getLogger('baw_helpers')
         baw_logger.setLevel(logging.INFO)  
