@@ -115,9 +115,9 @@ class ViewModel(SimpleNamespace):
             app_logger.addHandler(app_panel_handler)
 
         # --- Handler for `baw_helpers` ---
-        # This handler will ONLY show WARNING messages and up
-        baw_panel_handler = PanelLogHandler(pane=self.log_pane) # New instance, same pane
-        baw_panel_handler.setLevel(logging.WARNING) # This filter is strict
+        # Show INFO level for database creation progress
+        baw_panel_handler = PanelLogHandler(pane=self.log_pane)
+        baw_panel_handler.setLevel(logging.INFO)  # Changed from WARNING to INFO
         
         baw_logger = logging.getLogger('baw_helpers')
         baw_logger.setLevel(logging.INFO)  

@@ -163,7 +163,7 @@ def iter_parquet_dataframes(
 
   
     skip_arids_in = set() if skip_arids_in is None else {int(x) for x in skip_arids_in}
-    consecutive_auth_errors = 0  # NEW: track consecutive 401 errors
+    consecutive_auth_errors = 0  
 
     def warn(source, exc):
         log.warning(f"skipping {source}: {exc}")
@@ -186,8 +186,11 @@ def iter_parquet_dataframes(
         if api_client is None:
             raise ValueError("api_client is required when parquet_source is a list of ARIDs")
         
+        log.info(f"Starting download of {len(arids)} parquet files from API")
+        
         def fetch_one(arid: int):
             # Get BytesIO from API (auth handled by client)
+            log.debug(f"Fetching parquet for ARID {arid}")
             buf = api_client.analysis_result_file(
                 arid=arid,
                 analysis_job_id=analysis_job_id,
@@ -196,6 +199,7 @@ def iter_parquet_dataframes(
             )
             if buf is None:
                 raise RuntimeError(f"no parquet returned for ARID {arid}")
+            log.debug(f"Successfully fetched parquet for ARID {arid}, size: {len(buf.getvalue())} bytes")
             return pq.read_table(buf, columns=columns).to_pandas()
 
 
@@ -219,12 +223,15 @@ def iter_parquet_dataframes(
                     break
 
             pbar = tqdm.tqdm(total=len(arids), desc="remote")
+            files_processed = 0
             while q:
                 arid, fut = q.popleft()
                 submit_next()
                 try:
                     result = fut.result()
-                    consecutive_auth_errors = 0  # reset on success
+                    consecutive_auth_errors = 0
+                    files_processed += 1
+                    log.info(f"✓ Processed parquet {files_processed}/{len(arids)} (ARID: {arid}, rows: {len(result)})")
                     yield result
                 except AuthenticationError as e:
                     # Direct authentication error from the API client
@@ -254,7 +261,8 @@ def iter_parquet_dataframes(
                     
                 pbar.update(1)
             pbar.close()
-
+            
+        log.info(f"Completed downloading {files_processed} parquet files")
         return
     
     else:
@@ -460,15 +468,22 @@ def add_parquet_to_db(
         source_map_fn = lambda x: x
 
     existing_arids = get_existing_arids(db)
+    log.info(f"Database currently has {len(existing_arids)} existing ARIDs, will skip these")
 
     total_inserted = 0
+    files_processed = 0
 
-
+    log.info(f"Starting to ingest parquet files into database")
     for df in tqdm.tqdm(iter_parquet_dataframes(parquet_source, api_client=api_client, skip_arids_in=existing_arids), desc="ingest"):
         max_for_df = max_count - total_inserted if max_count > 0 else -1
         num_inserted = add_df_to_db(df, db, source_map_fn=source_map_fn, max_count=max_for_df, dataset_name=dataset_name)
         total_inserted += num_inserted
+        files_processed += 1
+        
+        log.info(f"Ingested file {files_processed}: added {num_inserted} embeddings (total: {total_inserted})")
+        
         if max_count > 0 and db.count_embeddings() >= max_count:
+            log.info(f"Reached max_count limit of {max_count}, stopping ingestion")
             break
         
     db.commit()
