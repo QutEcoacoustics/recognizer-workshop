@@ -8,13 +8,16 @@ from perch_hoplite.db import interface as db_interface
 from typing import Any, Iterator, Sequence
 from concurrent import futures
 
+import logging
+log = logging.getLogger(__name__)
+
 
 def csv_worker_initializer_factory(row_func: Any = None) -> None:
   """
   Initialize the CSV worker.
   row_func: optional function. will return extra column headings if called with no arguments.
   """
-  csv_header = 'idx,dataset_name,source_id,offset,label,logits'
+  csv_header = 'idx,dataset_name,source_id,offset,label,score'
   extras = row_func() if row_func is not None else []
   csv_header = ','.join([csv_header] + extras)
 

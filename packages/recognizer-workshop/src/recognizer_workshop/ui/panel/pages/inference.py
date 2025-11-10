@@ -5,6 +5,10 @@ import panel as pn
 
 from recognizer_workshop.app.agile_modeling_helpers import make_inference_subset
 
+import logging
+
+log = logging.getLogger(__name__)
+
 
 def build(vm):
     # Create help buttons
@@ -27,8 +31,6 @@ def build(vm):
     project_id   = pn.widgets.IntInput(name="Project ID (optional)", value=0, start=0)
     btn_upload   = pn.widgets.Button(name="Upload detections", button_type="success")
     
-    log          = pn.pane.Markdown("")
-
     # Sections that depend on file existence
     section2 = pn.Column()
     section3 = pn.Column()
@@ -148,25 +150,27 @@ def build(vm):
         try:
             out = (vm.eng.config.predictions_folder / out_filename.value).absolute()
             
-            # Check if file exists and ask for confirmation
-            if out.exists():
-                # Since Panel doesn't have built-in confirmation dialogs, we'll use a simple approach
-                # You might want to implement a proper modal dialog in the future
-                log.object = f"⚠️ **File exists!**\n\nThe file `{out.name}` already exists. Click 'Run inference' again to overwrite it."
-                # Set a flag to indicate next click should proceed
-                if not hasattr(_run, 'confirmed'):
-                    _run.confirmed = True
-                    return
-                else:
-                    # Reset the flag
-                    delattr(_run, 'confirmed')
+            # # Check if file exists and ask for confirmation
+            # if out.exists():
+            #     # Since Panel doesn't have built-in confirmation dialogs, we'll use a simple approach
+            #     # You might want to implement a proper modal dialog in the future
+            #     log.info(f"⚠️ **File exists!**\n\nThe file `{out.name}` already exists. Click 'Run inference' again to overwrite it."
+            #     # Set a flag to indicate next click should proceed
+            #     if not hasattr(_run, 'confirmed'):
+            #         _run.confirmed = True
+            #         return
+            #     else:
+            #         # Reset the flag
+            #         delattr(_run, 'confirmed')
+
+
             
             out.parent.mkdir(parents=True, exist_ok=True)
             labels_arg = None
             if labels_txt.value.strip():
                 labels_arg = [x.strip() for x in labels_txt.value.split(",") if x.strip()]
             
-            log.object = "Running inference... this may take a while."
+            log.info("Running inference... this may take a while.")
             
             vm.eng.run_inference(
                 output_filepath=out,
@@ -176,14 +180,14 @@ def build(vm):
                 subset=float(subset.value),
                 exclude_labeled=True,
             )
-            log.object = f"✅ **Inference complete!**\n\nSaved detections to: `{out}`"
+            log.info(f"✅ **Inference complete!**\n\nSaved detections to: `{out}`")
             vm.notify("Inference complete.", "success")
             
             # Update section visibility
             _check_file_availability()
             
         except Exception as e:
-            log.object = f"❌ **Error during inference:**\n```\n{e}\n```"
+            log.error(f"❌ **Error during inference:**\n```\n{e}\n```")
             vm.notify(f"Inference failed: {e}", "error")
 
     def _create_subset(_):
@@ -196,7 +200,7 @@ def build(vm):
             
             subset_csv = original_csv.with_suffix(f'.{subset_limit.value}.csv')
             
-            log.object = f"Creating subset with {subset_limit.value} examples per label..."
+            log.info(f"Creating subset with {subset_limit.value} examples per label...")
             
             make_inference_subset(
                 inference_csv=original_csv,
@@ -204,14 +208,14 @@ def build(vm):
                 limit=subset_limit.value
             )
             
-            log.object = f"✅ **Subset created!**\n\nSaved subset to: `{subset_csv}`"
+            log.info(f"✅ **Subset created!**\n\nSaved subset to: `{subset_csv}`")
             vm.notify("Subset created.", "success")
             
             # Update section visibility
             _check_file_availability()
             
         except Exception as e:
-            log.object = f"❌ **Error creating subset:**\n```\n{e}\n```"
+            log.error(f"❌ **Error creating subset:**\n```\n{e}\n```")
             vm.notify(f"Subset creation failed: {e}", "error")
 
     def _upload(_):
@@ -230,27 +234,25 @@ def build(vm):
             
             pid = int(project_id.value) if int(project_id.value) > 0 else None
             
-            log.object = f"Uploading detections from: `{upload_file.name}`..."
+            log.info(f"Uploading detections from: `{upload_file.name}`...")
             
             # Get the success status and verification link
             success_status, verification_link = vm.eng.upload_detections(upload_file, project_id=pid)
             
             if success_status and verification_link:
-                log.object = f"""✅ **Upload successful!**
+                log.info(f"✅ **Upload successful!**")
+                log.info(f"Uploaded file: `{upload_file.name}`")
+                log.info(f"Verification link: {verification_link}")
 
-Uploaded file: `{upload_file.name}`
-
-<a href="{verification_link}" target="_blank" style="color: #0066cc; text-decoration: underline;">🔗 Click here to verify detections (opens in new tab)</a>"""
-                vm.notify("Upload successful! Check log for verification link.", "success")
             elif success_status:
-                log.object = f"✅ **Upload successful!**\n\nUploaded file: `{upload_file.name}`\n\nVerification link not available."
+                log.info(f"✅ **Upload successful!**\n\nUploaded file: `{upload_file.name}`\n\nVerification link not available.")
                 vm.notify("Upload successful, but no verification link available.", "success")
             else:
-                log.object = f"❌ **Upload failed!**\n\nFile: `{upload_file.name}`"
+                log.info(f"❌ **Upload failed!**\n\nFile: `{upload_file.name}`")
                 vm.notify("Upload failed. Check logs for details.", "error")
             
         except Exception as e:
-            log.object = f"❌ **Error during upload:**\n```\n{e}\n```"
+            log.info(f"❌ **Error during upload:**\n```\n{e}\n```")
             vm.notify(f"Upload failed: {e}", "error")
 
     # Set up event handlers
@@ -272,8 +274,8 @@ Uploaded file: `{upload_file.name}`
     _check_file_availability()
 
     return pn.Column(
-        pn.Row("## Inference", pn.Spacer(), inference_help_btn),
-        pn.Row("### 1. Run Inference", pn.Spacer(), batch_inference_help_btn),
+        #pn.Row("## Inference", pn.Spacer(), inference_help_btn),
+        pn.Row("## Run Inference", pn.Spacer(), batch_inference_help_btn),
         pn.pane.Markdown(
             "Run the trained classifier on the database embeddings to generate predictions. "
             "This will create a CSV file with detections above the specified threshold."
@@ -282,13 +284,11 @@ Uploaded file: `{upload_file.name}`
         pn.Row(labels_txt, sizing_mode="stretch_width"),
         pn.Row(btn_run, sizing_mode="stretch_width"),
         
-        # Dynamic sections that appear when files exist
-        pn.Row("### 2. Create Subset (Optional)", pn.Spacer(), result_review_help_btn) if section2.objects else None,
-        section2,
-        pn.Row("### 3. Upload Detections", pn.Spacer(), export_results_help_btn) if section3.objects else None,
-        section3,
+        # # Dynamic sections that appear when files exist
+        # pn.Row("### 2. Create Subset (Optional)", pn.Spacer(), result_review_help_btn) if section2.objects else None,
+        # section2,
+        # pn.Row("### 3. Upload Detections", pn.Spacer(), export_results_help_btn) if section3.objects else None,
+        # section3,
         
-        "### Log",
-        log,
         sizing_mode="stretch_both",
     )

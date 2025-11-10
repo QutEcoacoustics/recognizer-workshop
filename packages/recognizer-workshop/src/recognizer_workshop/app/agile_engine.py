@@ -50,7 +50,7 @@ from recognizer_workshop.app.services.events.upload_detections import upload_det
 from recognizer_workshop.app.services.inference.helpers import make_site_map
 from recognizer_workshop.app.services.db_labels.db_labels import get_db_summary, get_label_counts, labels_from_event_taggings, add_labels_to_db
 from recognizer_workshop.app.services.db_labels.dataclasses import LabelName
-from recognizer_workshop.app.services.inference.inference import run_inference
+from recognizer_workshop.app.services.inference.inference import run_inference as inference_service_run_inference
 
 
 log = logging.getLogger(__name__)
@@ -763,8 +763,8 @@ class agile_state:
         if output_filepath is None:
             output_filepath = Path(self.config.predictions_folder) / 'inference.csv'
         Path(output_filepath).parent.mkdir(parents=True, exist_ok=True)
-
-        run_inference(self.classifier,
+        # not self.run_inference
+        inference_service_run_inference(self.classifier,
                         self.db,
                         output_filepath,
                         self.baw_api,
@@ -772,6 +772,7 @@ class agile_state:
                         labels=labels,
                         subset=subset,
                         exclude_labeled=exclude_labeled)
+        log.info(f'Inference results written to {output_filepath}')
     
 
     
