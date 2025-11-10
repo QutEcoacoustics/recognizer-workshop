@@ -131,9 +131,10 @@ def build(vm):
             # This case shouldn't happen due to the check at the top, but it's safe to handle
             db_path_display.value = "Not set in config."
 
-    @pn.depends(vm.obs.ensure("engine_state").param.version, watch=True)
-    def _update_on_engine_change(_):
-        """Reacts to engine state changes and updates button availability."""
+    # Watch for config changes instead of engine changes
+    @pn.depends(vm.obs.ensure("config_state").param.version, watch=True)
+    def _update_on_config_change(_):
+        """Reacts to config changes and updates button availability."""
         _update_button_state()
 
     btn_create.on_click(_create_db)
