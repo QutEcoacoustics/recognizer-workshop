@@ -55,20 +55,40 @@ def build_app(vm):
         sidebar=[vm.help_system, vm.help_system.content]  # Pass components directly
     )
 
-
+    # Check for dev mode via query string parameter or environment variable
+    # URL would be: http://localhost:5006/?dev=true
+    dev_mode = pn.state.session_args.get('dev', [b'false'])[0].decode() == 'true' or \
+               os.environ.get('RECOGNIZER_DEV_MODE', '').lower() == 'true'
     
-    # def sync_vm_to_template(event):
-    #     # When VM sidebar_open changes, update template's collapsed_sidebar
-    #     template.collapsed_sidebar = not event.new  # Note: collapsed is opposite of open
+    # Create a toggle for dev mode (hidden by default)
+    dev_toggle = pn.widgets.Checkbox(
+        name="🔧 Developer Mode", 
+        value=dev_mode,
+        visible=False  # Hidden by default
+    )
     
-    # def sync_template_to_vm(event):
-    #     # When template collapsed_sidebar changes, update VM sidebar_open
-    #     vm.help_system.sidebar_open = not event.new  # Note: collapsed is opposite of open
-    
-    # # Watch for changes
-    # vm.help_system.param.watch(sync_vm_to_template, 'sidebar_open')
-    # template.param.watch(sync_template_to_vm, 'collapsed_sidebar')
-
+    # Add keyboard shortcut to show dev toggle: Ctrl+Shift+D
+    dev_toggle_button = pn.pane.HTML(f"""
+    <script>
+    document.addEventListener('keydown', function(e) {{
+        if (e.ctrlKey && e.shiftKey && e.key === 'D') {{
+            e.preventDefault();
+            // Toggle visibility of dev mode checkbox
+            var devToggle = document.querySelector('.dev-toggle-container');
+            if (devToggle) {{
+                devToggle.style.display = devToggle.style.display === 'none' ? 'block' : 'none';
+            }}
+        }}
+    }});
+    </script>
+    <div class="dev-toggle-container" style="display: {'block' if dev_mode else 'none'}; 
+         padding: 10px; 
+         background: #f0f0f0; 
+         border-radius: 4px; 
+         margin: 10px 0;">
+        <small>💡 Press <kbd>Ctrl+Shift+D</kbd> to toggle dev mode panel</small>
+    </div>
+    """)
 
     # seems to be problematic to do a relative src to the image files in the html, but
     # we can read and encode them here. TODO: maybe cache this for load time improvement?
@@ -106,6 +126,7 @@ def build_app(vm):
 
 
     template.header.append(header_logos)
+    template.header.append(dev_toggle_button)
     template.main.append(error_banner)
     template.main.append(tabs)
     # template.sidebar.append(vm.help_system) # append the js custom component for sidebar control

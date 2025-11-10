@@ -30,24 +30,22 @@ class ThreadedSQLiteUsearchDB(SQLiteUsearchDB):
         db_path: str,
         usearch_cfg: config_dict.ConfigDict | None = None,
     ):
-        """
-        Duplicate the parent class method but modify the sqlite3.connect with the check_same_thread=False option.
-        """
-
         db_path = epath.Path(db_path)
         db_path.mkdir(parents=True, exist_ok=True)
-        hoplite_path = db_path / HOPLITE_FILENAME 
+        hoplite_path = db_path / HOPLITE_FILENAME
+
 
         # Only this line is modified from the parent class, to allow cross-thread usage
+        #db = sqlite3.connect(hoplite_path.as_posix())
         db = sqlite3.connect(hoplite_path.as_posix(), check_same_thread=False)
 
-        # The rest of the method is exactly the same as the original
         cursor = db.cursor()
-        cursor.execute('PRAGMA journal_mode=WAL;')
-        _setup_sqlite_tables(cursor) 
+        cursor.execute('PRAGMA journal_mode=WAL;')  # Enable WAL mode
+        _setup_sqlite_tables(cursor)
         db.commit()
 
-        metadata = _get_metadata(cursor, None) # Assuming accessible
+        # TODO(tomdenton): Check that config is consistent with the DB.
+        metadata = _get_metadata(cursor, None)
         if (
             USEARCH_CONFIG_KEY in metadata
             and usearch_cfg is not None
@@ -62,34 +60,43 @@ class ThreadedSQLiteUsearchDB(SQLiteUsearchDB):
             raise ValueError('No usearch config found in DB and none provided.')
         else:
             _insert_metadata(cursor, USEARCH_CONFIG_KEY, usearch_cfg)
-            db.commit()
+        db.commit()
 
         usearch_dtype = USEARCH_DTYPES[usearch_cfg.dtype]
-        ui_mem = uindex.Index(
-            ndim=usearch_cfg.embedding_dim,
-            metric=getattr(uindex.MetricKind, usearch_cfg.metric_name),
-            expansion_add=usearch_cfg.expansion_add,
-            expansion_search=usearch_cfg.expansion_search,
-            dtype=usearch_dtype,
-        )
         index_path = db_path / UINDEX_FILENAME
-        ui_disk_view = uindex.Index(ndim=usearch_cfg.embedding_dim)
         if index_path.exists():
-            ui_disk_view.view(index_path.as_posix())
-            ui = ui_disk_view
+            ui = uindex.Index(
+                ndim=usearch_cfg.embedding_dim,
+                path=index_path,
+                view=True,
+            )
+            ui_in_memory = False
         else:
-            ui = ui_mem
-        
+            ui = uindex.Index(
+                ndim=usearch_cfg.embedding_dim,
+                metric=getattr(uindex.MetricKind, usearch_cfg.metric_name),
+                expansion_add=usearch_cfg.expansion_add,
+                expansion_search=usearch_cfg.expansion_search,
+                dtype=usearch_dtype,
+                path=index_path,
+                view=False,
+            )
+            ui_in_memory = True
+
         return cls(
             db_path=db_path.as_posix(),
             db=db,
             ui=ui,
-            _ui_mem=ui_mem, 
-            _ui_disk_view=ui_disk_view,
             embedding_dim=usearch_cfg.embedding_dim,
             embedding_dtype=usearch_cfg.dtype,
+            _ui_loaded=ui_in_memory,
+            _ui_updated=ui_in_memory,
         )
-    
+
+
+
+
+
 
     def update_label_type(self, embedding_id: int, label: str, new_type: hoplite_interface.LabelType):
         """

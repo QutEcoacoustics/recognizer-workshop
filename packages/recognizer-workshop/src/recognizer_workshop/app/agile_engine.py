@@ -46,8 +46,6 @@ from baw_helpers.baw_api import baw_api
 from baw_helpers.baw_helpers import annotation_upload_csv
 
 
-
-
 from recognizer_workshop.app.services.events.upload_detections import upload_detections
 from recognizer_workshop.app.services.inference.helpers import make_site_map
 from recognizer_workshop.app.services.db_labels.db_labels import get_db_summary, get_label_counts, labels_from_event_taggings, add_labels_to_db
@@ -369,8 +367,9 @@ class agile_state:
             max_retries = 2
             for attempt in range(max_retries):
                 try:
-                    # Load and cache the model in the private attribute
-                    self._embedding_model = self.model_class.from_config(self.db_model_config.model_config)
+                    #TODO: load the model based on db config data rather than hardcoding "perch_8"
+                    self._embedding_model = model_configs.load_model_by_name("perch_8")
+                    #self._embedding_model = self.model_class.from_config(self.db_model_config.model_config)
                     log.info("Model loaded successfully.")
                     break
                 except ValueError as e:
@@ -491,6 +490,8 @@ class agile_state:
               OR the result of classifier.train_linear_classifier() (kind of)
         """
 
+        log.info(f'Searching for label {target_label} with num_results={num_results}, sample_size={sample_size}, target_score={target_score}, dataset={dataset}, exclude_labeled={exclude_labeled}')
+
         score_fn = score_functions.get_score_fn('dot', bias=bias, target_score=target_score)
         all_datasets = self.db.get_dataset_names()
         if dataset is not None and dataset not in all_datasets:
@@ -504,6 +505,8 @@ class agile_state:
         results, all_scores = brutalism.threaded_brute_search(
             self.db, query, num_results, score_fn=score_fn,
             sample_size=sample_size, exclude_labeled=exclude_labeled)
+        
+        log.info(f'Found {len(results)} results for label {target_label}')
 
         if self.search_results is None:
             self.search_results = {} # dict for each target label

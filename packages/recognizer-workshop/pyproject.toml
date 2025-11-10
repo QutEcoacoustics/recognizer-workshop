@@ -40,7 +40,7 @@ dependencies = [
 
   # Needed to read/write Parquet files and work with arrow tables
   # used for hoplie db creation from parquet files
-  "pyarrow",
+  "pyarrow==22.0.0",
 
   "pandas",
   "numpy",

@@ -4,7 +4,11 @@ from functools import partial
 from pathlib import Path
 import logging
 import panel as pn
-from recognizer_workshop.app.agile_engine import AgileConfig, agile_state, get_recent_files
+from recognizer_workshop.app.agile_engine import AgileConfig
+from recognizer_workshop.app.agile_engine import agile_state
+from recognizer_workshop.app.agile_engine import get_recent_files
+
+
 
 log = logging.getLogger(__name__)
 
