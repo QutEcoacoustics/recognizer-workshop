@@ -18,6 +18,8 @@ os.environ.setdefault("MPLBACKEND", "module://matplotlib_inline.backend_inline")
 pn.extension('tabulator', sizing_mode="stretch_width")
 hv.extension('bokeh')
 
+
+
 # --- Global Error Handling Setup ---
 error_banner = pn.pane.Alert(visible=False, sizing_mode="stretch_width")
 
@@ -26,7 +28,7 @@ def global_exception_handler(ex):
     logging.error("An unhandled exception occurred", exc_info=ex)
     # Display a user-friendly message in the app's UI
     error_banner.object = (
-        "💥 **An unexpected error occurred!** Please try refreshing the page."
+        f"💥 **An unexpected error occurred!** Please try refreshing the page. {ex}"
     )
     error_banner.alert_type = 'danger'
     error_banner.visible = True
