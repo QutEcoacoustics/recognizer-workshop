@@ -62,7 +62,7 @@ def build_active_label_picker(vm) -> pn.Row:
             # If it's one of the options, sync it into the Select
             if eng.active_label in select.options.values():
                 select.value = eng.active_label
-                note.object = f"**Selected:** {str(select.value)}"
+
 
     # User changed selection -> write back LabelName and bump
     def _on_user_change(event):
