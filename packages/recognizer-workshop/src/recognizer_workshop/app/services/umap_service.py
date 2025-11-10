@@ -112,9 +112,13 @@ def load_umap_data(db, db_path: Path):
     all_labels = db.get_all_labels()
     if all_labels:
         df_labels = pd.DataFrame(all_labels, columns=['embedding_id', 'label', 'type'])
+
+        # sort by label type positive last so that positive takes precedence in composite label
+        df_labels = df_labels.sort_values(by=['type', 'label'])
         df_labels = df_labels.drop_duplicates(subset='embedding_id', keep='last')
+        
         df_labels['composite_label'] = df_labels.apply(
-            lambda row: f"{row['label']} ({'Positive' if row['type'] == 1 else 'Negative'})",
+            lambda row: row['label'] if row['type'] == 1 else 'Negative',
             axis=1
         )
         
