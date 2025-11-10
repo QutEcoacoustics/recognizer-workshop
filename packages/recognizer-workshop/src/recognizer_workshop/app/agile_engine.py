@@ -684,7 +684,7 @@ class agile_state:
             "config": self.config,
             "db_loaded": self.db is not None,
             "embedding_model_loaded": self._embedding_model is not None,
-            "embedding_model_config": self._embedding_model.config if self._embedding_model else None,
+            "embedding_model_config": self.db_model_config,
             "db_summary": self.db_summary() if self.db else None,
         }
 
