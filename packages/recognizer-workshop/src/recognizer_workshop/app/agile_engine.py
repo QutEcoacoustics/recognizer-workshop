@@ -420,6 +420,7 @@ class agile_state:
         """
 
         self.query_embedding = self.embedding_model.embed(query_audio_samples).embeddings[0, 0]
+        log.info('Query audio embedded.')
         return self.query_embedding
     
 

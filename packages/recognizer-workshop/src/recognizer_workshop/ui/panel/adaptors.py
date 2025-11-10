@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
 from typing import Any, Iterable, Literal, Optional, Sequence
+import logging
 
 import numpy as np
 import panel as pn
@@ -14,6 +15,7 @@ from recognizer_workshop.app.agile_engine import AgileConfig, agile_state, Label
 from recognizer_workshop.perch_hoplite_custom_modifications.embedding_display import QueryDisplay
 from recognizer_workshop.ui.panel.components.native.embedding_display import PanelQuerySelector, PanelEmbeddingDisplay, PanelEmbeddingDisplayGroup
 
+log = logging.getLogger(__name__)
 
 @dataclass
 class Region():
@@ -276,11 +278,17 @@ class PanelUI(param.Parameterized):
         active_label = eng.active_label
         if not active_label:
             self.render(pn.pane.Alert("Pick target label(s) on the Config tab.", alert_type="warning"), results_region)
+            log.warning('No active label selected for search.')
             return
+        else:
+            self.clear_region_box(results_region)
+        
 
+        log.info(f'Starting search for label {active_label}...')
         eng.search_with_query(num_results=num_results, sample_size=None, target_score=target_score, target_label=active_label)
-
+        log.info(f'Search completed for label {active_label}, showing results.')
         self.show_results(eng, active_label, results_region=results_region)
+        log.info(f'Results rendered for label {active_label}.')
 
 
     def search_with_classifier(
