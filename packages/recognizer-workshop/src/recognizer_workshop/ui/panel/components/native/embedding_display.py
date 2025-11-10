@@ -43,7 +43,7 @@ class PanelQuerySelector(pn.Column):
         )
         super().__init__(card, sizing_mode="stretch_width", **params)
 
-        # Backend object from your (modified) library
+        # Backend object from perch_hoplite
         self.qd = QueryDisplay(uri=self.uri, window_size_s=self.window_size_s, sample_rate_hz=32000)
 
         # Wire slider -> re-render
@@ -67,7 +67,7 @@ class PanelQuerySelector(pn.Column):
         # here we inline to keep this class self-contained:
         from librosa import display as librosa_display
         librosa_display.specshow(
-            np.flipud(spec), sr=self.qd.sample_rate_hz, y_axis='mel', x_axis='time',
+            spec, sr=self.qd.sample_rate_hz, y_axis='mel', x_axis='time',
             hop_length=self.qd.sample_rate_hz // self.qd.frame_rate, cmap='Greys', ax=ax
         )
         if draw_window:
@@ -270,7 +270,8 @@ class PanelEmbeddingDisplay(pn.Column):
                 spec = self._spec.T
                 import librosa.display as lrd
                 lrd.specshow(
-                    np.flipud(spec),
+                    #np.flipud(spec),
+                    spec,
                     sr=self.sample_rate_hz,
                     y_axis='mel',
                     x_axis='time',
