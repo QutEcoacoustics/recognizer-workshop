@@ -507,7 +507,7 @@ class agile_state:
             self.db, query, num_results, score_fn=score_fn,
             sample_size=sample_size, exclude_labeled=exclude_labeled)
         
-        log.info(f'Found {len(results)} results for label {target_label}')
+        log.info(f'Search complete. Found {len(results.search_results)} results.')
 
         if self.search_results is None:
             self.search_results = {} # dict for each target label
