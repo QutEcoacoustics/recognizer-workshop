@@ -93,10 +93,10 @@ class ViewModel(SimpleNamespace):
         # This handler will show INFO messages and up
         # Limit to 2000 lines to prevent performance issues
         app_panel_handler = PanelLogHandler(pane=self.log_pane, max_lines=2000)
-        app_panel_handler.setLevel(logging.INFO) 
+        app_panel_handler.setLevel(logging.DEBUG) 
         
         app_logger = logging.getLogger('recognizer_workshop')
-        app_logger.setLevel(logging.INFO)
+        app_logger.setLevel(logging.DEBUG)
         
         if not any(isinstance(h, PanelLogHandler) for h in app_logger.handlers):
             app_logger.addHandler(app_panel_handler)
