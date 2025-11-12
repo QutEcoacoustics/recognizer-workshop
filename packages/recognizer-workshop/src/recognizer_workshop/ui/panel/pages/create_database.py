@@ -115,8 +115,17 @@ def build(vm):
         if cached_file.exists():
             btn_use_cache = pn.widgets.Button(name="Use Cached List", button_type="primary")
             btn_fetch_new = pn.widgets.Button(name="Fetch New List")
-            btn_use_cache.on_click(lambda _: asyncio.create_task(_run_creation_process(use_cache=True)))
-            btn_fetch_new.on_click(lambda _: asyncio.create_task(_run_creation_process(use_cache=False)))
+            
+            def _use_cache_and_close(_):
+                dialog.open = False
+                asyncio.create_task(_run_creation_process(use_cache=True))
+                
+            def _fetch_new_and_close(_):
+                dialog.open = False
+                asyncio.create_task(_run_creation_process(use_cache=False))
+                
+            btn_use_cache.on_click(_use_cache_and_close)
+            btn_fetch_new.on_click(_fetch_new_and_close)
             dialog = Dialog(pn.Column(pn.pane.Markdown(f"Found a cached file list for these filters. Use it or fetch a new list?"), pn.Row(btn_use_cache, btn_fetch_new)), title="Cached File List Found")
             dialog_container.objects = [dialog]; dialog.open = True
         else:

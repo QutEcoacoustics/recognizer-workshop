@@ -81,6 +81,8 @@ class ViewModel(SimpleNamespace):
         self.help_system = HelpSystem()
 
 
+
+
     def _setup_logging(self):
         """Connects the ViewModel's log_view widget to the app's loggers.
 
@@ -89,29 +91,27 @@ class ViewModel(SimpleNamespace):
         So that we don't block useful log messages from other handlers.
         """
         
-        # --- Handler for your App (`recognizer_workshop`) ---
-        # This handler will show INFO messages and up
-        # Limit to 2000 lines to prevent performance issues
-        app_panel_handler = PanelLogHandler(pane=self.log_pane, max_lines=2000)
-        app_panel_handler.setLevel(logging.DEBUG) 
+        # Create a single shared handler for both loggers
+        shared_panel_handler = PanelLogHandler(pane=self.log_pane, max_lines=2000)
+        shared_panel_handler.setLevel(logging.DEBUG)
         
+        # Store reference to the handler for easy access
+        self.log_handler = shared_panel_handler
+        
+        # Setup recognizer_workshop logger
         app_logger = logging.getLogger('recognizer_workshop')
         app_logger.setLevel(logging.DEBUG)
         
         if not any(isinstance(h, PanelLogHandler) for h in app_logger.handlers):
-            app_logger.addHandler(app_panel_handler)
+            app_logger.addHandler(shared_panel_handler)
 
-        # --- Handler for `baw_helpers` ---
-        # Show INFO level for database creation progress
-        # Share the same pane but with a separate handler instance
-        baw_panel_handler = PanelLogHandler(pane=self.log_pane, max_lines=2000)
-        baw_panel_handler.setLevel(logging.DEBUG)
-        
+        # Setup baw_helpers logger with the same handler
         baw_logger = logging.getLogger('baw_helpers')
-        baw_logger.setLevel(logging.DEBUG)  
+        baw_logger.setLevel(logging.INFO)
         
         if not any(isinstance(h, PanelLogHandler) for h in baw_logger.handlers):
-            baw_logger.addHandler(baw_panel_handler)
+            baw_logger.addHandler(shared_panel_handler)
+
 
 
 

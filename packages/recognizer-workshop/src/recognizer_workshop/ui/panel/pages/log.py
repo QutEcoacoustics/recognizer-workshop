@@ -1,5 +1,6 @@
 import logging
 import panel as pn
+from collections import deque
 
 log = logging.getLogger(__name__)
 
@@ -8,12 +9,8 @@ def build(vm):
     """Build the log viewer page."""
     
     # Get the log handler to access its buffer
-    app_logger = logging.getLogger('recognizer_workshop')
-    handler = None
-    for h in app_logger.handlers:
-        if hasattr(h, 'log_buffer'):  # Our custom PanelLogHandler
-            handler = h
-            break
+    #app_logger = logging.getLogger('recognizer_workshop')
+    handler = getattr(vm, 'log_handler', None)
     
     # Controls
     btn_clear = pn.widgets.Button(name="Clear Logs", button_type="warning", icon="trash")
@@ -79,14 +76,11 @@ def build(vm):
         level_name = event.new
         level = getattr(logging, level_name)
         
-        # Update all our handlers
-        for logger_name in ['recognizer_workshop', 'baw_helpers']:
-            logger = logging.getLogger(logger_name)
-            for h in logger.handlers:
-                if hasattr(h, 'log_buffer'):
-                    h.setLevel(level)
+        # Update the shared handler directly
+        if handler:
+            handler.setLevel(level)
+            log.info(f"Log level changed to {level_name}")
         
-        log.info(f"Log level changed to {level_name}")
     
     def _on_max_lines_change(event):
         """Change the buffer size."""
@@ -146,12 +140,12 @@ def build(vm):
         ),
         
         # Log display
-        pn.Card(
-            log_display,
-            title="Log Output",
-            sizing_mode="stretch_both",
-            height=600
-        ),
+        # pn.Card(
+        #     log_display,
+        #     title="Log Output",
+        #     sizing_mode="stretch_both",
+        #     height=600
+        # ),
         
         sizing_mode="stretch_both"
     )

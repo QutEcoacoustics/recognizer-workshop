@@ -385,10 +385,41 @@ def get_events_with_verifications_and_tags(api, filter_params, target_tags=None)
     # this is only applicable if target_label is None
     events_without_taggings = [event for event in events if 'taggings' not in event or len(event['taggings']) == 0]
     events = [event for event in events if 'taggings' in event and len(event['taggings']) > 0]
+
+    target_tag_records = api.post("/tags/filter?disable_paging=true", data={
+        "filter": {
+            "text": {
+                "in": target_tags
+            }
+        }
+    }).get('data', [])
+
+    target_tag_ids = [t['id'] for t in target_tag_records]
+
+
+
+
+    # get only events where any of the target_tag_ids is in the target_events_taggings.id list
+    def tag_match (event_taggings):
+        event_tag_ids = [tagging['tag_id'] for tagging in event_taggings]
+        return bool(set(event_tag_ids) & set(target_tag_ids))
+    
+    # limit to target events
+    # this is a temporary hack so we don't pull too many events from negative events
+    # which kills performance and our approach to negative tags is probably dumb anyway
+    # TODO: completely rethink this whole process being more selective of negative tags
+    # and using latest api for related models
+    target_events = [event for event in events if tag_match(event['taggings'])]
+    log.info(f"Found {len(target_events)} in {len(events)} total events.")
+    events = target_events
+    
+ 
     event_ids = [event['id'] for event in events]
+
     verifications = get_verifications_for_sites(api, event_ids)
     
     tag_ids = list(set([tagging['tag_id'] for event in events for tagging in event.get('taggings', [])]))
+
 
     # all tags that are in the events. We need this later to know which are taxonomic tags and which are not.
     tags = api.post("/tags/filter?disable_paging=true", data={
