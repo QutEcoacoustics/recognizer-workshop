@@ -476,7 +476,7 @@ def add_parquet_to_db(
     log.info(f"Starting to ingest parquet files into database")
     for df in tqdm.tqdm(iter_parquet_dataframes(parquet_source, api_client=api_client, skip_arids_in=existing_arids), desc="ingest"):
         max_for_df = max_count - total_inserted if max_count > 0 else -1
-        num_inserted = add_df_to_db(df, db, source_map_fn=source_map_fn, max_count=max_for_df, dataset_name=dataset_name)
+        num_inserted = add_df_to_db(df, db, source_map_fn=source_map_fn, max_for_df=max_for_df, dataset_name=dataset_name)
         total_inserted += num_inserted
         files_processed += 1
         
@@ -495,7 +495,7 @@ def add_parquet_to_db(
     return db
 
 
-def add_df_to_db(df, db, source_map_fn=convert_source_to_original_url, max_count=-1, dataset_name='search_set'):
+def add_df_to_db(df, db, source_map_fn=convert_source_to_original_url, max_for_df=-1, dataset_name='search_set'):
     if source_map_fn is None:
         source_map_fn = lambda x: x
     num_inserted = 0
@@ -507,7 +507,7 @@ def add_df_to_db(df, db, source_map_fn=convert_source_to_original_url, max_count
         source = interface.EmbeddingSource(dataset_name, row_source, row_offset)
         db.insert_embedding(row_embedding, source)
         num_inserted += 1
-        if max_count > 0 and db.count_embeddings() >= max_count:
+        if max_for_df > 0 and num_inserted >= max_for_df:
             break
     return num_inserted
 

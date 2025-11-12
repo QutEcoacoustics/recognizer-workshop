@@ -65,6 +65,9 @@ class PanelQuerySelector(pn.Column):
         fig, ax = plt.subplots()
         # qd.plot_spectrogram returns (fig, img, ax) if you’d rather reuse it;
         # here we inline to keep this class self-contained:
+        
+        # depending on the mood of the gremlins, the spec may be upside down
+        spec = np.flipud(spec)
         from librosa import display as librosa_display
         librosa_display.specshow(
             spec, sr=self.qd.sample_rate_hz, y_axis='mel', x_axis='time',
@@ -268,9 +271,10 @@ class PanelEmbeddingDisplay(pn.Column):
             def _create_plot():
                 fig, ax = plt.subplots()
                 spec = self._spec.T
+                # depending on the mood of the gremlins, the spec may be upside down
+                spec = np.flipud(spec)
                 import librosa.display as lrd
                 lrd.specshow(
-                    #np.flipud(spec),
                     spec,
                     sr=self.sample_rate_hz,
                     y_axis='mel',
@@ -319,7 +323,7 @@ class PanelEmbeddingDisplay(pn.Column):
 
 class PanelEmbeddingDisplayGroup(pn.Column):
     """
-    Paginates a list of PanelEmbeddingResult.
+    Displays a grid of PanelEmbeddingDisplay items with pagination.
     """
     def __init__(self, items: List[PanelEmbeddingDisplay], page_size: int = 10, **kwargs):
         self._items = items
