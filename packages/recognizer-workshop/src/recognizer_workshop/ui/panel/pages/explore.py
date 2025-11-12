@@ -78,7 +78,7 @@ def build(vm):
         status_pane.object = "⏳ Working on UMAP cache... This can take a long time. Please be patient."
         
         try:
-            # UPDATED: Call the new main service function with the new parameters
+
             await asyncio.to_thread(
                 umap_service.generate_umap_cache,
                 db=vm.eng.db,

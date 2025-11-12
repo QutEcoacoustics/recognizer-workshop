@@ -67,7 +67,7 @@ class PanelQuerySelector(pn.Column):
         # here we inline to keep this class self-contained:
         
         # depending on the mood of the gremlins, the spec may be upside down
-        spec = np.flipud(spec)
+        #spec = np.flipud(spec)
         from librosa import display as librosa_display
         librosa_display.specshow(
             spec, sr=self.qd.sample_rate_hz, y_axis='mel', x_axis='time',
@@ -272,7 +272,7 @@ class PanelEmbeddingDisplay(pn.Column):
                 fig, ax = plt.subplots()
                 spec = self._spec.T
                 # depending on the mood of the gremlins, the spec may be upside down
-                spec = np.flipud(spec)
+                #spec = np.flipud(spec)
                 import librosa.display as lrd
                 lrd.specshow(
                     spec,

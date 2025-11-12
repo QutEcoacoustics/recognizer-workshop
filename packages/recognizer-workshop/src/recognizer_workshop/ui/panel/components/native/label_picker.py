@@ -1,4 +1,7 @@
+import logging
 import panel as pn
+
+log = logging.getLogger(__name__)
 
 def build_active_label_picker(vm) -> pn.Row:
     """
@@ -26,6 +29,7 @@ def build_active_label_picker(vm) -> pn.Row:
             return
 
         pool = eng.config.target_labels or []   # List[LabelName]
+        log.debug(f"Rebuilding active label picker with {len(pool)} target labels...")
         # Options map friendly text -> LabelName
         opts = {str(ln): ln for ln in pool}
         select.options = opts
@@ -48,11 +52,13 @@ def build_active_label_picker(vm) -> pn.Row:
     # React to changes in the available labels
     @pn.depends(vm.obs.ensure("target_labels").param.version, watch=True)
     def _on_target_labels_changed(_version):
+        log.info("Rebuilding active label picker due to target_labels change...")
         _rebuild()
 
     # React to external changes of the active label
     @pn.depends(vm.obs.ensure("active_label").param.version, watch=True)
     def _on_active_label_changed(_version):
+        log.info("Active label changed externally, updating picker...")
         eng = getattr(vm, "eng", None)
         if not eng:
             return

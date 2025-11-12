@@ -25,6 +25,7 @@ def _fit_and_save_model(db, model_path: Path, subset_size: int):
         log.warning(f"Dataset has fewer points ({len(all_ids)}) than subset_size ({subset_size}). Using all points.")
         subset_size = len(all_ids)
     
+    log.debug(f"Loading {subset_size} embeddings of {len(all_ids)} for UMAP fitting...")
     # Get a random subset of embeddings to fit on
     subset_ids = np.random.choice(all_ids, subset_size, replace=False)
     _, subset_embeddings = db.get_embeddings(subset_ids)
@@ -86,6 +87,10 @@ def generate_umap_cache(db, db_path: Path, fit_subset_size=100_000, transform_ba
     """
     model_path, coords_path = _get_umap_paths(db_path)
 
+    # check if db is a database instance
+    if not hasattr(db, 'get_embedding_ids') or not hasattr(db, 'get_embeddings'):
+        raise ValueError("db must be a database instance with get_embedding_ids and get_embeddings methods.")
+
     # Step 1: Fit and save the model if it doesn't exist
     if not model_path.exists():
         reducer = _fit_and_save_model(db, model_path, subset_size=fit_subset_size)
@@ -98,7 +103,7 @@ def generate_umap_cache(db, db_path: Path, fit_subset_size=100_000, transform_ba
 
 # --- Data Loading Function (for the UI plot) ---
 
-def load_umap_data(db, db_path: Path):
+def load_umap_data(db, db_path: Path, max_plot_points=10000):
     """
     Loads the cached UMAP coordinates and merges them with current labels from the DB.
     """
@@ -130,5 +135,29 @@ def load_umap_data(db, db_path: Path):
 
     df_plot['label'] = df_plot['label'].fillna('unlabeled')
     df_plot['composite_label'] = df_plot['composite_label'].fillna('unlabeled').astype('category')
+
+
+    # sample points to max_plot_points, but always include all labeled points
+    if max_plot_points is not None and len(df_plot) > max_plot_points:
+
+        np.random.seed(42)  # Reproducible sampling
+        include_mask = np.random.choice([True, False], size=len(df_plot), 
+                                       p=[max_plot_points/len(df_plot), 1-max_plot_points/len(df_plot)])
+        
+        # Step 2: Set all labeled rows to True
+        labeled_mask = df_plot['composite_label'] != 'unlabeled'
+        include_mask[labeled_mask] = True
+        
+        # Apply the mask
+        df_plot = df_plot[include_mask]
+        
+        labeled_count = labeled_mask.sum()
+        unlabeled_count = len(df_plot) - labeled_count
+        log.info(f"Sampled {len(df_plot)} points: {labeled_count} labeled + {unlabeled_count} unlabeled")
+    else:
+        log.info(f"Using all {len(df_plot)} points (no sampling applied)")
+
+
+
     log.info("UMAP data loaded and merged with labels.")
     return df_plot

@@ -149,7 +149,8 @@ def build(vm):
         # Use a flag to prevent autosave feedback loop
         if hasattr(sync_config_to_ui, '_syncing'):
             return  # Prevent recursive calls
-            
+        vm.obs.bump("config_state")
+        
         sync_config_to_ui._syncing = True
         try:
             annotator_id.value = vm.config.annotator_id
@@ -183,6 +184,8 @@ def build(vm):
 
     def sync_ui_to_config():
         """Updates the vm.config object from all UI widgets."""
+        # will trigger watchers of the config_state
+        vm.obs.bump("config_state")
         vm.config.annotator_id = annotator_id.value
         vm.config.baw_config["domain"] = domain.value
         vm.config.baw_config["auth_token"] = auth_token.value
@@ -199,7 +202,10 @@ def build(vm):
         # Don't autosave if we're currently syncing config to UI (prevents feedback loop)
         if hasattr(sync_config_to_ui, '_syncing'):
             return
-            
+
+        # will trigger watchers of the config_state
+        vm.obs.bump("config_state")
+
         sync_ui_to_config()
         if vm.config.config_path:
             try:
@@ -207,8 +213,7 @@ def build(vm):
                 vm.notify("Autosaved.", "info")
             except (FileNotFoundError, PermissionError, OSError) as e:
                 vm.notify(f"Autosave failed: {e}", "error")
-        # will trigger watchers of the config_state
-        vm.obs.bump("config_state")
+
 
 
     def _on_new_click(_event):
@@ -420,6 +425,9 @@ def build(vm):
 
     def _make_engine(_):
 
+        # anything observing engine_state will check for updates
+        vm.obs.bump("engine_state")
+
         try:
 
             vm.eng = agile_state(vm.config)
@@ -432,7 +440,6 @@ def build(vm):
                 vm.notify("API connection successful", "success")
             else:
                 vm.notify("API connection failed", "error")
-            vm.obs.bump("engine_state")
 
             # initialise the database
             try:
