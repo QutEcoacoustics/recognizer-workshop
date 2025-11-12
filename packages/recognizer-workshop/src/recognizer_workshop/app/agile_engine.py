@@ -800,9 +800,15 @@ class agile_state:
         """
         Inits our workbench client for interacting with Ecosounds. 
         """
+        log.debug(f"Initializing workbench")
 
         if token is None:
             token = self.config.baw_config.get('auth_token', None)
+
+
+        baw_config = getattr(self.config, 'baw_config', {}) or {}
+        log.debug(f"BAW config: {baw_config}")
+
 
         self.baw_api = baw_api(token=token,
                                base_url=self.config.baw_config.get('domain', None),
@@ -811,6 +817,7 @@ class agile_state:
         if self.baw_api.token is not None:
             # token supplied was valid OR was loaded from env and valid OR was prompted for and valid
             # update our config to sync with the baw_api loaded token
+            log.debug("Auth token set")
             self.config.baw_config['auth_token'] = self.baw_api.token
             return True
         else:

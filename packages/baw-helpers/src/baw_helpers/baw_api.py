@@ -55,8 +55,9 @@ class baw_api:
                                  If None, defaults to True if running in an interactive terminal.
         
         """
+        start_of_token = token[:4] + "..." if token else "None"
+        log.debug(f"BAW API initializing with token={start_of_token}, base_url={base_url}")
 
-       
         if not base_url:
             # If base_url is not provided, use the environment variable or default to ecosounds
             base_url = os.environ.get("API_BASE_URL", "https://api.ecosounds.org")
@@ -107,6 +108,8 @@ class baw_api:
         If content_type is None, we omit Content-Type (needed for multipart/form-data).
         Only adds Authorization header if token is set, otherwise we make unauthenticated requests in anonymous mode.
         """
+        log.debug(f"Creating auth headers, token available: {bool(self.token)}")
+
         h = {}
         if content_type is not None:
             h["Content-Type"] = content_type
