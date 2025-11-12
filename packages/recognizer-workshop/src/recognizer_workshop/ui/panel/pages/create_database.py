@@ -133,6 +133,7 @@ def build(vm):
 
     # Watch for config changes instead of engine changes
     @pn.depends(vm.obs.ensure("config_state").param.version, watch=True)
+    @pn.depends(vm.obs.ensure("engine_state").param.version, watch=True)
     def _update_on_config_change(_):
         """Reacts to config changes and updates button availability."""
         _update_button_state()

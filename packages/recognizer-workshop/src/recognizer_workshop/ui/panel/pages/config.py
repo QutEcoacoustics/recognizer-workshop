@@ -432,9 +432,15 @@ def build(vm):
                 vm.notify("API connection successful", "success")
             else:
                 vm.notify("API connection failed", "error")
+            vm.obs.bump("engine_state")
 
             # initialise the database
-            db_success = vm.eng.init_db()
+            try:
+                db_success = vm.eng.init_db()
+            except Exception as e:
+                db_success = False
+                log.exception("Database initialization error: %s", e)
+
             if db_success:
                 vm.notify("Database initialized", "success")
             else:

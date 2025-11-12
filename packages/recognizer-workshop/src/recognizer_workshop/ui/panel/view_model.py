@@ -105,10 +105,10 @@ class ViewModel(SimpleNamespace):
         # Show INFO level for database creation progress
         # Share the same pane but with a separate handler instance
         baw_panel_handler = PanelLogHandler(pane=self.log_pane, max_lines=2000)
-        baw_panel_handler.setLevel(logging.INFO)
+        baw_panel_handler.setLevel(logging.DEBUG)
         
         baw_logger = logging.getLogger('baw_helpers')
-        baw_logger.setLevel(logging.INFO)  
+        baw_logger.setLevel(logging.DEBUG)  
         
         if not any(isinstance(h, PanelLogHandler) for h in baw_logger.handlers):
             baw_logger.addHandler(baw_panel_handler)
