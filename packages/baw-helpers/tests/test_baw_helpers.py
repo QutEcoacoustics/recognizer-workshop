@@ -9,28 +9,6 @@ from baw_helpers.baw_helpers import simple_filter, get_random_audio_recordings
 STAGING_URL = "https://api.staging.ecosounds.org"
 
 
-@pytest.fixture(scope="module")
-def api_client():
-    """
-    Integration client against BAW staging. Skips if no/invalid token.
-    """
-    token = os.getenv("STAGING_API_TOKEN")
-    if not token:
-        pytest.skip("requires STAGING_API_TOKEN")
-
-    client = baw_api.baw_api(
-        token=token,
-        base_url=STAGING_URL,
-        allow_prompt=False,
-        debug=True,
-    )
-
-    if not client.test_token(default=False):
-        pytest.skip("invalid/expired token or service unavailable")
-
-    return client
-
-
 def test_simple_filter():
     """Test the simple_filter function."""
 

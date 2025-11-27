@@ -29,10 +29,9 @@ def prod_api_client():
         baw_api = baw_mod.baw_api
 
     client = baw_api(
-        token=None,                 # let update_token() read BAW_AUTH_TOKEN from .env
+        token=None,                 # read BAW_AUTH_TOKEN from .env
         base_url=PROD_URL,
-        allow_prompt=False,         # don’t prompt in CI
-        debug=False,                # flip True locally if you want verbose request logs
+        allow_prompt=False,     
     )
 
     # Quick health check; skip suite if not valid or service down

@@ -202,6 +202,10 @@ def build(vm):
         # Don't autosave if we're currently syncing config to UI (prevents feedback loop)
         if hasattr(sync_config_to_ui, '_syncing'):
             return
+        
+        if not vm.config.config_path:
+            vm.notify("Autosave skipped: No configuration file path set.", "warn")
+            return  # No path to autosave to
 
         # will trigger watchers of the config_state
         vm.obs.bump("config_state")
@@ -513,7 +517,6 @@ def build(vm):
     config_status = pn.Row(current_config_path_display, save_status, sizing_mode="fixed")
 
     return pn.Column(
-        "## Configuration",
         pn.pane.Markdown(
             "Configure your project settings, database paths, and API connections. "
             "Click 'Start Engine' when ready to begin."

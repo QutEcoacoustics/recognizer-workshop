@@ -122,7 +122,9 @@ def build_app(vm):
         ("Inference", inference.build(vm)),
         ("Status", status.build(vm)),
         ("Logs", vm.log_pane),
-        sizing_mode="stretch_both",
+        sizing_mode="stretch_width",
+        min_height=500,
+        scroll=True
     )
 
 
@@ -130,6 +132,7 @@ def build_app(vm):
     template.header.append(header_logos)
     template.header.append(dev_toggle_button)
     template.main.append(error_banner)
+    template.main.append(vm.status)
     template.main.append(tabs)
     # template.sidebar.append(vm.help_system) # append the js custom component for sidebar control
     # template.sidebar.append(vm.help_system.content) # append the actual help content

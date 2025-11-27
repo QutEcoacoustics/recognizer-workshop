@@ -1,3 +1,14 @@
+"""
+Tests for loading embedding configuration in create_database. 
+
+Pure perch-hoplite will insert a configuration dict in the database metadata during embedding. 
+We are pulling parquet files from the workbench api, so we insert these configs in a different way. 
+These test this functionality. 
+
+
+"""
+
+
 from pathlib import Path
 import pytest
 from ml_collections import config_dict

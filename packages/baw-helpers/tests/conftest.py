@@ -80,8 +80,7 @@ def api_client(staging_token):
     client = baw_api(
         token=staging_token,
         base_url=STAGING_URL,
-        allow_prompt=False,
-        debug=False,  # set True locally if you want verbose request/response logs
+        allow_prompt=False
     )
 
     # Quick health check; skip suite if not valid or service down

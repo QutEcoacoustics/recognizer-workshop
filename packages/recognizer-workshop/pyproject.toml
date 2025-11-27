@@ -115,7 +115,7 @@ path = "src/recognizer_workshop/__about__.py"
 [tool.hatch.envs.test]
 template = "default"
 dev-mode = true
-dependencies = ["pytest>=7.0", "pytest-cov"]
+dependencies = ["pytest>=7.0", "pytest-cov", "pytest-timeout"]
 pre-install-commands = [
   "python -m pip install -e {root:parent}/baw-helpers",
   "python -m pip install -e {root:parent:parent}/libs/perch-hoplite",

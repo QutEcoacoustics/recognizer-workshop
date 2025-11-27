@@ -14,7 +14,7 @@ def api_client():
     if not token:
         pytest.skip("requires STAGING_API_TOKEN")
 
-    client = baw_api.baw_api(token=token, base_url=STAGING_URL, allow_prompt=False, debug=True)
+    client = baw_api.baw_api(token=token, base_url=STAGING_URL, allow_prompt=False)
 
     if not client.test_token(default=False):
         pytest.skip("invalid/expired token or service unavailable")
