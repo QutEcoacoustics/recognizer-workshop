@@ -102,11 +102,11 @@ def build(vm):
         except Exception as e:
             vm.notify(f"Could not load remote: {e}", "error")
 
-    def _search(_):
+    async def _search(_):
         if not vm.eng:
             return vm.notify("Initialize first.", "error")
         ts = parse_target_score(target_score.value)
-        vm.ui.search_with_selected_window(vm.eng, num_results=int(num_results.value), target_score=ts)
+        await vm.ui.search_with_selected_window(vm.eng, num_results=int(num_results.value), target_score=ts)
 
     def _save(_):
         if not vm.eng:
@@ -123,6 +123,10 @@ def build(vm):
     btn_load_uri.on_click(_load_remote)
     btn_search.on_click(_search)
     btn_save.on_click(_save)
+
+
+
+
 
     return pn.Column(
         pn.Row("## Search (single example)", pn.Spacer(), search_help_btn),

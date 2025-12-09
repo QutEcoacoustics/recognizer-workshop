@@ -1,3 +1,4 @@
+
 import base64
 import logging
 import os
@@ -6,7 +7,6 @@ from pathlib import Path
 
 import holoviews as hv
 import panel as pn
-
 
 from recognizer_workshop.ui.panel.view_model import ViewModel
 from recognizer_workshop.ui.panel.pages import config, create_database, labeled_examples, search, explore, train, refine, inference, status
@@ -17,8 +17,6 @@ os.environ.setdefault("MPLBACKEND", "module://matplotlib_inline.backend_inline")
 # Load necessary extensions
 pn.extension('tabulator', sizing_mode="stretch_width")
 hv.extension('bokeh')
-
-
 
 # --- Global Error Handling Setup ---
 error_banner = pn.pane.Alert(visible=False, sizing_mode="stretch_width")

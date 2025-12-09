@@ -8,33 +8,21 @@ import json
 import os
 from pathlib import Path
 import numpy as np
-import pandas as pd
 import random
-import tempfile
-import shutil
-
 from tqdm import tqdm
-from typing import Union, Dict, Any, List, Optional, Callable
-
-
+from typing import Dict, Any, List, Optional, Callable
 from ml_collections import config_dict
-
+import multiprocessing
 
 import logging
-
-
 
 from perch_hoplite.agile import audio_loader
 from perch_hoplite.agile import classifier
 from perch_hoplite.agile import classifier_data
-#from perch_hoplite.agile import embedding_display
-#from recognizer_workshop.perch_hoplite_custom_modifications import embedding_display_group as embedding_display_mod
 from perch_hoplite.agile import source_info
 from recognizer_workshop.perch_hoplite_custom_modifications import brutalism
 from perch_hoplite.db import score_functions
-#from perch_hoplite.db import sqlite_usearch_impl
 from perch_hoplite.db import interface as hoplite_interface
-# from chirp.projects.zoo import models
 from perch_hoplite.zoo import model_configs
 from perch_hoplite import audio_io
 
@@ -52,12 +40,13 @@ from recognizer_workshop.app.services.db_labels.db_labels import get_db_summary,
 from recognizer_workshop.app.services.db_labels.dataclasses import LabelName
 from recognizer_workshop.app.services.inference.inference import run_inference as inference_service_run_inference
 
+from recognizer_workshop.app.services.embed import embed_worker
+from concurrent.futures import ProcessPoolExecutor
 
 log = logging.getLogger(__name__)
 
 _APP_DATA_FILE = Path.home() / ".recognizer_workshop_data.json"
 _MAX_RECENT_FILES = 10
-
 
 @dataclasses.dataclass
 class AgileConfig:
@@ -302,6 +291,11 @@ class agile_state:
 
     def __init__(self, config):
         self.config = config
+        mp_context = multiprocessing.get_context('spawn')
+        self._embed_runner = ProcessPoolExecutor(
+            max_workers=1,
+            mp_context=mp_context
+        )
 
 
     def initialize(self):
@@ -344,44 +338,44 @@ class agile_state:
 
         return True
 
-    @property
-    def embedding_model(self):
-        """
-        Lazy-loads the embedding model on first access and caches it.
-        Tfhub attempts to cache downloaded models. This function handles cache clearing and retries,
-        in the event that the cache is corrupted.
-        """
-        if self._embedding_model is None:
-            log.info("Loading embedding model for the first time...")
+    # @property
+    # def embedding_model(self):
+    #     """
+    #     Lazy-loads the embedding model on first access and caches it.
+    #     Tfhub attempts to cache downloaded models. This function handles cache clearing and retries,
+    #     in the event that the cache is corrupted.
+    #     """
+    #     if self._embedding_model is None:
+    #         log.info("Loading embedding model for the first time...")
 
-            def clear_tfhub_cache():
-                cache_dir = Path(tempfile.gettempdir()) / "tfhub_modules"
-                if cache_dir.exists():
-                    log.info(f"Corrupted cache detected. Deleting {cache_dir}...")
-                    try:
-                        shutil.rmtree(cache_dir)
-                        log.info("Cache cleared successfully.")
-                    except OSError as e:
-                        log.info(f"Error clearing cache: {e}")
+    #         def clear_tfhub_cache():
+    #             cache_dir = Path(tempfile.gettempdir()) / "tfhub_modules"
+    #             if cache_dir.exists():
+    #                 log.info(f"Corrupted cache detected. Deleting {cache_dir}...")
+    #                 try:
+    #                     shutil.rmtree(cache_dir)
+    #                     log.info("Cache cleared successfully.")
+    #                 except OSError as e:
+    #                     log.info(f"Error clearing cache: {e}")
 
-            max_retries = 2
-            for attempt in range(max_retries):
-                try:
-                    #TODO: load the model based on db config data rather than hardcoding "perch_8"
-                    self._embedding_model = model_configs.load_model_by_name("perch_8")
-                    #self._embedding_model = self.model_class.from_config(self.db_model_config.model_config)
-                    log.info("Model loaded successfully.")
-                    break
-                except ValueError as e:
-                    is_cache_error = 'saved_model.pb' in str(e) or 'saved_model.pbtxt' in str(e)
-                    if is_cache_error and attempt < max_retries - 1:
-                        log.info(f"Attempt {attempt + 1} failed. Looks like a cache issue.")
-                        clear_tfhub_cache()
-                        log.info("Retrying model load...")
-                    else:
-                        log.warning("Failed to load model after retries.")
-                        raise e
-        return self._embedding_model
+    #         max_retries = 2
+    #         for attempt in range(max_retries):
+    #             try:
+    #                 #TODO: load the model based on db config data rather than hardcoding "perch_8"
+    #                 self._embedding_model = model_configs.load_model_by_name("perch_8")
+    #                 #self._embedding_model = self.model_class.from_config(self.db_model_config.model_config)
+    #                 log.info("Model loaded successfully.")
+    #                 break
+    #             except ValueError as e:
+    #                 is_cache_error = 'saved_model.pb' in str(e) or 'saved_model.pbtxt' in str(e)
+    #                 if is_cache_error and attempt < max_retries - 1:
+    #                     log.info(f"Attempt {attempt + 1} failed. Looks like a cache issue.")
+    #                     clear_tfhub_cache()
+    #                     log.info("Retrying model load...")
+    #                 else:
+    #                     log.warning("Failed to load model after retries.")
+    #                     raise e
+    #     return self._embedding_model
 
     @property
     def active_label(self) -> Optional[LabelName]:
@@ -414,15 +408,61 @@ class agile_state:
         self._active_label = value
 
     
+    # def embed_query_old(self, query_audio_samples):
+    #     """
+    #     Embeds a single query audio clip allowing the user to select the 5s window within the specified source
+    #     """
+
+    #     self.query_embedding = self.embedding_model.embed(query_audio_samples).embeddings[0, 0]
+    #     log.info('Query audio embedded.')
+    #     return self.query_embedding
+
+
     def embed_query(self, query_audio_samples):
         """
-        Embeds a single query audio clip allowing the user to select the 5s window within the specified source
+        Embeds a single query audio clip using the worker process.
         """
-
-        self.query_embedding = self.embedding_model.embed(query_audio_samples).embeddings[0, 0]
-        log.info('Query audio embedded.')
+        model_name = "perch_8" 
+        
+        future = self._embed_runner.submit(
+            embed_worker.run_embed_task, 
+            model_name, 
+            query_audio_samples
+        )
+        
+        embedding_numpy = future.result()
+        self.query_embedding = embedding_numpy
+        log.info('Query audio embedded (via worker).')
+        
         return self.query_embedding
     
+
+    async def embed_query_async(self, query_audio_samples):
+        """
+        Async version. ESSENTIAL for Panel to avoid deadlocking the event loop.
+        """
+        import asyncio
+        model_name = "perch_8"
+        
+        # Get the Panel event loop
+        loop = asyncio.get_running_loop()
+
+        # "await" the result without freezing the main thread
+        # This allows the main thread to receive signals from the worker
+        embedding_numpy = await loop.run_in_executor(
+            self._embed_runner, 
+            embed_worker.run_embed_task, 
+            model_name, 
+            query_audio_samples
+        )
+        
+        self.query_embedding = embedding_numpy
+        log.info('Query audio embedded (via worker, async).')
+        return self.query_embedding
+    
+
+    def shutdown(self):
+            self._embed_runner.shutdown()
 
     def get_random_labeled_examples(self, label, label_type=1, num=5, dataset_name=None):
 

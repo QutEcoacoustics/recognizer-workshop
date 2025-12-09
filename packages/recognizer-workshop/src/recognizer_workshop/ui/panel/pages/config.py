@@ -4,11 +4,10 @@ from functools import partial
 from pathlib import Path
 import logging
 import panel as pn
+
 from recognizer_workshop.app.agile_engine import AgileConfig
 from recognizer_workshop.app.agile_engine import agile_state
 from recognizer_workshop.app.agile_engine import get_recent_files
-
-
 
 log = logging.getLogger(__name__)
 
@@ -466,16 +465,12 @@ def build(vm):
             # Create labels editor regardless of tag fetch success
             labels_editor_placeholder.objects = [vm.ui.view_target_labels(vm.eng)]
 
-            log.debug("before %s", vm.obs)
-
             # this will trigger anything observing these observables to update
             vm.obs.bump("engine_state")
             vm.obs.bump("target_labels")
             
             # Update button state after successful engine creation
             update_engine_button()
-
-            log.debug("after %s", vm.obs)
 
         except Exception as e:
             vm.notify(f"Failed to start engine: {e}", "error")

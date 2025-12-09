@@ -12,9 +12,14 @@
         "type": "python",
         "request": "launch",
         "module": "recognizer_workshop.ui.panel.serve",
-        "args": ["--port", "5006", "--address", "127.0.0.1", "--autoreload"],
+        "args": ["--port", "5006", "--address", "127.0.0.1"],
         "console": "integratedTerminal",
-        "justMyCode": false
+        "justMyCode": false,
+        "env": {
+            "CUDA_VISIBLE_DEVICES": "-1",
+            "TF_METAL_DEVICE_NS": "0",
+            "TF_ENABLE_ONEDNN_OPTS": "0"
+        }
     }
     {
         "name": "Panel: Debug Notebook App",

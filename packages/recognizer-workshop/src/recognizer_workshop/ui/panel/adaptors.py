@@ -251,7 +251,7 @@ class PanelUI(param.Parameterized):
         self.render(selector, region_name)
     
 
-    def search_with_selected_window(
+    async def search_with_selected_window(
         self,
         eng,
         *,
@@ -274,7 +274,7 @@ class PanelUI(param.Parameterized):
             return
 
         # embed & search
-        eng.embed_query(audio_window)
+        await eng.embed_query_async(audio_window)
         active_label = eng.active_label
         if not active_label:
             self.render(pn.pane.Alert("Pick target label(s) on the Config tab.", alert_type="warning"), results_region)
