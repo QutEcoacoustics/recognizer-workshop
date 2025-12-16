@@ -32,6 +32,7 @@ from recognizer_workshop.perch_hoplite_custom_modifications import classifier as
 from recognizer_workshop.app.agile_modeling_helpers import list_audio_files, get_or_create_workshop_provenance
 from baw_helpers.baw_api import baw_api
 from baw_helpers.baw_helpers import annotation_upload_csv
+from baw_helpers.baw_utils import extract_arid_and_domain
 
 
 from recognizer_workshop.app.services.events.upload_detections import upload_detections
@@ -39,6 +40,8 @@ from recognizer_workshop.app.services.inference.helpers import make_site_map
 from recognizer_workshop.app.services.db_labels.db_labels import get_db_summary, get_label_counts, labels_from_event_taggings, add_labels_to_db
 from recognizer_workshop.app.services.db_labels.dataclasses import LabelName
 from recognizer_workshop.app.services.inference.inference import run_inference as inference_service_run_inference
+from recognizer_workshop.app.create_database.create_database import add_parquet_to_db
+
 
 from recognizer_workshop.app.services.embed import embed_worker
 from concurrent.futures import ProcessPoolExecutor
@@ -309,6 +312,9 @@ class agile_state:
             raise ValueError('DB path not set in config. Please set it before initializing the DB.')
         if not Path(self.config.db_path).exists():
             raise ValueError(f'DB path {self.config.db_path} does not exist.')
+        # if no sqlite file or usearch index file exists inside the db_path folder
+        if not any(Path(self.config.db_path).glob("*.sqlite")) and not any(Path(self.config.db_path).glob("*.usearch")):
+            raise ValueError(f'No valid DB files found in {self.config.db_path}. Please check the path.')
         
         self.db = sqlite_usearch_impl_mod.ThreadedSQLiteUsearchDB.create(self.config.db_path)
         self.db_model_config = self.db.get_metadata('model_config')
@@ -760,7 +766,6 @@ class agile_state:
 
         # db metadata needs to be a config dict
         metadata = config_dict.ConfigDict({'filters': baw_filters})
-
         self.db.insert_metadata('baw_filters', metadata)
         self.db.commit()
 
@@ -773,6 +778,9 @@ class agile_state:
             return "no_baw_filters"
         
         all_results = []
+
+        if self.config.target_labels is None or len(self.config.target_labels) == 0:
+            raise ValueError("No target labels set in config. Cannot fetch labels.")
 
         # baw_filters is a list, so repeat the process for each one
         for filter_params in baw_filters:
@@ -851,18 +859,19 @@ class agile_state:
 
 
         self.baw_api = baw_api(token=token,
-                               base_url=self.config.baw_config.get('domain', None),
-                               allow_prompt=allow_prompt)
-
-        if self.baw_api.token is not None:
-            # token supplied was valid OR was loaded from env and valid OR was prompted for and valid
-            # update our config to sync with the baw_api loaded token
-            log.debug("Auth token set")
-            self.config.baw_config['auth_token'] = self.baw_api.token
-            return True
-        else:
-            log.warning("No auth token set")
-            return False
+                            base_url=self.config.baw_config.get('domain', None),
+                            allow_prompt=allow_prompt)
+            
+        # Don't think we need this anymore, since we are allowing anonymous access now.
+        # if self.baw_api.token is not None:
+        #     # token supplied was valid OR was loaded from env and valid OR was prompted for and valid
+        #     # update our config to sync with the baw_api loaded token
+        #     log.debug("Auth token set")
+        #     self.config.baw_config['auth_token'] = self.baw_api.token
+        #     return True
+        # else:
+        #     log.warning("No auth token set")
+        #     return False
 
 
     def fetch_workbench_tags(self):
@@ -874,7 +883,7 @@ class agile_state:
         # get all taxonomic tags from the workbench
         if self.baw_api is None:
             log.warning("Tags not fetched, BAW API is not initialized")
-            return True
+            return False
         else:
         
             response = self.baw_api.baw_filter('/tags', {'is_taxonomic': {'eq': True}}, qsp={"disable_paging":"true"})
@@ -886,6 +895,29 @@ class agile_state:
                 self.workbench_tags = sorted([l['text'] for l in response.get('data', [])])
                 log.info(f"Fetched {len(self.workbench_tags)} workbench tags")
                 return True
+            
+    def add_labeled_embeddings_if_missing(self, labeled_sources):
+
+        print(labeled_sources)
+
+        sources = [
+            extract_arid_and_domain(src)
+            for item in labeled_sources
+            for src in item['labels'].keys()
+        ]
+        
+        # domain and arid are both part of the source, but we currently rely on 
+        # the baw client and assume everything is from the same domain. In the future we will need to 
+        # support multiple domains. 
+        arids = [arid for _, arid in sources if arid is not None]
+
+        add_parquet_to_db(
+            db=self.db,
+            parquet_source=arids,
+            api_client=self.baw_api
+        )
+
+        return False
 
 
 

@@ -83,13 +83,19 @@ def create_database_from_baw(
 
     arids = [int(ar['id']) for ar in audio_recordings]
 
-    convert_parquet(
+    db = convert_parquet(
         db_path=db_path,
         parquet_source=arids,
         api_client=client,    
         max_count=max_embeddings,
         config=config
     )
+
+    # create a baw filters metadata entry. It's a list of filter params dicts, so we can define multiple filters if needed
+    # it must be wrapped in a ConfigDict to be storable in the db
+    if filter_params is not None:
+        db.insert_metadata('baw_filters', config_dict.ConfigDict({"filters": [filter_params['filter']]}))
+        db.commit()
 
 
 

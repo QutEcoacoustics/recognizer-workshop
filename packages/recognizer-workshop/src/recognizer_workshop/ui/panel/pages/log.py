@@ -107,18 +107,17 @@ def build(vm):
     log_display = vm.log_pane
     
     # Add some CSS for better log display
-    log_display.styles = {
-        'background-color': '#f5f5f5',
-        'border': '1px solid #ddd',
-        'border-radius': '4px',
-        'padding': '10px',
-        'font-family': 'monospace',
-        'font-size': '12px',
-        'overflow-y': 'auto'
-    }
+    # log_display.styles = {
+    #     'background-color': '#f5f5f5',
+    #     'border': '1px solid #ddd',
+    #     'border-radius': '4px',
+    #     'padding': '10px',
+    #     'font-family': 'monospace',
+    #     'font-size': '12px',
+    #     'overflow-y': 'auto'
+    # }
     
     return pn.Column(
-        "## Application Logs",
         pn.pane.Alert(
             "This page shows real-time logs from the application. "
             "Logs are limited to the most recent entries to prevent performance issues.",
@@ -136,16 +135,13 @@ def build(vm):
                 sizing_mode="stretch_width"
             ),
             pn.Row(info_pane),
-            title="Log Controls"
         ),
         
         # Log display
-        # pn.Card(
-        #     log_display,
-        #     title="Log Output",
-        #     sizing_mode="stretch_both",
-        #     height=600
-        # ),
+        pn.Card(
+            log_display,
+            sizing_mode="stretch_both"
+        ),
         
         sizing_mode="stretch_both"
     )

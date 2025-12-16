@@ -1,36 +1,25 @@
 "Genereric wrapper for the BAW API"
 from __future__ import annotations 
-from fileinput import filename
+import getpass
+import io
 import json
 import logging
 import os
-import io
-import sys
-import requests
 import re
-from pathlib import Path
-from dataclasses import dataclass, field
+import sys
+import threading
 
+import requests
+from dotenv import find_dotenv, dotenv_values, set_key
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-import getpass
-import threading
-from typing import Any, Optional
-
-
-from dotenv import load_dotenv, find_dotenv, dotenv_values, set_key
-
-from baw_helpers import utils
-
 
 # regex to determine default analysis results filenames based on analysis_name patterns
 ANALYSIS_FILENAME_MAP = {
-    re.compile(r"embeddings", re.I): "embeddings.parquet",   # substring match
+    re.compile(r"embeddings", re.I): "embeddings.parquet",
 }
 
-
 log = logging.getLogger(__name__)
-
 
 class AuthenticationError(Exception):
     """Raised when authentication is required but not provided or invalid."""
@@ -281,8 +270,8 @@ class baw_api:
         )
 
         if response is None:
-            log.warning("No response received.")
-            return None
+            log.warning("No response received (Connection Error).")
+            raise requests.exceptions.ConnectionError(f"Failed to connect to {url}")
         
         self._tls.last_response = response
         with self._lr_lock:
@@ -296,16 +285,17 @@ class baw_api:
             # Prefer the failing response.request; fallback to prepared_request if missing
             req_for_log = getattr(getattr(e, "response", None), "request", None) or prepared_request
             self._print_request_details(req_for_log, response_obj=getattr(e, "response", None), error_context=True)
-            try:
-                if e.response is None:
-                    return None
-                if return_json:
-                    return e.response.json()
+
+            if response.status_code == 401:
+                if self.token is None:
+                    message = "Authentication token is missing."
                 else:
-                    return e.response
-            except (requests.exceptions.JSONDecodeError, ValueError):
-                log.debug("Error response was not JSON.")
-                return None
+                    message = "Authentication token is invalid or expired."
+
+                raise AuthenticationError(f"401 Unauthorized: {message} {response.text}") from e
+
+            raise e
+
             
         log.debug("Request was successful!") 
         self._print_request_details(response.request, response_obj=response, error_context=False)
@@ -316,8 +306,9 @@ class baw_api:
         try:
             return response.json()
         except (requests.exceptions.JSONDecodeError, ValueError):
-            log.debug("Warning: Successful request returned non-JSON content (expected JSON).")
-            return None
+            log.error("Successful request returned non-JSON content.")
+            raise ValueError(f"Response from {endpoint} was not valid JSON")
+            
 
 
     def post_files(self, endpoint, files=None, data=None, params=None, *, timeout: float | tuple | None = None):
@@ -364,8 +355,6 @@ class baw_api:
             timeout=timeout,
             return_json=False,   # we want the raw Response object
         )
-        if resp is None:
-            return None
 
         log.info("File download started (streaming).")
         self._print_request_details(resp.request, response_obj=resp, error_context=False)
@@ -393,7 +382,7 @@ class baw_api:
             log.error(f"FILE SAVE ERROR: {io_e}")
             # We still have resp.request for details
             self._print_request_details(resp.request, response_obj=resp, error_context=True)
-            return None
+            raise
         finally:
             try:
                 resp.close()
@@ -446,17 +435,7 @@ class baw_api:
                 log.info("\n--- RESPONSE DETAILS NOT AVAILABLE (e.g., ConnectionError) ---")
 
 
-    def test_connection(self, silent=True):
-        """Test the connection to the BAW API."""
-        try:
-            # This will use the request method, which has the debug logic
-            response = self.request("GET", "/status", return_json=False)
-            if not silent:
-                log.info(f"Connection successful: {response}")
-            return response
-        except requests.RequestException as e:
-            log.error(f"Error connecting to BAW API via test_connection: {e}")
-            return None
+
         
 
     def test_token(self, default=False):
@@ -469,25 +448,39 @@ class baw_api:
             # Token in env can be quoted or unquoted, but if it has a missing opening or closing quote, will include the quote in the value
             log.warning("Possibly unclosed quote in your token string")
 
-        r = self.test_connection(silent=True)
+        # return True if token is valid, False if not, or default if we can't verify
+        try:
+            # /status does not require auth, but will return 401 if token is provided and is invalid
+            response = self.request("GET", "/status", return_json=False)
+            log.info(f"Connection successful: {response}")
+            return True
+            
+        except requests.RequestException as e:
+            # Covers 5xx, 404, DNS failures, Timeouts
+            log.error(f"Error connecting to BAW API during test_token: {e}")
+            assumption = "valid" if default else "invalid"
+            log.warning(f"Token can't be verified, assuming {assumption}.")
+            return default
+            
+        except AuthenticationError:
+            log.error("TOKEN INVALID. Connection successful, but Authentication failed.")
+            return False
+            
+        except Exception as e:
+            log.error(f"Unexpected error during test_token: {e}")
+            assumption = "valid" if default else "invalid"
+            log.warning(f"Token can't be verified, assuming {assumption}.")
+            return default
 
-        status_code = r.status_code if r is not None else None
-        
-        if status_code is None:
-            is_valid, message = default, "Token can't be verified, no response."
-        elif status_code == 401:
-            is_valid, message = False, "Token is invalid or expired."
-        elif 200 <= status_code < 300:
-            is_valid, message = True, "Token is valid."
-        elif r is not None and status_code >= 500:
-            is_valid, message = default, "Token can't be verified, due to server or connection issues."
+    @property
+    def hidden_token(self):
+        """Returns a masked version of the token for logging."""
+        if self.token is None:
+            return "None"
+        elif len(self.token) <= 8:
+            return self.token[0] + "..." + self.token[-1]
         else:
-            is_valid, message = default, "Token can't be verified, something went wrong."
-        
-        log.info(message)
-        
-        return is_valid
-
+            return self.token[:4] + "..." + self.token[-4]
 
     def update_token(self, 
                      token=None, 
@@ -500,6 +493,8 @@ class baw_api:
             token: Explicit token to use
             allow_prompt: Whether to interactively prompt for token
             require_auth: If True, raises error when no valid token available
+
+            If a token is available either passed or from environment, and is invalid, will raise an error whether or not 
         """
         log.info("\nUpdating BAW API token...")
         
@@ -533,7 +528,7 @@ class baw_api:
             if self.test_token():
                 return True 
             else:
-                self.token = None
+                raise AuthenticationError(f"Supplied token {self.hidden_token} is invalid.")
         else:
             log.info("No token supplied in arguments or environment.")
         
@@ -542,13 +537,11 @@ class baw_api:
         # if we do require it, either prompt or fail
         if require_auth:
             if not allow_prompt:
-                log.error("Authentication required but no valid token available")
-                return False  # Fail explicitly
+                raise AuthenticationError("Authentication required but no valid token available")
             else:
                 self._prompt_for_token(env_file=env_file)
                 if self.token is None:
-                    log.error("No valid token provided, exiting.")
-                    return False  # Fail explicitly
+                    raise AuthenticationError("No valid token provided, exiting.")
             
         if self.token is None:
             log.warning("\n💡 No Valid Token supplied, creating anonymous client")
@@ -562,7 +555,6 @@ class baw_api:
         # Will have already returned false if require_auth and no valid token
         # or if a token was supplied but was invalid. 
         return True
-
 
 
     def _prompt_for_token(self, env_file = None):
@@ -590,64 +582,7 @@ class baw_api:
             else:
                 print("The token you entered is invalid. Please try again.")
         
-        
-
-
-
-    # def update_token(self, token=None, save_to_env=True, allow_prompt=True):
-    #     """
-    #     sets the token to the supplied value
-    #     tests the connection. 
-    #     if can't connect, looks for a token in the env. 
-    #     If found, tests it
-    #     if not prompts the user to enter a token
-    #     tests the resulting token
-    #     updates the environment variable if successful
-    #     """
-
-    #     print("\nUpdating BAW API token...")
-
-    #     self.token = token
-
-    #     if not self.test_token():
-
-    #         print("\nAuthentication token is missing or invalid.")
-    #         env_file = find_dotenv(usecwd=True)
-    #         if not env_file:
-    #             env_file = os.path.join(os.getcwd(), '.env')
-    #             print("No .env file found. A new one will be created if a token is provided.")
-    #             config = {}
-    #         else:
-    #             print(f"Found .env file: {env_file}")
-    #             config = dotenv_values(env_file)
-
-            
-    #         self.token = config.get('BAW_AUTH_TOKEN', None)
-
-    #         if not self.test_token():
-
-    #             if not allow_prompt:
-    #                 print("No valid token found and prompting is disabled. Please provide a valid token or set one in the environment.")
-    #                 return
-
-    #             # Loop until the user provides a valid token or quits
-    #             while allow_prompt:
-    #                 print("\nPlease enter a valid token to proceed. (Type 'quit' to exit)")
-    #                 new_token = getpass.getpass(f"Enter your BAW_AUTH_TOKEN for {self.base_url}: ")
-                    
-    #                 if new_token.lower() in ['quit', 'q']:
-    #                     break
-
-    #                 self.token = new_token 
-    #                 if self.test_token():
-    #                     if save_to_env:
-    #                         set_key(env_file, 'BAW_AUTH_TOKEN', new_token)
-    #                     break 
-    #     else:
-    #         print("\nExisting token from .env file is valid.")
-
-
-
+    
 
     @staticmethod
     def print_response(response, file=None):

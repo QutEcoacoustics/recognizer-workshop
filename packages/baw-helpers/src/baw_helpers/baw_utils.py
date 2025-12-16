@@ -119,24 +119,25 @@ def make_baw_listen_link_from_arid(
   return audio_path
 
 
-def extract_arid_and_domain(file_id: str) -> tuple[str, str]:
-  """Extract the domain and recording ID from a full recording url or a canonical file name."""
+def extract_arid_and_domain(file_id: str) -> tuple[str | None, int | None]:
+  """
+  DEPRECATED: it is confusing because it gives them back in a different order than the name suggests.
+              use extract_domain_and_arid instead.
+  Extract the domain and recording ID from a full recording url or a canonical file name.
+  """
   match = FULL_RECORDING_PATTERN.match(file_id)
   if match:
     domain = match.group(1)
-    arid = int(match.group(2))  # Convert arid to an integer
+    arid = int(match.group(2))
     return domain, arid
-  
-  match = FILE_ID_TO_UID_PATTERN.match(file_id)
-  if match:
-    domain = None
-    arid = int(match.group(1))  # Convert arid to an integer
-    return domain, arid
-
-  if not match:
-    raise ValueError(f"Invalid file_id format: {file_id}")
+  else:
+    return None, None
   
 
+def extract_domain_and_arid(file_id: str) -> tuple[str, int]:
+  """Extract the domain and recording ID from a full recording url or a canonical file name."""
+  return extract_arid_and_domain(file_id)
+  
 
 def load_baw_audio(
     audio_url: str,

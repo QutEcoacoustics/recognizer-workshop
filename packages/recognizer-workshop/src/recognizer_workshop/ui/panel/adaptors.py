@@ -58,7 +58,7 @@ class PanelUI(param.Parameterized):
     ]
 
 
-    def __init__(self):
+    def __init__(self, vm):
 
         super().__init__()
         # initialise the state to have a dict of state for each region, with a 'region' property that contains the pn Column. 
@@ -66,7 +66,11 @@ class PanelUI(param.Parameterized):
             region_name: Region(name=region_name) for region_name in self._region_names
             }
         
+        self.vm = vm
+        
         # list of callbacks to call when the engine is ready
+        # TODO: probably change this to watch for for obvervable bumps
+        # this seems unreliable if eng is updated or recreated
         self._on_engine_ready = []
 
     def on_engine_ready(self, fn):
@@ -112,6 +116,12 @@ class PanelUI(param.Parameterized):
         btn_add_label = pn.widgets.Button(name="Add Label", icon="plus", button_type="success")
         current_labels_display = pn.pane.Markdown()
 
+        label_editor_section = pn.Column(
+            labels_container,
+            btn_add_label,
+            sizing_mode="stretch_width"
+        )
+
         def sync_and_update_display(*events):
             # Save the config whenever a change is made
             eng.config.save() # Assumes config_path is stored on eng.config
@@ -126,6 +136,11 @@ class PanelUI(param.Parameterized):
 
         def _build_labels_ui():
             labels_container.clear()
+
+            if not hasattr(eng, 'baw_api') or eng.baw_api is None:
+                return
+
+
             for i, label in enumerate(eng.config.target_labels):
                 species_widget = pn.widgets.AutocompleteInput(
                     name=f"Species {i+1}", 
@@ -162,25 +177,35 @@ class PanelUI(param.Parameterized):
 
         btn_add_label.on_click(_add_label)
 
-        # Initial build
-        if eng:
-            btn_add_label.disabled = False
-            _build_labels_ui()
-            sync_and_update_display()
-        else:
-            current_labels_display.object = "*(Engine must be started)*"
-            btn_add_label.disabled = True
+
+
+        def _init():
+            has_baw_api = hasattr(eng, 'baw_api') and eng.baw_api is not None
+            label_editor_section.visible = has_baw_api
+            
+            if has_baw_api:
+                _build_labels_ui()
+                sync_and_update_display()
+            else:
+                current_labels_display.object = "*(Connect to BAW API to define labels)*"
+                labels_container.clear()
+
+
+        # Initial state
+        _init()
+
+        @pn.depends(self.vm.obs.ensure("engine_state").param.version, watch=True)
+        def _update_visibility(_):
+            _init()
 
 
         return pn.Column(
-            pn.pane.Markdown("## Define Target Labels"),
             pn.pane.Alert(
                 "Define one or more target species. For each species, you can optionally specify distinct call types.",
                 alert_type="info"
             ),
             current_labels_display,
-            labels_container,
-            btn_add_label,
+            label_editor_section,
             sizing_mode="stretch_width"
         )
 

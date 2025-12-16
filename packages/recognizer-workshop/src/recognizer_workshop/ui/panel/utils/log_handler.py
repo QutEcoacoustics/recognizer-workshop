@@ -10,7 +10,7 @@ class PanelLogHandler(logging.Handler):
     Uses a circular buffer to limit memory usage and prevent performance issues.
     """
 
-    def __init__(self, pane: pn.pane.Markdown, max_lines: int = 1000):
+    def __init__(self, pane: pn.pane.HTML, max_lines: int = 1000):
         """
         Args:
             pane: The Panel Markdown pane to write logs to
@@ -29,25 +29,48 @@ class PanelLogHandler(logging.Handler):
         self.setFormatter(formatter)
 
     def emit(self, record: logging.LogRecord) -> None:
-        """Emit a log record to the Panel pane."""
+        """Emit a log record with HTML color formatting."""
         try:
-            msg = self.format(record)
+            timestamp = datetime.fromtimestamp(record.created).strftime("%H:%M:%S")
+            level = record.levelname
+            logger_name = record.name
+            message = record.getMessage()
 
-            # Add emoji based on level
+            # Define colors for each log level
             if record.levelno >= logging.ERROR:
-                prefix = "❌"
+                emoji = "❌"
+                level_color = "#f44336"  # Red
+                level_bg = "#5a1a1a"
             elif record.levelno >= logging.WARNING:
-                prefix = "⚠️"
+                emoji = "⚠️"
+                level_color = "#ff9800"  # Orange
+                level_bg = "#4a3a1a"
             elif record.levelno >= logging.INFO:
-                prefix = "ℹ️"
-            else:
-                prefix = "🔍"
+                emoji = ""
+                level_color = "#2196f3"  # Blue
+                level_bg = "#1a2a3a"
+            else:  # DEBUG
+                emoji = ""
+                level_color = "#9e9e9e"  # Gray
+                level_bg = "#2a2a2a"
 
-            # Add to circular buffer
-            self.log_buffer.append(f"{prefix} {msg}")
-
-            # Update the pane with all buffered lines
+            # Build HTML formatted log line
+            html_line = (
+                f'<div style="margin: 2px 0; padding: 4px; background-color: {level_bg}; border-left: 3px solid {level_color};">'
+                f'<span style="color: #808080;">{timestamp}</span> '
+                f'<span>{emoji}</span> '
+                f'<span style="color: {level_color}; font-weight: bold;">{level:8s}</span> '
+                #f'<span style="color: #4ec9b0;">[{logger_name}]</span> '
+                f'<span style="color: #d4d4d4;">{message}</span>'
+                f'</div>'
+            )
+            print(f"[DEBUG] HTML line: {html_line[:100]}")  # ADD THIS
+            self.log_buffer.append(html_line)
+            
+            print(f"[DEBUG] Buffer size: {len(self.log_buffer)}")  # ADD THIS
             self._update_pane()
+            print(f"[DEBUG] Pane updated, object length: {len(self.pane.object) if self.pane.object else 0}")  # ADD THIS
+
 
         except Exception:
             self.handleError(record)
@@ -55,7 +78,8 @@ class PanelLogHandler(logging.Handler):
     def _update_pane(self):
         """Update the pane with current buffer contents."""
         # Join with newlines and wrap in code block for monospace font
-        content = "```\n" + "\n".join(self.log_buffer) + "\n```"
+        #content = "```\n" + "\n".join(self.log_buffer) + "\n```"
+        content = ''.join(self.log_buffer)
         self.pane.object = content
 
     def clear(self):

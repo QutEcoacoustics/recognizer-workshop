@@ -8,6 +8,7 @@ import panel as pn
 from recognizer_workshop.app.agile_engine import AgileConfig
 from recognizer_workshop.app.agile_engine import agile_state
 from recognizer_workshop.app.agile_engine import get_recent_files
+from recognizer_workshop.ui.panel.utils.delayed_init import run_after_render
 
 log = logging.getLogger(__name__)
 
@@ -31,6 +32,8 @@ def build(vm):
     Returns:
         Panel Column containing the configuration interface
     """
+
+    print("[DEBUG] Building configuration page...")
 
     dialogs_container = pn.Column()  
 
@@ -438,11 +441,11 @@ def build(vm):
             vm.notify("Engine created. Initializing...", "info")
 
             # initialise the API connection
-            token_success = vm.eng.init_workbench(allow_prompt=False)
-            if token_success:
+            try:
+                vm.eng.init_workbench(allow_prompt=False)
                 vm.notify("API connection successful", "success")
-            else:
-                vm.notify("API connection failed", "error")
+            except Exception as e:
+                vm.notify(f"API connection failed {e}", "error")
 
             # initialise the database
             try:
@@ -496,16 +499,23 @@ def build(vm):
     _print_paths("0.1")
     sync_config_to_ui()
 
-    if is_new_unsaved_config:
-        vm.notify("Welcome! Please configure your project and click 'Save As' to begin.", "warn")
-    else:
-        # Safe access to config_path.name
-        config_name = vm.config.config_path.name if vm.config.config_path else "Unknown"
-        vm.notify(f"Loaded recent project: {config_name}", "success")
-        
-        # Auto-start engine for loaded configurations
-        if should_auto_start_engine:
-            _make_engine(None)
+    def _init_config_page():
+
+        if not pn.state.curdoc or not pn.state.curdoc.session_context:
+            return
+
+        if is_new_unsaved_config:
+            vm.notify("Welcome! Please configure your project and click 'Save As' to begin.", "warn")
+        else:
+            # Safe access to config_path.name
+            config_name = vm.config.config_path.name if vm.config.config_path else "Unknown"
+            vm.notify(f"Loaded recent project: {config_name}", "success")
+            
+            # Auto-start engine for loaded configurations
+            if should_auto_start_engine:
+                _make_engine(None)
+
+    run_after_render(_init_config_page)
 
     # --- LAYOUT ---
     file_buttons = pn.Row(btn_new, btn_open, btn_save, btn_save_as, sizing_mode="fixed")

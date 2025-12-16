@@ -9,7 +9,7 @@ import holoviews as hv
 import panel as pn
 
 from recognizer_workshop.ui.panel.view_model import ViewModel
-from recognizer_workshop.ui.panel.pages import config, create_database, labeled_examples, search, explore, train, refine, inference, status
+from recognizer_workshop.ui.panel.pages import config, create_database, labeled_examples, search, explore, train, refine, inference, status, log
 from recognizer_workshop.ui.panel.adaptors import PanelUI
 
 os.environ.setdefault("MPLBACKEND", "module://matplotlib_inline.backend_inline")
@@ -45,10 +45,26 @@ def encode_png_to_base64(path: Path) -> str:
 def build_app(vm):
     """Builds the main application layout using a Panel template."""
 
-    vm.ui = PanelUI()
+    vm.ui = PanelUI(vm)
 
     vm.setup_help_system()
 
+    # DEBUG: Check if handler is attached
+    test_logger = logging.getLogger('recognizer_workshop')
+    print(f"Logger handlers: {test_logger.handlers}")
+    print(f"Logger level: {test_logger.level}")
+    print(f"VM log handler: {vm.log_handler}")
+    print(f"Log pane type: {type(vm.log_pane)}")
+    print(f"Log pane object: {vm.log_pane.object}")
+    
+    # Test logs
+    test_logger.info("🚀 Application started - this is a test log message")
+    test_logger.warning("⚠️ This is a warning test")
+    test_logger.error("❌ This is an error test")
+
+    # Check again after logging
+    print(f"Log pane object after logging: {vm.log_pane.object[:200] if vm.log_pane.object else 'EMPTY!'}")
+   
     template = pn.template.FastListTemplate(
         title="Recognizer Workshop",
         sidebar_width=400,
@@ -119,7 +135,8 @@ def build_app(vm):
         ("Refine", refine.build(vm)),
         ("Inference", inference.build(vm)),
         ("Status", status.build(vm)),
-        ("Logs", vm.log_pane),
+        #("Logs", vm.log_pane),
+        ("Logs",  log.build(vm)),
         sizing_mode="stretch_width",
         min_height=500,
         scroll=True

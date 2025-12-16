@@ -407,6 +407,8 @@ def build(vm):
         if not stash["result_sets"]: return vm.notify("Fetch labels first.", "warn")
 
         all_outcomes_by_filter = []
+
+        vm.eng.add_labeled_embeddings_if_missing(stash["result_sets"])
         
         for i, result_set in enumerate(stash["result_sets"]):
             try:

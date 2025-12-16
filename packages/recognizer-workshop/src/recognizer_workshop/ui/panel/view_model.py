@@ -63,11 +63,18 @@ class ViewModel(SimpleNamespace):
     def __init__(self):
         super().__init__(eng=None, ui=None)
         self.status = pn.pane.Markdown("", sizing_mode="stretch_width")
-        self.log_pane = pn.pane.Markdown(
+        self.log_pane = pn.pane.HTML(
             "",  # Start with empty content
-            height=220,
-            sizing_mode="stretch_width",
-            css_classes=['log-pane']  # A class for clean CSS styling
+            sizing_mode="stretch_both",
+            styles={
+                'background-color': '#1e1e1e',  # Dark background
+                'color': '#d4d4d4',  # Light text
+                'padding': '10px',
+                'font-family': '"SF Mono", "Monaco", "Consolas", monospace, "Apple Color Emoji"',
+                'font-size': '12px',
+                'overflow-y': 'auto',
+                'border-radius': '4px'
+            }
         )
         self._setup_logging()
 

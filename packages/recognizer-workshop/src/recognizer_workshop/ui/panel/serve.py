@@ -59,12 +59,17 @@ def main(argv=None):
     p.add_argument("--port", type=int, default=int(os.environ.get("PORT", 0)))
     p.add_argument("--address", default=os.environ.get("ADDRESS", "127.0.0.1"))
     p.add_argument("--autoreload", action="store_true")
+    p.add_argument("--singleton", action="store_true")
     args = p.parse_args(argv)
 
-    app, _vm = create_app_session()
+    def get_app():
+        app, _vm = create_app_session()
+        return app
+    
+    what_to_serve = get_app() if args.singleton else get_app
 
     pn.serve(
-        {"/": app},
+        {"/": what_to_serve},
         port=args.port,
         address=args.address,
         allow_websocket_origin=["*"],

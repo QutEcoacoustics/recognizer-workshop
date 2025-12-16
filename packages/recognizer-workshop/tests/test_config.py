@@ -7,6 +7,20 @@ import pytest
 from recognizer_workshop.app.agile_engine import AgileConfig, LabelName, get_recent_files, _write_app_data, _APP_DATA_FILE
 
 
+@pytest.fixture(autouse=True)
+def mock_app_data_file(monkeypatch, tmp_path):
+    """
+    Automatically patches the app data file for all tests in this module.
+    autouse=True means this runs for every test without explicitly requesting it.
+    """
+    temp_app_data_file = tmp_path / ".test_app_data.json"
+    monkeypatch.setattr(
+        "recognizer_workshop.app.agile_engine._get_app_data_file",
+        lambda: temp_app_data_file
+    )
+    return temp_app_data_file
+
+
 class TestAgileConfig:
     """Unit tests for the AgileConfig class using pytest."""
 
