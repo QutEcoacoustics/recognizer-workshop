@@ -15,6 +15,7 @@ import tqdm
 from collections import deque
 import pyarrow.dataset as ds
 import pyarrow.parquet as pq
+import pyarrow.compute as pc
 from concurrent.futures import ThreadPoolExecutor
 
 from perch_hoplite.agile.convert_legacy import load_embedding_config
@@ -141,6 +142,12 @@ def convert_parquet(
 
 
 
+def get_parquet_offset_rows(df, offsets) #-> pd.DataFrame
+    """Get rows from a parquet dataframe that match the given offsets (in seconds)"""
+    if offsets:
+        return df[df['offset'].isin(offsets)]
+    return df
+
 def iter_parquet_dataframes(
     parquet_source: str | Path | list,
     *,
@@ -156,8 +163,9 @@ def iter_parquet_dataframes(
     Yield pandas DataFrames from local or downloaded files
 
     @param: parquet_source
-      - a local directory path OR single file path OR list of file paths; OR
-        a list of ARIDs (remote), fetched via api_client.
+      - (local) a local directory path OR single file path OR list of file paths; OR
+      - (remote) a list of ARIDs or list of dict in the form { id: 123, offsets: [offset1, offset2] } fetched via api_client
+      - must be either remote or local, not a mix
     @param: api_client
       - an instance of your module client, used for fetching remote parquet files
     @param: prefetch
@@ -168,85 +176,108 @@ def iter_parquet_dataframes(
       - maximum number of consecutive 401 authentication errors before aborting
     """
 
-  
     skip_arids_in = set() if skip_arids_in is None else {int(x) for x in skip_arids_in}
-    consecutive_auth_errors = 0  
+    consecutive_auth_errors = 0  # so we can abort after too many auth errors
 
     def warn(source, exc):
-        log.warning(f"skipping {source}: {exc}")
+        log.warning("skipping %s: %s", source, exc)
 
     if prefetch < 0:
         raise ValueError("prefetch must be non-negative")
 
     if isinstance(parquet_source, int):
         parquet_source = [parquet_source]
-
+    
+    # convert list format to dict format to normalize
     is_seq = isinstance(parquet_source, (list, tuple))
 
-    # downloading parquet based on arids
+    # convert list of ints to list of dicts for normalised format
     if is_seq and all(isinstance(x, int) for x in parquet_source):
+        parquet_source = [{'id': x} for x in parquet_source]
+
+    is_remote = is_seq and all(isinstance(x, dict) for x in parquet_source)
+
+    # just check that they have not tried passing a dict of local file paths and offsets
+    # we don't support that because of the way we read local files via pyarrow datasets
+    if is_remote:
+        for item in parquet_source:
+            if 'id' not in item:
+                raise ValueError("When passing a dict list for parquet source, each item must have an 'id' of a remote audio recording. Local file paths with offsets are not supported.")
+
+    # downloading parquet based on arids
+    if is_remote:
         
-        arids = [a for a in parquet_source if int(a) not in skip_arids_in]
-        if not arids:
+        items = [item for item in parquet_source if int(item['id']) not in skip_arids_in]
+        if not items:
             return
 
         if api_client is None:
             raise ValueError("api_client is required when parquet_source is a list of ARIDs")
         
-        log.info(f"Starting download of {len(arids)} parquet files from API")
+        log.info("Starting download of %d parquet files from API", len(items))
         
-        def fetch_one(arid: int):
+        def fetch_one(item: dict):
             # Get BytesIO from API (auth handled by client)
-            log.debug(f"Fetching parquet for ARID {arid}")
+            log.debug("Fetching parquet for ARID %d", item['id'])
             buf = api_client.analysis_result_file(
-                arid=arid,
+                arid=item['id'],
                 analysis_job_id=analysis_job_id,
                 analysis_name=analysis_name,
                 to_memory=True # get an io buffer rather than save to file
             )
             if buf is None:
-                raise RuntimeError(f"no parquet returned for ARID {arid}")
-            log.debug(f"Successfully fetched parquet for ARID {arid}, size: {len(buf.getvalue())} bytes")
-            return pq.read_table(buf, columns=columns).to_pandas()
+                raise RuntimeError(f"no parquet returned for ARID {item['id']}")
+            log.debug("Successfully fetched parquet for ARID %d size: %d bytes", item['id'], len(buf.getvalue()))
+            table = pq.read_table(buf, columns=columns)
+
+            df = table.to_pandas()
+
+            # 3. Filter inside the thread (Efficient)
+            offsets = item.get('offsets')
+            if offsets:
+                # Standard Pandas filtering - works on all versions
+                df = df[df['offset'].isin(offsets)]
+            
+            return df
 
 
         # prefetch queue to download some while the current is working
         with ThreadPoolExecutor(max_workers=max(1, prefetch + 1)) as executor:
             q: deque = deque()
-            it = iter(arids)
+            it = iter(items)
 
             def submit_next():
                 try:
-                    cur_arid = next(it)
+                    cur_item = next(it)
                 except StopIteration:
                     return False
-                q.append((cur_arid, executor.submit(fetch_one, cur_arid)))
+                q.append((cur_item, executor.submit(fetch_one, cur_item)))
                 return True
 
 
             # fill initial queue
-            for _ in range(min(prefetch + 1, len(arids))):
+            for _ in range(min(prefetch + 1, len(items))):
                 if not submit_next():
                     break
 
-            pbar = tqdm.tqdm(total=len(arids), desc="remote")
+            pbar = tqdm.tqdm(total=len(items), desc="remote")
             files_processed = 0
             while q:
-                arid, fut = q.popleft()
+                item, fut = q.popleft()
                 submit_next()
                 try:
                     result = fut.result()
                     consecutive_auth_errors = 0
                     files_processed += 1
-                    log.info(f"✓ Processed parquet {files_processed}/{len(arids)} (ARID: {arid}, rows: {len(result)})")
+                    log.info("Processed parquet %d/%d (ARID: %d, rows: %d)", files_processed, len(items), item['id'], len(result))
                     yield result
                 except AuthenticationError as e:
                     # Direct authentication error from the API client
                     consecutive_auth_errors += 1
-                    log.error(f"Authentication error ({consecutive_auth_errors}/{max_auth_errors}) for ARID {arid}: {e}")
+                    log.error("Authentication error (%d/%d) for ARID %d: %s", consecutive_auth_errors, max_auth_errors, item['id'], e)
                     
                     if consecutive_auth_errors >= max_auth_errors:
-                        log.error(f"Aborting: {max_auth_errors} consecutive authentication errors. Check your API token.")
+                        log.error("Aborting: %d consecutive authentication errors. Check your API token.", max_auth_errors)
                         pbar.close()
                         raise RuntimeError(f"Aborted after {max_auth_errors} consecutive authentication errors")
                 except Exception as e:
@@ -256,24 +287,25 @@ def iter_parquet_dataframes(
                     
                     if is_http_auth_error:
                         consecutive_auth_errors += 1
-                        log.error(f"Authentication error ({consecutive_auth_errors}/{max_auth_errors}) for ARID {arid}: {e}")
+                        log.error("Authentication error (%d/%d) for ARID %d: %s", consecutive_auth_errors, max_auth_errors, item['id'], e)
                         
                         if consecutive_auth_errors >= max_auth_errors:
-                            log.error(f"Aborting: {max_auth_errors} consecutive authentication errors. Check your API token.")
+                            log.error("Aborting: %d consecutive authentication errors. Check your API token.", max_auth_errors)
                             pbar.close()
                             raise RuntimeError(f"Aborted after {max_auth_errors} consecutive authentication errors")
                     else:
                         consecutive_auth_errors = 0  # Reset counter for non-auth errors
-                        warn(arid, e)
+                        warn(item, e)
                     
                 pbar.update(1)
             pbar.close()
             
-        log.info(f"Completed downloading {files_processed} parquet files")
+        log.info("Completed downloading %d parquet files", files_processed)
         return
     
     else:
         # using local files
+        # we don't support dict of offsets here, because the parquet_source can be a directory of files
 
         dataset = ds.dataset(parquet_source, format="parquet")
 
@@ -284,11 +316,11 @@ def iter_parquet_dataframes(
             try:
                 _, arid_from_name = extract_arid_and_domain(path)
             except ValueError as e:
-                log.warning(f"Can't determine arid of {path}: {e}")
+                log.warning("Can't determine arid of %s: %s", path, e)
                 arid_from_name = None
 
             if arid_from_name is not None and arid_from_name in skip_arids_in:
-                log.info(f"Skipping existing ARID: {arid_from_name} ({path})")
+                log.info("Skipping existing ARID: %s (%s)", arid_from_name, path)
                 continue
 
             # Now actually read this fragment
@@ -377,26 +409,6 @@ def create_empty_db(
     else:
       raise ValueError(f'Unknown db type: {db_type}')
 
-    # #-- TODO: what is all this metadata doing? Might be possible to remove 
-    # file_id_depth = legacy_config.embed_fn_config['file_id_depth']
-    # audio_globs = []
-    # for i, glob in enumerate(legacy_config.source_file_patterns):
-    #   base_path, file_glob = glob.split('/')[-file_id_depth - 1 :]
-    #   if i > 0:
-    #     partial_dataset_name = f'{dataset_name}_{i}'
-    #   else:
-    #     partial_dataset_name = dataset_name
-    #   audio_globs.append(
-    #       source_info.AudioSourceConfig(
-    #           dataset_name=partial_dataset_name,
-    #           base_path=base_path,
-    #           file_glob=file_glob,
-    #           min_audio_len_s=legacy_config.embed_fn_config.min_audio_s,
-    #           target_sample_rate_hz=legacy_config.embed_fn_config.get(
-    #               'target_sample_rate_hz', -2
-    #           ),
-    #       )
-    #   )
 
     # I think this is legacy stuff that is only applicable to local files, not baw stuff
     # Not sure if it's a good idea to get rid of it, so make some empty audio sources
@@ -475,12 +487,12 @@ def add_parquet_to_db(
         source_map_fn = lambda x: x
 
     existing_arids = get_existing_arids(db)
-    log.info(f"Database currently has {len(existing_arids)} existing ARIDs, will skip these")
+    log.info("Database currently has %d existing ARIDs, will skip these", len(existing_arids))
 
     total_inserted = 0
     files_processed = 0
 
-    log.info(f"Starting to ingest parquet files into database")
+    log.info("Starting to ingest parquet files into database")
     for df in tqdm.tqdm(iter_parquet_dataframes(parquet_source, api_client=api_client, skip_arids_in=existing_arids), desc="ingest"):
         max_for_df = max_count - total_inserted if max_count > 0 else -1
         num_inserted = add_df_to_db(df, db, source_map_fn=source_map_fn, max_for_df=max_for_df, dataset_name=dataset_name)
