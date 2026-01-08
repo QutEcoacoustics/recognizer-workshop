@@ -1,39 +1,32 @@
 import os
 import pytest
 from pathlib import Path
+import uuid
 
 from baw_helpers import baw_api
 from baw_helpers.baw_helpers import annotation_upload_csv
 from recognizer_workshop.app.agile_modeling_helpers import get_or_create_workshop_provenance
+import pandas as pd
 
 STAGING_URL = "https://api.staging.ecosounds.org"
 
-@pytest.fixture(scope="module")
-def api_client():
-    token = os.getenv("STAGING_API_TOKEN")
-    if not token:
-        pytest.skip("requires STAGING_API_TOKEN")
-
-    client = baw_api.baw_api(token=token, base_url=STAGING_URL, allow_prompt=False)
-
-    if not client.test_token(default=False):
-        pytest.skip("invalid/expired token or service unavailable")
-
-    return client
 
 
 
-@pytest.fixture
-def data_dir(request):
-    return Path(request.fspath).parent / "files"
-
-def test_event_upload(api_client, data_dir):
+def test_event_upload(staging_api_client, data_dir, tmp_path):
      
-    provenance = get_or_create_workshop_provenance(api_client)
+    provenance = get_or_create_workshop_provenance(staging_api_client)
 
     file_path = data_dir / 'recognizer_output_01.csv'
 
-    response = annotation_upload_csv(api_client, filepath_to_csv=file_path, provenance_id=provenance['id'], import_name="test_import", commit='true')
+    df = pd.read_csv(file_path)
 
-    # todo: make a proper test - this was just an interactive one
+    # Add a unique nonce to avoid duplicate rejection
+    df['test_nonce'] = uuid.uuid4().hex
+    unique_file_path = tmp_path / f"unique_{uuid.uuid4().hex[:8]}.csv"
+    df.to_csv(unique_file_path, index=False)
+
+    response = annotation_upload_csv(staging_api_client, filepath_to_csv=unique_file_path, provenance_id=provenance['id'], import_name="test_import", commit='true')
+    
+    # if we get a response back without an http error, we assume success
     assert response is not None, "Response should not be None"

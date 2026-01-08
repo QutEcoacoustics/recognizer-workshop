@@ -20,6 +20,7 @@ import os
 import re
 from typing import Generator, Sequence
 import urllib
+from pathlib import Path
 
 from perch_hoplite import audio_io
 import librosa
@@ -29,10 +30,10 @@ import requests
 import soundfile
 
 # regex to extract a recording id from a canonical file name
-FILE_ID_TO_UID_PATTERN = re.compile(r".*_(\d+).[^\.]+$")
+FILE_ID_TO_UID_PATTERN = re.compile(r".*(?:^|_)(\d+)\.")
 
 # regex to extract the domain and recording id from a full recording URL
-FULL_RECORDING_PATTERN = re.compile(r"https://(.+?)/audio_recordings/(\d+)/original")
+FULL_RECORDING_PATTERN = re.compile(r"(https?://.+?)/audio_recordings/(\d+)/original")
 
 BAW_DOMINS_ALLOWLIST = ["api.acousticobservatory.org", "api.ecosounds.org", "api.staging.ecosounds.org"]
 
@@ -41,6 +42,19 @@ WEBSITE_DOMAIN_MAP = {
     "api.acousticobservatory.org": "data.acousticobservatory.org",
     "api.ecosounds.org": "www.ecosounds.org",
 }
+
+
+def extract_arid_from_filename(filename: str | Path) -> int | None:
+    """
+    Extract the audio_recording_id from a canonical file name.
+    This also works for any string that ends with _{arid}.ext or just {arid}.ext
+    """
+    match = FILE_ID_TO_UID_PATTERN.match(str(filename))
+    if match:
+      return int(match.group(1))
+    else:
+      return None
+
 
 def make_baw_audio_url_from_file_id(
     file_id: str,
@@ -90,6 +104,14 @@ def make_baw_audio_url_from_arid(
     params["end_offset"] = offset_s + int(window_size_s)
   audio_path = audio_path + "?" + urllib.parse.urlencode(params)
   return audio_path
+
+
+def original_baw_audio_url_from_arid(arid: int | str, domain: str) -> str:
+  if not domain.startswith(("http://", "https://")):
+         domain = f"https://{domain}"
+  return f"{domain}/audio_recordings/{arid}/original"
+
+
 
 
 def make_baw_listen_link_from_arid(

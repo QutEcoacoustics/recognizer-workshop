@@ -1,5 +1,6 @@
 # tests/conftest.py
 import os
+import io
 from pathlib import Path
 import pytest
 import numpy as np
@@ -8,13 +9,17 @@ from scipy.io.wavfile import write as write_wav
 
 from unittest.mock import MagicMock
 
+import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
+
 from perch_hoplite.db import sqlite_usearch_impl
 
 # We rely on your baw_api to read .env (BAW_AUTH_TOKEN) itself via update_token().
 # No need to load dotenv here unless you want to; keeping it minimal.
 
 PROD_URL = os.getenv("PROD_API_BASE_URL", "https://api.ecosounds.org")
-
+STAGING_URL = os.getenv("STAGING_API_BASE_URL", "https://api.staging.ecosounds.org")
 
 @pytest.fixture(scope="session")
 def prod_api_client():
@@ -71,6 +76,11 @@ def db_with_path(test_db_path):
 
 
 @pytest.fixture
+def data_dir(request):
+    return Path(request.fspath).parent / "files"
+
+
+@pytest.fixture
 def working_folder(tmp_path):
     """
     Copies the template test DB into a temporary folder for this test run.
@@ -97,3 +107,60 @@ def audio_files_folder(tmp_path):
         write_wav(audio_dir / f"example_{i}.wav", sample_rate, audio_data)
         
     return audio_dir
+
+@pytest.fixture
+def mock_api_client():
+    """
+    Mocks the baw_api client instance for unit tests.
+    Use this when you don't want to hit the real API.
+    """
+    client = MagicMock()
+    return client
+
+
+@pytest.fixture
+def create_fake_parquet_bytes():
+    """
+    Factory fixture that returns a function to create fake parquet bytes.
+    Usage in test:
+        def test_thing(create_fake_parquet_bytes):
+            buf = create_fake_parquet_bytes([{'col': 1}])
+    """
+    def _create(data):
+        df = pd.DataFrame(data)
+        table = pa.Table.from_pandas(df)
+        buf = io.BytesIO()
+        pq.write_table(table, buf)
+        buf.seek(0)
+        return buf
+    return _create
+
+
+@pytest.fixture(scope="session")
+def staging_api_client():
+    """
+    Integration client against STAGING BAW. 
+    Requires 'STAGING_API_TOKEN' env var to be set, otherwise skips.
+    """
+    token = os.getenv("STAGING_API_TOKEN")
+    if not token:
+        pytest.skip("Skipping staging integration test: STAGING_API_TOKEN not found in env.")
+
+    try:
+        from baw_helpers.baw_api import baw_api
+    except Exception:
+        from baw_helpers import baw_api as baw_mod
+        baw_api = baw_mod.baw_api
+
+    # Initialize client against Staging
+    client = baw_api(
+        token=token,
+        base_url=STAGING_URL,
+        allow_prompt=False,
+    )
+
+    # Health check
+    if not client.test_token(default=False):
+        pytest.skip("STAGING_API_TOKEN is invalid or Staging service is unavailable")
+
+    return client

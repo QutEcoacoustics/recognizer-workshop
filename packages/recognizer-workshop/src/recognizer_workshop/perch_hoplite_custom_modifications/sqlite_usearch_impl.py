@@ -1,11 +1,14 @@
 import numpy as np
 from perch_hoplite.db import interface
-
+import threading
 
 import sqlite3
 import perch_hoplite.db.interface as hoplite_interface
-from perch_hoplite.db.sqlite_usearch_impl import SQLiteUsearchDB, USEARCH_DTYPES, HOPLITE_FILENAME, USEARCH_CONFIG_KEY, UINDEX_FILENAME, _setup_sqlite_tables, _get_metadata, _insert_metadata
-
+from perch_hoplite.db.sqlite_usearch_impl import (
+    SQLiteUsearchDB, USEARCH_DTYPES, HOPLITE_FILENAME, USEARCH_CONFIG_KEY, 
+    UINDEX_FILENAME, _setup_sqlite_tables, _get_metadata, _insert_metadata,
+    deserialize_embedding
+)
 from etils import epath
 from ml_collections import config_dict
 
@@ -24,6 +27,37 @@ class ThreadedSQLiteUsearchDB(SQLiteUsearchDB):
     - we are accessing private methods/attributes of the parent class,
       but this is necessary to avoid re-implementing everything or modifying the parent class.
     """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Create a thread-local storage container
+        self._thread_local = threading.local()
+
+
+    def _get_cursor(self) -> sqlite3.Cursor:
+        """
+        Override: Returns a thread-local cursor. 
+        If the current thread doesn't have one, it creates it.
+        """
+        if not hasattr(self._thread_local, 'cursor'):
+            self._thread_local.cursor = self.db.cursor()
+        return self._thread_local.cursor
+
+
+    def commit(self):
+        """
+        Override: We must NOT try to close 'self._cursor' because we are not using it.
+        """
+        self.db.commit()
+        
+        # In the parent, they close self._cursor here. 
+        # We leave thread-local cursors open (they are lightweight and tied to the thread).
+        
+        if self._ui_updated:
+            self.ui.save()
+            self._ui_updated = False
+
+
     @classmethod
     def create(
         cls,
@@ -123,7 +157,41 @@ class ThreadedSQLiteUsearchDB(SQLiteUsearchDB):
 
 
 
+    def get_offsets_for_source_id(self, source_url: str) -> set[float]:
+        """
+        Get all existing offsets for a given source URL across all datasets.
+        Returns a set of floats.
+        """
+        cursor = self._get_cursor()
+        
+        # SQL to find offsets for this source string.
+        # We join embeddings with sources to find the right rows.
+        # We ignore 'dataset' because we want to de-dupe globally across the whole DB.
+        query = """
+            SELECT he.offsets
+            FROM hoplite_embeddings he
+            JOIN hoplite_sources hs ON he.source_idx = hs.id
+            WHERE hs.source = ?;
+        """
+        
+        try:
+            cursor.execute(query, (source_url,))
+            results = cursor.fetchall()
+        except Exception:
+            # If the query fails (e.g. table locked or doesn't exist), return empty set
+            return set()
 
+        all_offsets = set()
+        
+        # Use the parent class property to know if offsets are stored as float16 or float32
+        dtype = self.offset_dtype
+        
+        for (blob,) in results:
+            # Deserialize the binary blob using the imported helper
+            offsets_array = deserialize_embedding(blob, dtype)
+            all_offsets.update(offsets_array.tolist())
+            
+        return all_offsets
 
 
 

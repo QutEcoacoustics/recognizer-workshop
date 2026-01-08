@@ -34,7 +34,7 @@ class baw_api:
     token = None
 
 
-    def __init__(self, token=None, base_url=None, allow_prompt=None):
+    def __init__(self, token=None, base_url=None, allow_prompt=None, anonymous=None):
         """
         Initializes the BAW API client.
         Args:
@@ -66,7 +66,7 @@ class baw_api:
             else:
                 allow_prompt = bool(sys.stdin) and sys.stdin.isatty()
                 
-        self.update_token(token, allow_prompt=allow_prompt)
+        self.update_token(token, allow_prompt=allow_prompt, anonymous=anonymous)
 
 
     def _get_session(self) -> requests.Session:
@@ -485,18 +485,25 @@ class baw_api:
     def update_token(self, 
                      token=None, 
                      allow_prompt=True, 
-                     require_auth=False):
+                     anonymous=None):
         """
         Validate and set authentication token.
         
         Args:
             token: Explicit token to use
             allow_prompt: Whether to interactively prompt for token
-            require_auth: If True, raises error when no valid token available
+            anonymous: If False, raises error when no valid token available
+                       If True, will ignore any tokens and create anonymous client
+                       If None, will use token if available, otherwise anonymous mode
 
             If a token is available either passed or from environment, and is invalid, will raise an error whether or not 
         """
         log.info("\nUpdating BAW API token...")
+
+        if anonymous is True:
+            self.token = None
+            log.info("Creating anonymous client as requested (no token).")
+            return True
         
         supplied_token = token if token else None
 
@@ -535,13 +542,12 @@ class baw_api:
         # if we reach here, we have no valid token
         # if we don't require it, just succeed in anonymous mode with a message
         # if we do require it, either prompt or fail
-        if require_auth:
+
+        if anonymous is False:
             if not allow_prompt:
                 raise AuthenticationError("Authentication required but no valid token available")
             else:
                 self._prompt_for_token(env_file=env_file)
-                if self.token is None:
-                    raise AuthenticationError("No valid token provided, exiting.")
             
         if self.token is None:
             log.warning("\n💡 No Valid Token supplied, creating anonymous client")
@@ -561,14 +567,19 @@ class baw_api:
         """
         Prompts the user to enter a token interactively.
         Sets self.token if it's valid. 
+        If strict is True, 
         
         """
         new_token = None
         while True:
-            print("\nPlease enter a valid token to proceed. (Type 'quit' to to proceed in anonymous mode)")
+            print("\nPlease enter a valid token to proceed. (Type 'a' for anonymous, 'q' to exit)")
             new_token = getpass.getpass(f"Enter your BAW_AUTH_TOKEN for {self.base_url}: ")
             
             if new_token.lower() in ['quit', 'q']:
+                raise AuthenticationError("No valid token provided, exiting.")
+            elif new_token.lower().strip() in ['anonymous', 'anon', 'a']:
+                log.info("Proceeding in anonymous mode as requested.")
+                self.token = None
                 return
 
             self.token = new_token 

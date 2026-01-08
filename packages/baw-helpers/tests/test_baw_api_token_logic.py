@@ -1,7 +1,7 @@
 """Unit tests for token validation and authentication logic."""
 import pytest
 from unittest.mock import patch
-from baw_helpers.baw_api import baw_api
+from baw_helpers.baw_api import baw_api, AuthenticationError
 
 
 # ==================== Test-Specific Fixtures ====================
@@ -34,7 +34,6 @@ class TestTokenPriorityChain:
             
             api = baw_api.__new__(baw_api)
             api.base_url = "https://test.example.com"
-            api.debug = False
             api.token = None
             
             result = api.update_token(token="explicit_token", allow_prompt=False)
@@ -51,7 +50,6 @@ class TestTokenPriorityChain:
             
             api = baw_api.__new__(baw_api)
             api.base_url = "https://test.example.com"
-            api.debug = False
             api.token = None
             
             result = api.update_token(token=None, allow_prompt=False)
@@ -67,7 +65,6 @@ class TestTokenPriorityChain:
             
             api = baw_api.__new__(baw_api)
             api.base_url = "https://test.example.com"
-            api.debug = False
             api.token = None
             
             result = api.update_token(token=None, allow_prompt=False)
@@ -79,10 +76,9 @@ class TestTokenPriorityChain:
         """#13: No token anywhere results in anonymous mode."""
         api = baw_api.__new__(baw_api)
         api.base_url = "https://test.example.com"
-        api.debug = False
         api.token = None
         
-        result = api.update_token(token=None, allow_prompt=False, require_auth=False)
+        result = api.update_token(token=None, allow_prompt=False, anonymous=None)
         
         assert result is True
         assert api.token is None
@@ -95,22 +91,20 @@ class TestAnonymousModeNonInteractive:
         """#17: Valid explicit token succeeds."""
         api = baw_api.__new__(baw_api)
         api.base_url = "https://test.example.com"
-        api.debug = False
         api.token = None
         
-        result = api.update_token(token="valid_token", allow_prompt=False, require_auth=False)
+        result = api.update_token(token="valid_token", allow_prompt=False, anonymous=False)
         
         assert result is True
         assert api.token == "valid_token"
     
-    def test_18_invalid_explicit_anonymous_ok(self, mock_env_no_token, mock_no_dotenv, mock_test_token_invalid):
+    def test_18_forced_anonymous_ignores_token(self, mock_env_no_token, mock_no_dotenv, mock_test_token_invalid):
         """#18: Invalid explicit token proceeds to anonymous mode."""
         api = baw_api.__new__(baw_api)
         api.base_url = "https://test.example.com"
-        api.debug = False
         api.token = None
         
-        result = api.update_token(token="invalid_token", allow_prompt=False, require_auth=False)
+        result = api.update_token(token="invalid_token", allow_prompt=False, anonymous=True)
         
         assert result is True
         assert api.token is None
@@ -119,10 +113,9 @@ class TestAnonymousModeNonInteractive:
         """#19: No token proceeds to anonymous mode."""
         api = baw_api.__new__(baw_api)
         api.base_url = "https://test.example.com"
-        api.debug = False
         api.token = None
         
-        result = api.update_token(token=None, allow_prompt=False, require_auth=False)
+        result = api.update_token(token=None, allow_prompt=False, anonymous=True)
         
         assert result is True
         assert api.token is None
@@ -135,37 +128,30 @@ class TestAuthRequiredNonInteractive:
         """#22: Valid explicit token succeeds when auth required."""
         api = baw_api.__new__(baw_api)
         api.base_url = "https://test.example.com"
-        api.debug = False
         api.token = None
         
-        result = api.update_token(token="valid_token", allow_prompt=False, require_auth=True)
+        result = api.update_token(token="valid_token", allow_prompt=False, anonymous=False)
         
         assert result is True
         assert api.token == "valid_token"
     
     def test_23_invalid_explicit_auth_fails(self, mock_env_no_token, mock_no_dotenv, mock_test_token_invalid):
-        """#23: Invalid explicit token fails when auth required."""
+        """#23: Invalid explicit token raises exception when auth required."""
         api = baw_api.__new__(baw_api)
         api.base_url = "https://test.example.com"
-        api.debug = False
         api.token = None
         
-        result = api.update_token(token="invalid_token", allow_prompt=False, require_auth=True)
-        
-        assert result is False
-        assert api.token is None
+        with pytest.raises(AuthenticationError):
+            api.update_token(token="invalid_token", allow_prompt=False, anonymous=False)
     
     def test_24_no_token_auth_fails(self, mock_env_no_token, mock_no_dotenv):
-        """#24: No token fails when auth required."""
+        """#24: No token raises exception when auth required."""
         api = baw_api.__new__(baw_api)
         api.base_url = "https://test.example.com"
-        api.debug = False
         api.token = None
         
-        result = api.update_token(token=None, allow_prompt=False, require_auth=True)
-        
-        assert result is False
-        assert api.token is None
+        with pytest.raises(AuthenticationError):
+            api.update_token(token=None, allow_prompt=False, anonymous=False)
 
 
 class TestInteractiveAuthRequired:
@@ -175,45 +161,28 @@ class TestInteractiveAuthRequired:
         """#32: Valid explicit token, no prompting needed."""
         api = baw_api.__new__(baw_api)
         api.base_url = "https://test.example.com"
-        api.debug = False
         api.token = None
         
-        result = api.update_token(token="valid_token", allow_prompt=True, require_auth=True)
+        result = api.update_token(token="valid_token", allow_prompt=True, anonymous=False)
         
         assert result is True
         assert api.token == "valid_token"
     
-    def test_34_invalid_explicit_user_quits(self, mock_env_no_token, mock_test_token_invalid):
-        """#34: Invalid explicit token, user quits prompt, auth required -> fails."""
-        with patch('baw_helpers.baw_api.find_dotenv', return_value="/fake/.env"), \
-             patch('baw_helpers.baw_api.os.path.exists', return_value=False), \
-             patch('baw_helpers.baw_api.getpass.getpass', return_value="quit"):
-            
-            api = baw_api.__new__(baw_api)
-            api.base_url = "https://test.example.com"
-            api.debug = False
-            api.token = None
-            
-            result = api.update_token(token="invalid_token", allow_prompt=True, require_auth=True)
-            
-            assert result is False
-            assert api.token is None
+
     
     def test_36_no_token_user_quits(self, mock_env_no_token):
-        """#36: No token, user quits prompt, auth required -> fails."""
+        """#36: No token, user quits prompt -> raises exception."""
         with patch('baw_helpers.baw_api.find_dotenv', return_value="/fake/.env"), \
              patch('baw_helpers.baw_api.os.path.exists', return_value=False), \
              patch('baw_helpers.baw_api.getpass.getpass', return_value="quit"):
             
             api = baw_api.__new__(baw_api)
             api.base_url = "https://test.example.com"
-            api.debug = False
             api.token = None
             
-            result = api.update_token(token=None, allow_prompt=True, require_auth=True)
-            
-            assert result is False
-            assert api.token is None
+            # FIX: Expect Error, not False
+            with pytest.raises(AuthenticationError):
+                api.update_token(token=None, allow_prompt=True, anonymous=False)
 
 
 class TestEdgeCasesEmptyStrings:
@@ -227,7 +196,6 @@ class TestEdgeCasesEmptyStrings:
             
             api = baw_api.__new__(baw_api)
             api.base_url = "https://test.example.com"
-            api.debug = False
             api.token = None
             
             result = api.update_token(token="", allow_prompt=False)
@@ -244,7 +212,6 @@ class TestEdgeCasesEmptyStrings:
             
             api = baw_api.__new__(baw_api)
             api.base_url = "https://test.example.com"
-            api.debug = False
             api.token = None
             
             result = api.update_token(token="", allow_prompt=False)
@@ -261,10 +228,9 @@ class TestEdgeCasesEmptyStrings:
             
             api = baw_api.__new__(baw_api)
             api.base_url = "https://test.example.com"
-            api.debug = False
             api.token = None
             
-            result = api.update_token(token="", allow_prompt=False, require_auth=False)
+            result = api.update_token(token="", allow_prompt=False, anonymous=None)
             
             assert result is True
             assert api.token is None
@@ -274,7 +240,7 @@ class TestInteractivePromptingSuccess:
     """Interactive prompting with successful token entry (require_auth=True only)."""
     
     def test_no_token_user_enters_valid_require_auth(self, mock_env_no_token, mock_test_token_valid):
-        """No token with require_auth=True, user enters valid token via prompt."""
+        """No token with anonymous=False, user enters valid token via prompt."""
         with patch('baw_helpers.baw_api.find_dotenv', return_value="/fake/.env"), \
              patch('baw_helpers.baw_api.os.path.exists', return_value=False), \
              patch('baw_helpers.baw_api.getpass.getpass', return_value="user_token"), \
@@ -282,34 +248,29 @@ class TestInteractivePromptingSuccess:
             
             api = baw_api.__new__(baw_api)
             api.base_url = "https://test.example.com"
-            api.debug = False
             api.token = None
             
-            result = api.update_token(token=None, allow_prompt=True, require_auth=True)
-            
-            assert result is True
-            assert api.token == "user_token"
-    
-    def test_invalid_explicit_user_enters_valid_require_auth(self, mock_env_no_token):
-        """Invalid explicit token with require_auth=True, user enters valid token."""
-        test_token_results = [False, True]  # First call fails (invalid), second succeeds (user input)
-        
-        with patch('baw_helpers.baw_api.find_dotenv', return_value="/fake/.env"), \
-             patch('baw_helpers.baw_api.os.path.exists', return_value=False), \
-             patch('baw_helpers.baw_api.getpass.getpass', return_value="user_token"), \
-             patch('baw_helpers.baw_api.input', return_value="n"), \
-             patch.object(baw_api, 'test_token', side_effect=test_token_results):
-            
-            api = baw_api.__new__(baw_api)
-            api.base_url = "https://test.example.com"
-            api.debug = False
-            api.token = None
-            
-            result = api.update_token(token="invalid_token", allow_prompt=True, require_auth=True)
+            result = api.update_token(token=None, allow_prompt=True, anonymous=False)
             
             assert result is True
             assert api.token == "user_token"
 
+    def test_user_chooses_anonymous_via_prompt(self, mock_env_no_token):
+        """User explicitly enters 'a' in the prompt to go anonymous."""
+        with patch('baw_helpers.baw_api.find_dotenv', return_value="/fake/.env"), \
+            patch('baw_helpers.baw_api.os.path.exists', return_value=False), \
+            patch('baw_helpers.baw_api.getpass.getpass', return_value="a"):
+            
+            api = baw_api.__new__(baw_api)
+            api.base_url = "https://test.example.com"
+            api.token = None
+            
+            # Even though anonymous=False (Strict), the user override 'a' should succeed
+            result = api.update_token(token=None, allow_prompt=True, anonymous=False)
+            
+            assert result is True
+            assert api.token is None
+    
 
 class TestPromptRetryLogic:
     """Test #41: Retry logic in interactive prompt."""
@@ -326,10 +287,9 @@ class TestPromptRetryLogic:
             
             api = baw_api.__new__(baw_api)
             api.base_url = "https://test.example.com"
-            api.debug = False
             api.token = None
             
-            result = api.update_token(token=None, allow_prompt=True, require_auth=True)
+            result = api.update_token(token=None, allow_prompt=True, anonymous=False)
             
             assert result is True
             assert api.token == "good_token"
@@ -348,10 +308,9 @@ class TestSaveToEnvPrompting:
             
             api = baw_api.__new__(baw_api)
             api.base_url = "https://test.example.com"
-            api.debug = False
             api.token = None
             
-            result = api.update_token(token=None, allow_prompt=True, require_auth=True)
+            result = api.update_token(token=None, allow_prompt=True, anonymous=False)
             
             assert result is True
             assert api.token == "user_token"
@@ -367,10 +326,9 @@ class TestSaveToEnvPrompting:
             
             api = baw_api.__new__(baw_api)
             api.base_url = "https://test.example.com"
-            api.debug = False
             api.token = None
             
-            result = api.update_token(token=None, allow_prompt=True, require_auth=True)
+            result = api.update_token(token=None, allow_prompt=True, anonymous=False)
             
             assert result is True
             assert api.token == "user_token"
@@ -381,7 +339,7 @@ class TestInvalidTokenNoFallback:
     """Test #4, #5, #6: Invalid explicit token doesn't fall back to env/dotenv."""
     
     def test_4_invalid_explicit_ignores_valid_env(self, mock_env_no_token, mock_test_token_invalid):
-        """#4: Invalid explicit token doesn't fall back to valid env var."""
+        """#4: Invalid explicit token raises exception (doesn't fall back to valid env var)."""
         with patch('baw_helpers.baw_api.find_dotenv', return_value="/fake/.env"), \
              patch('baw_helpers.baw_api.os.path.exists', return_value=True), \
              patch('baw_helpers.baw_api.os.getenv', return_value="valid_env_token"), \
@@ -389,16 +347,13 @@ class TestInvalidTokenNoFallback:
             
             api = baw_api.__new__(baw_api)
             api.base_url = "https://test.example.com"
-            api.debug = False
             api.token = None
             
-            result = api.update_token(token="invalid_explicit", allow_prompt=False, require_auth=False)
-            
-            assert result is True  # Anonymous mode OK
-            assert api.token is None  # Didn't fall back to env tokens
+            with pytest.raises(AuthenticationError):
+                api.update_token(token="invalid_explicit", allow_prompt=False)
     
     def test_5_invalid_explicit_all_invalid(self, mock_env_no_token, mock_test_token_invalid):
-        """#5: Invalid explicit token with all sources invalid."""
+        """#5: Invalid explicit token raises exception (all sources invalid)."""
         with patch('baw_helpers.baw_api.find_dotenv', return_value="/fake/.env"), \
              patch('baw_helpers.baw_api.os.path.exists', return_value=True), \
              patch('baw_helpers.baw_api.os.getenv', return_value="invalid_env"), \
@@ -406,22 +361,16 @@ class TestInvalidTokenNoFallback:
             
             api = baw_api.__new__(baw_api)
             api.base_url = "https://test.example.com"
-            api.debug = False
             api.token = None
             
-            result = api.update_token(token="invalid_explicit", allow_prompt=False, require_auth=False)
-            
-            assert result is True  # Anonymous mode OK
-            assert api.token is None
+            with pytest.raises(AuthenticationError):
+                api.update_token(token="invalid_explicit", allow_prompt=False)
     
     def test_6_invalid_explicit_no_env(self, mock_env_no_token, mock_no_dotenv, mock_test_token_invalid):
-        """#6: Invalid explicit token with no env tokens available."""
+        """#6: Invalid explicit token raises exception (no env tokens available)."""
         api = baw_api.__new__(baw_api)
         api.base_url = "https://test.example.com"
-        api.debug = False
         api.token = None
         
-        result = api.update_token(token="invalid_explicit", allow_prompt=False, require_auth=False)
-        
-        assert result is True  # Anonymous mode OK
-        assert api.token is None
+        with pytest.raises(AuthenticationError):
+            api.update_token(token="invalid_explicit", allow_prompt=False)

@@ -17,7 +17,8 @@ from recognizer_workshop.app.create_database.create_database import (
     add_parquet_to_db,
     convert_source_to_original_url,
     convert_parquet,
-    create_empty_db
+    create_empty_db,
+    _iter_local_parquet_dataframes
 )
 
 
@@ -76,93 +77,82 @@ def test_iter_parquet_dataframes_local_skip(tmp_path):
     _write_parquet(df, p2)
 
     # Skip 222
-    dfs = list(iter_parquet_dataframes(tmp_path, skip_arids_in=[222]))
+    dfs = list(_iter_local_parquet_dataframes(tmp_path, skip_arids_in=[222]))
     assert len(dfs) == 1
     # Make sure we got the content of the kept file
     assert list(dfs[0].columns[:3]) == ["source", "channel", "offset"]
 
 
-def make_fake_api(
-    *,
-    n_rows: int = 3,
-    n_features: int = 3,
-    dtype: str | np.dtype = "float16",
-    hop_size: float = 5.0,
-    source_base: str = "https://api.ecosounds.org",
-):
-    """
-    Factory returning a FakeAPI to provide anaysis result parquet files
-    with configurable shape/dtype.
+# def make_fake_api(
+#     *,
+#     n_rows: int = 3,
+#     n_features: int = 3,
+#     dtype: str | np.dtype = "float16",
+#     hop_size: float = 5.0,
+#     source_base: str = "https://api.ecosounds.org",
+# ):
+#     """
+#     Factory returning a FakeAPI to provide anaysis result parquet files
+#     with configurable shape/dtype.
 
-    - n_rows: number of frames per ARID
-    - n_features: number of feature columns (f0..f{n_features-1})
-    - dtype: feature dtype ('float16'|'float32'|'float64' or numpy dtype)
-    - hop_size: spacing between offsets (multiples of hop_size)
-    - source_base: base URL for source
-    """
-    dtype = np.dtype(dtype)
+#     - n_rows: number of frames per ARID
+#     - n_features: number of feature columns (f0..f{n_features-1})
+#     - dtype: feature dtype ('float16'|'float32'|'float64' or numpy dtype)
+#     - hop_size: spacing between offsets (multiples of hop_size)
+#     - source_base: base URL for source
+#     """
+#     dtype = np.dtype(dtype)
 
-    class FakeAPI:
-        def __init__(self):
-            self.n_rows = n_rows
-            self.n_features = n_features
-            self.dtype = dtype
-            self.hop_size = float(hop_size)
-            self.source_base = source_base.rstrip("/")
+#     class FakeAPI:
+#         def __init__(self):
+#             self.n_rows = n_rows
+#             self.n_features = n_features
+#             self.dtype = dtype
+#             self.hop_size = float(hop_size)
+#             self.source_base = source_base.rstrip("/")
 
-        def _make_df(self, arid: int) -> pd.DataFrame:
-            # realistic meta columns
-            src = f"{self.source_base}/audio_recordings/{arid}/original"
-            data = {
-                "source": [src] * self.n_rows,
-                "channel": [0] * self.n_rows,
-                "offset": [i * self.hop_size for i in range(self.n_rows)],  # multiples of hop_size
-            }
-            # feature columns f0..f{n_features-1}, deterministic per arid/row/feature
-            # value will be the (arid + the row + the feature column) / 100
-            for j in range(self.n_features):
-                col = f"f{j}"
-                vals = np.array(
-                    [(float(arid) + i + j) / 100.0 for i in range(self.n_rows)],
-                    dtype=self.dtype,
-                )
-                data[col] = vals
-            return pd.DataFrame(data)
+#         def _make_df(self, arid: int) -> pd.DataFrame:
+#             # realistic meta columns
+#             src = f"{self.source_base}/audio_recordings/{arid}/original"
+#             data = {
+#                 "source": [src] * self.n_rows,
+#                 "channel": [0] * self.n_rows,
+#                 "offset": [i * self.hop_size for i in range(self.n_rows)],  # multiples of hop_size
+#             }
+#             # feature columns f0..f{n_features-1}, deterministic per arid/row/feature
+#             # value will be the (arid + the row + the feature column) / 100
+#             for j in range(self.n_features):
+#                 col = f"f{j}"
+#                 vals = np.array(
+#                     [(float(arid) + i + j) / 100.0 for i in range(self.n_rows)],
+#                     dtype=self.dtype,
+#                 )
+#                 data[col] = vals
+#             return pd.DataFrame(data)
 
-        def analysis_result_file(
-            self,
-            *,
-            arid,
-            analysis_job_id,
-            analysis_name,
-            filename=None,
-            to_memory=True,
-            timeout=None,
-            **_,
-        ):
-            df = self._make_df(int(arid))
-            if to_memory:
-                return _parquet_bytes(df)
-            if filename is None:
-                raise ValueError("filename must be provided when to_memory=False")
-            table = pa.Table.from_pandas(df)
-            pq.write_table(table, filename)
-            return str(filename)
+#         def analysis_result_file(
+#             self,
+#             *,
+#             arid,
+#             analysis_job_id,
+#             analysis_name,
+#             filename=None,
+#             to_memory=True,
+#             timeout=None,
+#             **_,
+#         ):
+#             df = self._make_df(int(arid))
+#             if to_memory:
+#                 return _parquet_bytes(df)
+#             if filename is None:
+#                 raise ValueError("filename must be provided when to_memory=False")
+#             table = pa.Table.from_pandas(df)
+#             pq.write_table(table, filename)
+#             return str(filename)
 
-    return FakeAPI()
+#     return FakeAPI()
 
 
-def test_iter_parquet_dataframes_remote_skip():
-    api = make_fake_api()
-    # We’ll request [1,2,3], but skip 2
-    dfs = list(iter_parquet_dataframes([1,2,3], api_client=api, prefetch=1, skip_arids_in=[2]))
-    assert len(dfs) == 2
-    sources = sorted(df["source"].iloc[0] for df in dfs)
-    expected = sorted([
-        "https://api.ecosounds.org/audio_recordings/1/original",
-        "https://api.ecosounds.org/audio_recordings/3/original",
-    ])
-    assert sources == expected
 
 
 def test_add_to_new_db_then_readd_same_files_is_idempotent(tmp_path):

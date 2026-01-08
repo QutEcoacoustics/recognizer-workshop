@@ -369,12 +369,17 @@ def annotation_upload_csv(api, filepath_to_csv, provenance_id, import_name, comm
 
             log.info(f"Uploading '{filepath_to_csv.name}' to the '{event_file_upload_endpoint}' endpoint...")
             
-            # 5. Call the post_multipart method
-            response = api.post_files(  
-                endpoint=event_file_upload_endpoint,
-                files=files_payload,
-                params=params
-            )
+            try:
+                response = api.post_files(
+                    endpoint=event_file_upload_endpoint,
+                    files=files_payload,
+                    params=params
+                )
+            except Exception as e:
+                log.error(f"An error occurred during the upload: {e}")
+                return
+        
+
 
             log.info("\n--- API Response ---")
             if response:
