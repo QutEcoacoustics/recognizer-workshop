@@ -1,7 +1,7 @@
 import pandas as pd
 import panel as pn
 
-from recognizer_workshop.app.services.db_labels.db_labels import LabelCounts, DatabaseSummary
+from recognizer_workshop.app.services.db_labels.add_db_labels import LabelCounts, DatabaseSummary
 from recognizer_workshop.app.services.version import get_git_commit_short
 from recognizer_workshop.ui.panel.view_model import ViewModel
 

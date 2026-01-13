@@ -6,7 +6,7 @@ from recognizer_workshop.app.agile_engine import AgileConfig, agile_state
 
 from recognizer_workshop.app.agile_modeling_helpers import list_audio_files
 
-from recognizer_workshop.app.services.db_labels.db_labels import add_labels_to_db, labels_from_event_taggings
+from recognizer_workshop.app.services.db_labels.add_db_labels import add_labels_to_db, labels_from_event_taggings
 
 @pytest.mark.skip(reason="WIP: Full workflow test not complete")
 def test_full_workflow (db_with_path, working_folder, audio_files_folder):

@@ -9,7 +9,7 @@ from pathlib import Path
 from recognizer_workshop.app.agile_engine import agile_config, agile_state
 from recognizer_workshop.app.agile_modeling_helpers import list_audio_files
 
-from recognizer_workshop.app.services.db_labels.db_labels import add_labels_to_db, labels_from_event_taggings
+from recognizer_workshop.app.services.db_labels.add_db_labels import add_labels_to_db, labels_from_event_taggings
 
 find_dotenv = dotenv.find_dotenv
 load_dotenv = dotenv.load_dotenv

@@ -69,6 +69,15 @@ class baw_api:
         self.update_token(token, allow_prompt=allow_prompt, anonymous=anonymous)
 
 
+    def enable_tag_cache(self, cache_file="tags_cache.json"):
+        """
+        Initializes the TagCache and attaches it to this client.
+        We import inside the method to avoid circular top-level imports.
+        """
+        from baw_helpers.tag_cache import TagCache
+        self.tags = TagCache(self, cache_file=cache_file)
+
+
     def _get_session(self) -> requests.Session:
         """Returns the session for the current thread, creating it if necessary."""
         s = getattr(self._tls, "session", None)

@@ -241,11 +241,10 @@ def get_events_for_sites_old(baw_api, filter_params, tags=None):
 
 
 def get_events_for_sites(baw_api, filter_params, tags=None):
-    """Get any audio recordings that have events for a specific region.
-    region_index is the index of the region in the regions list.
-    @param num: maximum number of audio recordings to get.
-
-    This we can only use site_ids, so we need to get those if project or region ids are provided.
+    """
+    Get audio_events for the filter_params provided.
+    If tags is provided, only get events with those tags.
+    Include verification summary. 
     """
     
     ae_filter = filter_params.copy()
@@ -255,11 +254,36 @@ def get_events_for_sites(baw_api, filter_params, tags=None):
             tags = [tags]
         ae_filter['tags.text'] = { "in": tags }
 
+    ae_filter["projection"] = {
+            "only": [
+                "id",
+                "audio_recording_id",
+                "start_time_seconds",
+                "end_time_seconds",
+                "provenance_id",
+                "score",
+                "taggings"
+            ],
+            "add": [
+                "verification_summary"
+            ]
+        }
+
     response = baw_api.post("/audio_events/filter?disable_paging=true", data={"filter": ae_filter})
     # maybe site by site? or if not then paging, but that is complicated
 
+    events =  response.get("data", [])
 
-    return response.get("data", [])
+    tag_ids = list(set([tagging['tag_id'] for event in events for tagging in event.get('taggings', [])]))
+
+    tags = baw_api.tags.get_by_ids(tag_ids)
+
+    for event in events:
+        for tagging in event.get('taggings', []):
+            tagging['tag'] = tags.get(tagging['tag_id'], None)
+
+    return events
+
 
 
 

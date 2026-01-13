@@ -24,7 +24,7 @@ from recognizer_workshop.app.agile_modeling_helpers import list_audio_files
 import baw_helpers.baw_utils as baw_utils
 from baw_helpers.baw_api import baw_api
 
-from recognizer_workshop.app.services.db_labels.db_labels import db_summary as _db_summary_print
+from recognizer_workshop.app.services.db_labels.add_db_labels import db_summary as _db_summary_print
 from recognizer_workshop.app.services.inference.inference import run_inference as _run_inference
 
 

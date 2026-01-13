@@ -4,7 +4,7 @@ import json
 import pandas as pd
 import panel as pn
 
-from recognizer_workshop.app.services.db_labels.db_labels import add_labels_to_db
+from recognizer_workshop.app.services.db_labels.add_db_labels import add_labels_to_db
 
 def build(vm):
 
@@ -123,7 +123,7 @@ def build(vm):
         return ' + '.join(filter_parts) if filter_parts else fallback_name
 
 
-    def _create_summary_table(result_sets):
+    def _create_fetch_summary_table(result_sets):
         """Create a summary table from the fetched results."""
         if not result_sets:
             return None
@@ -162,7 +162,7 @@ def build(vm):
         return df
 
 
-    def _create_outcomes_table(outcomes_by_filter):
+    def _create_outcomes_summary_table(outcomes_by_filter):
         """Create a table showing the outcomes of adding labels to the database."""
         if not outcomes_by_filter:
             return None
@@ -222,61 +222,7 @@ def build(vm):
         return df
 
 
-    def _create_details_table(filter_desc, species, label_type, outcome_type):
-        """Create a detailed table showing source/offset for a specific outcome."""
-        if not stash["outcomes"]:
-            return None
-            
-        rows = []
-        
-        # Process all filter data
-        for filter_data in stash["outcomes"]:
-            # If filter_desc is specified, only show data for that filter
-            if filter_desc and filter_data['filter_desc'] != filter_desc:
-                continue
-                
-            outcomes = filter_data['outcomes']
-            current_filter_desc = filter_data['filter_desc']
-            
-            # Process each source's outcomes
-            for source_id, labels_data in outcomes.items():
-                for label_str, type_data in labels_data.items():
-                    # If species is specified, only show data for that species
-                    if species and label_str != species:
-                        continue
-                        
-                    for label_type_str, outcome_list in type_data.items():
-                        current_label_type = 'Positive' if label_type_str == 'pos' else 'Negative'
-                        
-                        # If label_type is specified, only show data for that type
-                        if label_type and current_label_type != label_type:
-                            continue
-                        
-                        for outcome_item in outcome_list:
-                            current_outcome = outcome_item.get('outcome', 'error')
-                            
-                            # If outcome_type is specified, only show data for that outcome
-                            if outcome_type and current_outcome != outcome_type:
-                                continue
-                                
-                            rows.append({
-                                'Filter': current_filter_desc,
-                                'Species': label_str,
-                                'Type': current_label_type,
-                                'Source': source_id,
-                                'Offset': outcome_item.get('offset', 'N/A'),
-                                'Outcome': current_outcome
-                            })
-        
-        if rows:
-            df = pd.DataFrame(rows)
-            df = df.reset_index(drop=True)
-            return df
-        else:
-            return None
-
-
-    def _create_all_details_table(outcomes_by_filter):
+    def _create_outcomes_details_table(outcomes_by_filter):
         """Create a comprehensive table showing ALL outcome details."""
         if not outcomes_by_filter:
             return None
@@ -386,7 +332,7 @@ def build(vm):
             stash["result_sets"] = result
             
             # Create and display summary table
-            summary_df = _create_summary_table(result)
+            summary_df = _create_fetch_summary_table(result)
             if summary_df is not None:
                 # Configure the DataFrame to not show index
                 summary_table.object = summary_df.style.hide(axis='index')
@@ -406,47 +352,43 @@ def build(vm):
         if not vm.eng: return vm.notify("Initialize first.", "error")
         if not stash["result_sets"]: return vm.notify("Fetch labels first.", "warn")
 
-        all_outcomes_by_filter = []
+        try:
+            outcomes_list = vm.eng.commit_labels(stash["result_sets"])
 
-        vm.eng.add_labeled_embeddings_if_missing(stash["result_sets"])
-        
-        for i, result_set in enumerate(stash["result_sets"]):
-            try:
-                outcomes = add_labels_to_db(vm.eng.db, vm.eng.config, result_set["labels"])
-                
-                # Store outcomes with filter context
-                filter_params = result_set.get('filter_params', {})
-                filter_desc = _format_filter_params_for_display(filter_params, f"Filter {i+1}")
-                
-                all_outcomes_by_filter.append({
-                    'filter_desc': filter_desc,
-                    'filter_params': filter_params,
-                    'outcomes': outcomes
-                })
-                        
-                vm.notify("Labels added to DB.", "success")
-            except Exception as e:
-                vm.notify(f"Insert failed: {e}", "error")
-                return
-        
-        # Store outcomes and create tables
-        stash["outcomes"] = all_outcomes_by_filter
-        outcomes_df = _create_outcomes_table(all_outcomes_by_filter)
-        if outcomes_df is not None:
-            outcomes_table.object = outcomes_df.style.hide(axis='index')
+            # Show the results as a table with the outcome of adding each label
+            # each item in the outcomes list corresponds to a result_set, which corresponds to an audio recording filter. 
+            # we display the filter in a human-readable way
+            for i, item in enumerate(outcomes_list):
+                item['filter_desc'] = _format_filter_params_for_display(
+                    item['filter_params'], 
+                    fallback_name=f"Filter {i+1}"
+                )                
+
+            stash["outcomes"] = outcomes_list
+            outcomes_df = _create_outcomes_summary_table(outcomes_list)
             
-            # Create and show the comprehensive details table
-            details_df = _create_all_details_table(all_outcomes_by_filter)
-            if details_df is not None:
-                details_table.value = details_df
-                details_title.object = f"### All Outcome Details ({len(details_df)} records)"
+            if outcomes_df is not None:
+                outcomes_table.object = outcomes_df.style.hide(axis='index')
+                details_df = _create_outcomes_details_table(outcomes_list)
+                if details_df is not None:
+                    details_table.value = details_df
+                    details_title.object = f"### All Outcome Details ({len(details_df)} records)"
+                else:
+                    details_table.value = pd.DataFrame(columns=['Filter', 'Species', 'Type', 'Source', 'Offset', 'Outcome'])
+                    details_title.object = "### No outcome details available"
             else:
+                outcomes_table.object = pd.DataFrame()  # Use empty DataFrame instead of None
                 details_table.value = pd.DataFrame(columns=['Filter', 'Species', 'Type', 'Source', 'Offset', 'Outcome'])
-                details_title.object = "### No outcome details available"
-        else:
-            outcomes_table.object = pd.DataFrame()  # Use empty DataFrame instead of None
-            details_table.value = pd.DataFrame(columns=['Filter', 'Species', 'Type', 'Source', 'Offset', 'Outcome'])
-            details_title.object = ""
+                details_title.object = ""
+
+                    
+            vm.notify("Labels added to DB.", "success")
+        except Exception as e:
+            vm.notify(f"Insert failed: {e}", "error")
+            return
+        
+
+
 
 
     btn_edit.on_click(_toggle_to_edit_view)
