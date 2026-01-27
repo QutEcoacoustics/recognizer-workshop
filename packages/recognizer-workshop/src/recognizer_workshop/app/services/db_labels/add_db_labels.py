@@ -18,6 +18,9 @@ from recognizer_workshop.app.create_database.create_database import add_parquet_
 
 log = logging.getLogger(__name__)
 
+
+
+
 def add_labeled_audio_examples(
         db,
         source_folder, 
@@ -66,6 +69,26 @@ def add_embedding_to_db(db, dataset_name, embedding, source, label, annotator_id
 
 
 
+def build_parquet_source_list(items):
+    """
+    Transforms the items dict into the list format needed for parquet download.
+    """
+    parquet_source_list = []
+    for source_url, labels_data in items.items():
+        needed_offsets = set()
+        for _label_str, type_data in labels_data.items():
+            for _label_type_str, offsets in type_data.items():
+                needed_offsets.update(offsets)
+        
+        if needed_offsets:
+            parquet_source_list.append({
+                'source_url': source_url,
+                'offsets': list(needed_offsets)
+            })
+    return parquet_source_list
+
+
+
 def ensure_embeddings_exist(db, config, items, api_client):
     """
     Scans the items dict to find all required offsets for each source.
@@ -74,19 +97,7 @@ def ensure_embeddings_exist(db, config, items, api_client):
     if not api_client:
         return
 
-    parquet_source_list = []
-
-    for source_url, labels_data in items.items():
-
-        needed_offsets = set()
-        for label_str, type_data in labels_data.items():
-            for label_type_str, offsets in type_data.items():
-                needed_offsets.update(offsets)
-        
-        parquet_source_list.append({
-            'source_url': source_url,
-            'offsets': list(needed_offsets)
-        })
+    parquet_source_list = build_parquet_source_list(items)
 
     if not parquet_source_list:
         return

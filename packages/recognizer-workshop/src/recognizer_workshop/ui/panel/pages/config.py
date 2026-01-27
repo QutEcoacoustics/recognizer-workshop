@@ -7,7 +7,7 @@ import panel as pn
 
 from recognizer_workshop.app.agile_engine import AgileConfig
 from recognizer_workshop.app.agile_engine import agile_state
-from recognizer_workshop.app.agile_engine import get_recent_files
+from recognizer_workshop.app.services.app_data import get_recent_files
 from recognizer_workshop.ui.panel.utils.delayed_init import run_after_render
 
 log = logging.getLogger(__name__)

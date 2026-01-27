@@ -128,11 +128,13 @@ class PanelUI(param.Parameterized):
             description = eng.get_target_label_description()
             current_labels_display.object = f"**Summary:** {description}" if description else "*(No labels defined)*"
 
-        def _remove_label(label_to_remove, event):
-            if label_to_remove in eng.config.target_labels:
-                eng.config.target_labels.remove(label_to_remove)
+
+        def _remove_label(index, event):  
+            if 0 <= index < len(eng.config.target_labels):
+                eng.config.target_labels.pop(index)  
                 _build_labels_ui()
                 sync_and_update_display()
+
 
         def _build_labels_ui():
             labels_container.clear()
@@ -156,12 +158,22 @@ class PanelUI(param.Parameterized):
                 remove_btn = pn.widgets.Button(name="Remove", icon="trash", button_type="danger")
                 remove_btn.on_click(partial(_remove_label, label))
 
-                def _update_species(event, target_label=label):
-                    target_label.species = event.new
+                def _update_species(event, index=i):
+                    # Replace the LabelName instance instead of mutating it
+                    old_label = eng.config.target_labels[index]
+                    eng.config.target_labels[index] = LabelName(
+                        species=event.new,
+                        call_type=old_label.call_type
+                    )
                     sync_and_update_display()
 
-                def _update_call_type(event, target_label=label):
-                    target_label.call_type = event.new.strip() or None
+                def _update_call_type(event, index=i):
+                    # Replace the LabelName instance instead of mutating it
+                    old_label = eng.config.target_labels[index]
+                    eng.config.target_labels[index] = LabelName(
+                        species=old_label.species,
+                        call_type=event.new.strip() or None
+                    )
                     sync_and_update_display()
 
                 species_widget.param.watch(_update_species, 'value')

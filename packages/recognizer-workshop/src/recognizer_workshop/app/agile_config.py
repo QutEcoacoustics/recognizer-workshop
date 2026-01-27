@@ -10,10 +10,10 @@ from typing import Dict, Any, List
 import logging
 from recognizer_workshop.app.services.db_labels.dataclasses import LabelName
 
+from recognizer_workshop.app.services.app_data import add_to_recent_files
+
 log = logging.getLogger(__name__)
 
-_APP_DATA_FILE = Path.home() / ".recognizer_workshop_data.json"
-_MAX_RECENT_FILES = 10
 
 
 @dataclasses.dataclass
@@ -43,9 +43,6 @@ class AgileConfig:
 
     # Path to the current config file after a load or save_as, not part of the JSON serialization.
     config_path: Path | None = dataclasses.field(default=None, init=False, repr=False)
-
-    _APP_DATA_FILE = Path.home() / ".recognizer_workshop_data.json"
-    _MAX_RECENT_FILES = 10
     
     # List of fields that should be treated as paths
     _PATH_FIELDS: dataclasses.InitVar[List[str]] = [
@@ -102,7 +99,7 @@ class AgileConfig:
     def save_as(self, path):
         self.config_path = Path(path).resolve()
         self._to_json(self.config_path)
-        _add_to_recent_files(self.config_path)
+        add_to_recent_files(self.config_path)
         log.info(f"Configuration saved to new location: {self.config_path}")
 
     def __str__(self) -> str:
@@ -131,7 +128,7 @@ class AgileConfig:
 
         instance = cls.from_json(load_path)
         instance.config_path = load_path
-        _add_to_recent_files(load_path)
+        add_to_recent_files(load_path)
         return instance
 
 
@@ -231,4 +228,5 @@ class AgileConfig:
         with open(config_path, 'w') as f:
             json.dump(data_to_save, f, indent=4)
         log.info(f"Configuration saved to: {config_path}")
+
 

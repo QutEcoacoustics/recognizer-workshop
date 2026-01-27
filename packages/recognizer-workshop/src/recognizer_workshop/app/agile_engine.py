@@ -25,7 +25,9 @@ from baw_helpers.baw_api import baw_api
 
 from recognizer_workshop.app.agile_config import AgileConfig
 from recognizer_workshop.app.services.events.upload_detections import upload_detections
-from recognizer_workshop.app.services.db_labels.add_db_labels import get_db_summary, get_label_counts, labels_from_event_taggings, add_labels_to_db
+from recognizer_workshop.app.services.db_labels.fetch_baw_labels import labels_from_event_taggings
+from recognizer_workshop.app.services.db_labels.add_db_labels import add_labels_to_db
+from recognizer_workshop.app.services.db_labels.db_labels_info import get_db_summary, get_label_counts
 from recognizer_workshop.app.services.db_labels.dataclasses import LabelName
 from recognizer_workshop.app.services.inference.inference import run_inference as inference_service_run_inference
 
@@ -754,40 +756,8 @@ class agile_state:
 
 
 
-# private module functions for saving/loading app data
-
-def _get_app_data_file() -> Path:
-    """Returns the path to the central app data file."""
-    return AgileConfig._APP_DATA_FILE
-
-def _read_app_data() -> dict:
-    """Reads the central app data file."""
-    if _get_app_data_file().exists():
-        with open(_get_app_data_file(), 'r') as f:
-            try:
-                return json.load(f)
-            except json.JSONDecodeError:
-                return {}
-    return {}
-
-def _write_app_data(data: dict):
-    """Writes to the central app data file."""
-    with open(_get_app_data_file(), 'w') as f:
-        json.dump(data, f, indent=4)
 
 
-def _add_to_recent_files(path: Path):
-    """Adds a file path to the top of the recent files list."""
-    data = _read_app_data()
-    recent_files = data.get("recent_files", [])
-    str_path = str(path)
-    if str_path in recent_files:
-        recent_files.remove(str_path)
-    recent_files.insert(0, str_path)
-    data["recent_files"] = recent_files[:AgileConfig._MAX_RECENT_FILES]
-    _write_app_data(data)
 
 
-def get_recent_files(num: int = AgileConfig._MAX_RECENT_FILES) -> list[str]:
-    data = _read_app_data()
-    return data.get("recent_files", [])[:num]
+

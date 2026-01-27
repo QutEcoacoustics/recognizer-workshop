@@ -4,7 +4,9 @@ import pytest
 
 # Import the classes from your file
 # Make sure this import path is correct for your project structure
-from recognizer_workshop.app.agile_engine import AgileConfig, LabelName, get_recent_files, _write_app_data, _APP_DATA_FILE
+from recognizer_workshop.app.agile_config import AgileConfig
+from recognizer_workshop.app.services.db_labels.dataclasses import LabelName 
+from recognizer_workshop.app.services.app_data import get_recent_files
 
 
 @pytest.fixture(autouse=True)
@@ -15,7 +17,7 @@ def mock_app_data_file(monkeypatch, tmp_path):
     """
     temp_app_data_file = tmp_path / ".test_app_data.json"
     monkeypatch.setattr(
-        "recognizer_workshop.app.agile_engine._get_app_data_file",
+        "recognizer_workshop.app.services.app_data.get_app_data_file",
         lambda: temp_app_data_file
     )
     return temp_app_data_file
@@ -119,7 +121,7 @@ class TestAgileConfig:
         
         temp_app_data_file = tmp_path / ".test_app_data.json"
         monkeypatch.setattr(
-            "recognizer_workshop.app.agile_engine._get_app_data_file",
+            "recognizer_workshop.app.services.app_data.get_app_data_file",
             lambda: temp_app_data_file
         )
         
