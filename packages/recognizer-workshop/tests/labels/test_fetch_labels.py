@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 from recognizer_workshop.app.services.db_labels import fetch_baw_labels as target_module
 
 # Import the REAL dataclass
-from recognizer_workshop.app.services.db_labels.dataclasses import LabelName, TargetNegatives, PropositionType, LabelProposition
+from recognizer_workshop.app.services.db_labels.dataclasses import LabelName, TargetNegatives, PropositionType, LabelProposition, EventSegment
 
 # --- Fixtures & Mocks ---
 
@@ -98,34 +98,54 @@ def test_resolve_conflicts_and_format():
     """Test the resolution logic and formatting of label propositions."""
     target_label = LabelName("Magpie", "song")
     target_label_str = str(target_label)
+    
+    # shorthands
+    vpos = PropositionType.VERIFIED_POS
+    vneg = PropositionType.VERIFIED_NEG
+    ineg = PropositionType.IMPLIED_NEG
 
+    def make_prop(ptype, start, end):
 
+        es = EventSegment(
+            segment_start=0.0,
+            segment_end=5.0,
+            start=start,
+            end=end,
+            event_start=0.0,
+            event_end=5.0
+        )
+
+        return LabelProposition(
+            label=target_label,
+            proposition_type=ptype,
+            event_segment=es
+        )
 
     items = {
         'source_1': {
             10.0: {
-                target_label_str: [LabelProposition(target_label, PropositionType.VERIFIED_NEG, 0.1, 0.9), 
-                                   LabelProposition(target_label, PropositionType.VERIFIED_POS, 2.1, 2.9)] # pos wins
+                target_label_str: [make_prop(vneg, 0.1, 0.9), 
+                                   make_prop(vpos, 2.1, 2.9)] # pos wins
             },
             20.0: {
-                target_label_str: [LabelProposition(target_label, PropositionType.VERIFIED_NEG, 0.1, 3.9), 
-                                   LabelProposition(target_label, PropositionType.VERIFIED_POS, 2.1, 2.9)] # neg fully covers small pos -> Neg
+                target_label_str: [make_prop(vneg, 0.1, 3.9), 
+                                   make_prop(vpos, 2.1, 2.9)] # neg fully covers small pos -> Neg
             },
             25.0: {
-                target_label_str: [LabelProposition(target_label, PropositionType.VERIFIED_NEG, 0.1, 3.9), 
-                                   LabelProposition(target_label, PropositionType.VERIFIED_POS, 2.1, 2.9)] # invalid neg fully covers large pos -> discarded
+                target_label_str: [make_prop(vneg, 0.1, 3.9), 
+                                   make_prop(vpos, 2.1, 2.9)] # invalid neg fully covers large pos -> discarded
             },
             30.0: {
-                target_label_str: [LabelProposition(target_label, PropositionType.VERIFIED_POS, 0.1, 3.9), 
-                                   LabelProposition(target_label, PropositionType.VERIFIED_NEG, 2.1, 2.9)] # pos fully covers neg -> pos wins
+                target_label_str: [make_prop(vpos, 0.1, 3.9), 
+                                   make_prop(vneg, 2.1, 2.9)] # pos fully covers neg -> pos wins
             },
             40.0: {
-                target_label_str: [LabelProposition(target_label, PropositionType.IMPLIED_NEG, 0.1, 3.9), 
-                                   LabelProposition(target_label, PropositionType.VERIFIED_POS, 2.1, 2.9)] # implied neg fully covers pos -> pos wins
+                target_label_str: [make_prop(ineg, 0.1, 3.9), 
+                                   make_prop(vpos, 2.1, 2.9)] # implied neg fully covers pos -> pos wins
             },
             50.0: {
-                target_label_str: [LabelProposition(target_label, PropositionType.VERIFIED_NEG, 0.1, 3.9), 
-                                   LabelProposition(target_label, PropositionType.IMPLIED_NEG, 2.1, 2.9)] # verified neg + implied neg -> neg wins
+                target_label_str: [make_prop(vneg, 0.1, 3.9), 
+                                   make_prop(ineg, 2.1, 2.9)] # verified neg + implied neg -> neg wins
             }
         }
     }
@@ -147,18 +167,54 @@ NEG = PropositionType.VERIFIED_NEG
 IMP = PropositionType.IMPLIED_NEG
 TARGET = LabelName("Magpie", "song")
 
-def p(prop_type, start, end, event_cover=1.0):
+
+def p(prop_type, start=0.0, end=5.0, event_start=None, event_end=None):
     """
-    Helper to create propositions. 
-    Defaults to event_cover=1.0 per your update.
+    Creates a valid LabelProposition and EventSegment, given derived inputs
+    
+    Args:
+        start: Relative start within the 5s segment (0.0 to 5.0)
+        end: Relative end within the 5s segment (0.0 to 5.0)
+        event_start: start of event relative to the start of the segment (not valid if start > 0.0). Must be negative. 
+        event_end: end of the event, relative to the start of the segment (not valid if end < 5.0)
     """
+    # arbitrary relative to start of file
+    SEGMENT_BASE = 100.0
+    segment_start = SEGMENT_BASE
+    segment_end = SEGMENT_BASE + 5.0
+    
+    event_segment_start = SEGMENT_BASE + start
+    event_segment_end = SEGMENT_BASE + end
+    
+    if event_start is None:
+        event_start_abs = event_segment_start
+    elif event_start < 0 and start == 0.0:
+        event_start_abs = SEGMENT_BASE + event_start
+    else:
+        raise ValueError("incompatible event_start {} for given segment start {}".format(event_start, start))
+    
+    if event_end is None:
+        event_end_rel = event_segment_end
+    elif event_end > end and end == 5.0:
+        event_end_rel = SEGMENT_BASE + event_end
+    else:
+        raise ValueError("incompatible event_end {} for given segment end {}".format(event_end, end))
+    
+    es = EventSegment(
+        segment_start=segment_start,
+        segment_end=segment_end,
+        start=event_segment_start,
+        end=event_segment_end,
+        event_start=event_start_abs,
+        event_end=event_end_rel
+    )
+
     return LabelProposition(
         label=TARGET,
         proposition_type=prop_type,
-        local_start=start,
-        local_end=end,
-        event_cover=event_cover
+        event_segment=es
     )
+
 
 @pytest.mark.parametrize("scenario, propositions, expected", [
     (
@@ -244,25 +300,50 @@ def test_resolve_conflicts_small_events(scenario, propositions, expected):
 
 @pytest.mark.parametrize("scenario, propositions, expected", [
     (
-        "Case 1: Pos Crumb (0.1 cover) vs Disjoint Neg",
+        "Case 1: Pos Crumb 1 sec of a 13 sec event vs Disjoint Neg",
         [
-            p(POS, 0.0, 1.0, event_cover=0.1), # Score: 1.0s * 10 slots * 0.1 = 1.0
+            p(POS, 0.0, 1.0, event_start=-12.0),
             p(NEG, 2.0, 3.0)
         ],
-        None # EXPECTED: Discard. Score (1.0) < Threshold (2.0).
+        "positive" # 1 second is enough to pass the positive threshold
     ),
     (
-        "Case 2: Tiny Pos Crumb (0.05 cover)",
+        "Case 2: Small Pos Crumb + Large Neg",
         [
-            p(POS, 0.0, 1.0, event_cover=0.05), # Score: 0.5
-            p(NEG, 2.0, 3.0)
+            p(POS, 0.0, 1.0, event_start=-19.0), 
+            p(NEG, 1.0, 5.0)
         ],
-        None # EXPECTED: Discard. Score (0.5) < Threshold (2.0).
+        # although it's still 1 second, the fact that the event is longer 
+        # gives less trust to the final 1 second. The 4 second negative is still ignored due to 
+        # the ambiguous positive signal.
+        None 
+    ),
+    (
+        "Case 2.1: Tiny Pos Crumb + large neg)",
+        [
+            p(POS, 0.0, 0.4, event_start=-19.0), 
+            p(NEG, 1.0, 5.0)
+        ],
+        # The tiny crumb is not enough to pass positive threshold
+        # and is also not enough to veto the large negative. The negative is big enough to 
+        # consider the segment negative. 
+        "negative" 
+    ),
+    (
+        "Case 2.2: Tiny Pos + large neg)",
+        [
+            p(POS, 0.0, 0.4, event_start=-2.0), 
+            p(NEG, 1.0, 5.0)
+        ],
+        # The tiny crumb is the tail end of a short event. 
+        # not quite enough to pass the positive threshold, but enough to 
+        # veto the large negative
+        None 
     ),
     (
         "Case 3: Pos Crumb fully covered by Large Neg",
         [
-            p(POS, 0.0, 0.5, event_cover=0.2), # Weight 0.2
+            p(POS, 0.0, 0.5, event_start=-1.9), # Weight 0.2
             p(NEG, 0.0, 5.0)                   # Weight 1.0 (Dominates)
         ],
         "negative" 
@@ -275,7 +356,7 @@ def test_resolve_conflicts_small_events(scenario, propositions, expected):
     (
         "Case 3.2: Pos Crumb fully covered by Large Neg",
         [
-            p(POS, 0.0, 1.0, event_cover=0.2), # Weight 0.2
+            p(POS, 0.0, 1.0, event_start=-4.0), # Weight 0.2
             p(NEG, 0.0, 5.0)                   # Weight 1.0
         ],
         None
@@ -286,7 +367,7 @@ def test_resolve_conflicts_small_events(scenario, propositions, expected):
     (
         "Case 4: Pos Crumb covered by Medium Neg",
         [
-            p(POS, 0.0, 0.5, event_cover=0.2), 
+            p(POS, 0.0, 0.5, event_start=-2.0), 
             p(NEG, 0.0, 3.5) # 3.5s duration
         ],
         "negative" 
@@ -431,7 +512,7 @@ def full_flow_results(mock_api):
     
     (30.0, 'neg', "From Event 2 only"),
     
-    (35.0, 'pos', "From Event 4 (overlap with neg Event 2 and implied neg resolves to pos)"),
+    (35.0, None, "Event 4 (pos) overlaps too much with Event 2 (neg) -> Discarded"),
     
     (40.0, 'pos', "From Event 4: Implied Neg (Ev 5) doesn't block Verified Pos"),
     

@@ -3,7 +3,7 @@ import re
 
 from typing import Any, Dict, List
 from collections import UserDict
-
+from dataclasses import field
 
 
 
@@ -61,24 +61,79 @@ class LabelName:
             "species": self.species,
             "call_type": self.call_type
         }
+    
+
         
 @dataclasses.dataclass
-class LabelProposition:
-    """A data structure to hold a label proposition for a specific label on a specific segment."""
-    label: LabelName
-    proposition_type: str 
-    local_start: float = None
-    local_end: float = None
-    event_cover: float = 0.0
- # e.g. 'verified_positive', 'verified_negative', 'implied_negative'
+class EventSegment:
+    """A data structure to hold a segment of an event."""
 
-    def __post_init__(self):
-        # Runtime Validation
-        if not PropositionType.is_valid(self.proposition_type):
-            raise ValueError(
-                f"Invalid proposition_type: '{self.proposition_type}'. "
-                f"Must be one of: {PropositionType._ALL}"
-            )
+    # absolute start and end times within the recording
+    # of the part of the segment that corresponds to the event
+    start: float
+    end: float
+
+    # absolute start and end times of the entire segment within the recording
+    segment_start: float
+    segment_end: float
+
+    # absolute start and end times of the entire event within the recording
+    event_start: float
+    event_end: float
+
+    @property
+    def start_offset_in_segment(self) -> float:
+        """Seconds from the start of the 5s window to the start of the sound."""
+        return self.start - self.segment_start
+    
+    @property
+    def end_offset_in_segment(self) -> float:
+        """Seconds from the start of the 5s window to the end of the sound."""
+        return self.end - self.segment_start
+    
+    @property
+    def start_offset_in_event(self) -> float:
+        """Seconds from the start of the original event to the start of this slice."""
+        return self.start - self.event_start
+
+    @property
+    def end_offset_in_event(self) -> float:
+        """Seconds from the start of the original event to the end of this slice."""
+        return self.end - self.event_start
+    
+    @property
+    def duration(self) -> float:
+        return self.end - self.start
+
+    @property
+    def event_duration(self) -> float:
+        return self.event_end - self.event_start
+
+    @property
+    def segment_duration(self) -> float:
+        return self.segment_end - self.segment_start
+
+    # --- Computed Scores ---
+
+    @property
+    def event_cover(self) -> float:
+        """What fraction of the TOTAL event is represented by this slice?"""
+        total = self.event_duration
+        if total <= 0: return 0.0
+        return self.duration / total
+
+    @property
+    def segment_cover(self) -> float:
+        """What fraction of the 5s window is filled by this sound?"""
+        seg_len = self.segment_duration
+        if seg_len <= 0: return 0.0
+        return self.duration / seg_len
+
+    @property
+    def cover_score(self) -> float:
+        """Combined score for filtering weak signals."""
+        return self.event_cover + self.segment_cover
+
 
 
 class PropositionType:
@@ -95,6 +150,14 @@ class PropositionType:
     @classmethod
     def is_valid(cls, value: str) -> bool:
         return value in cls._ALL
+
+
+@dataclasses.dataclass
+class LabelProposition:
+    """A data structure to hold a label proposition for an event segment."""
+    label: LabelName
+    event_segment: EventSegment
+    proposition_type: str  # e.g. 'verified_positive', 'verified_negative', 'implied_negative'
 
 
 class TargetNegatives(UserDict):
