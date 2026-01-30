@@ -84,14 +84,14 @@ def test_compile_label_propositions():
     ]
     
     # modifies events in place
-    target_module.compile_label_propositions(events[0], target_labels, target_negatives)
-    target_module.compile_label_propositions(events[1], target_labels, target_negatives)
-    target_module.compile_label_propositions(events[2], target_labels, target_negatives)
+    target_module.compile_label_proposition_types(events[0], target_labels, target_negatives)
+    target_module.compile_label_proposition_types(events[1], target_labels, target_negatives)
+    target_module.compile_label_proposition_types(events[2], target_labels, target_negatives)
     
     
-    assert events[0]['label_propositions'][target] == PropositionType.VERIFIED_POS
-    assert events[1]['label_propositions'][target] == PropositionType.VERIFIED_NEG
-    assert events[2]['label_propositions'][target] == PropositionType.IMPLIED_NEG
+    assert events[0]['label_proposition_types'][target] == PropositionType.VERIFIED_POS
+    assert events[1]['label_proposition_types'][target] == PropositionType.VERIFIED_NEG
+    assert events[2]['label_proposition_types'][target] == PropositionType.IMPLIED_NEG
 
 
 def test_resolve_conflicts_and_format():
@@ -104,15 +104,16 @@ def test_resolve_conflicts_and_format():
     vneg = PropositionType.VERIFIED_NEG
     ineg = PropositionType.IMPLIED_NEG
 
-    def make_prop(ptype, start, end):
+    def make_prop(ptype, start, end, segment_start=0.0):
+        """Helper to create a LabelProposition in the simple case where the entire event is inside the segment"""
 
         es = EventSegment(
-            segment_start=0.0,
-            segment_end=5.0,
-            start=start,
-            end=end,
-            event_start=0.0,
-            event_end=5.0
+            segment_start=segment_start,
+            segment_end=segment_start + 5.0,
+            start=segment_start + start,
+            end=segment_start + end,
+            event_start=segment_start + start,
+            event_end=segment_start + end
         )
 
         return LabelProposition(
@@ -124,28 +125,28 @@ def test_resolve_conflicts_and_format():
     items = {
         'source_1': {
             10.0: {
-                target_label_str: [make_prop(vneg, 0.1, 0.9), 
-                                   make_prop(vpos, 2.1, 2.9)] # pos wins
+                target_label_str: [make_prop(vneg, 0.1, 0.9, 10.0), 
+                                   make_prop(vpos, 2.1, 2.9, 10.0)] # non overlapping pos + neg -> Pos
             },
             20.0: {
-                target_label_str: [make_prop(vneg, 0.1, 3.9), 
-                                   make_prop(vpos, 2.1, 2.9)] # neg fully covers small pos -> Neg
+                target_label_str: [make_prop(vneg, 0.1, 4.3, 20.0), 
+                                   make_prop(vpos, 2.1, 2.2, 20.0)] # large neg fully covers tiny pos -> Neg
             },
             25.0: {
-                target_label_str: [make_prop(vneg, 0.1, 3.9), 
-                                   make_prop(vpos, 2.1, 2.9)] # invalid neg fully covers large pos -> discarded
+                target_label_str: [make_prop(vneg, 0.1, 4.3, 25.0), 
+                                   make_prop(vpos, 2.1, 2.9, 25.0)] # large neg fully covers small pos -> discarded
             },
             30.0: {
-                target_label_str: [make_prop(vpos, 0.1, 3.9), 
-                                   make_prop(vneg, 2.1, 2.9)] # pos fully covers neg -> pos wins
+                target_label_str: [make_prop(vpos, 0.1, 3.9, 30.0), 
+                                   make_prop(vneg, 3.7, 4.9, 30.0)] # very small overlap of pos and neg -> Pos wins
             },
             40.0: {
-                target_label_str: [make_prop(ineg, 0.1, 3.9), 
-                                   make_prop(vpos, 2.1, 2.9)] # implied neg fully covers pos -> pos wins
+                target_label_str: [make_prop(ineg, 0.1, 4.9, 40.0), 
+                                   make_prop(vpos, 2.1, 2.9, 40.0)] # large implied neg fully covers pos -> pos wins
             },
             50.0: {
-                target_label_str: [make_prop(vneg, 0.1, 3.9), 
-                                   make_prop(ineg, 2.1, 2.9)] # verified neg + implied neg -> neg wins
+                target_label_str: [make_prop(vneg, 0.1, 3.9, 50.0), 
+                                   make_prop(ineg, 2.1, 2.9, 50.0)] # verified neg + implied neg -> neg wins
             }
         }
     }
@@ -153,10 +154,10 @@ def test_resolve_conflicts_and_format():
     inserted, counts = target_module.resolve_conflicts_and_format(items)
     
     assert inserted['source_1'][target_label_str]['pos'] == [10.0, 30.0, 40.0]
-    assert inserted['source_1'][target_label_str]['neg'] == [50.0]
+    assert inserted['source_1'][target_label_str]['neg'] == [20.0, 50.0]
     
     assert counts[target_label_str]['positive'] == 3
-    assert counts[target_label_str]['negative'] == 1
+    assert counts[target_label_str]['negative'] == 2
 
 
 
@@ -237,7 +238,7 @@ def p(prop_type, start=0.0, end=5.0, event_start=None, event_end=None):
         "Case 3: Verified Pos fully covers Verified Neg and exceeds max conflict ->  Discarded ",
         [
             p(POS, 0.0, 3.0),
-            p(NEG, 1.0, 1.6)
+            p(NEG, 1.0, 1.61)
         ],
         None # Pos has 2.0s clear signal vs 1.0s conflict. This is too much conflict and is discarded
     ),
@@ -546,8 +547,8 @@ def test_integration_counts(full_flow_results):
     """
     _, counts = full_flow_results
     
-    # Expected Positives: 10.0, 15.0, 35.0, 40.0
-    assert counts['positive'] == 4, f"Expected 4 positives, got {counts['positive']}"
+    # Expected Positives: 10.0, 15.0, 40.0
+    assert counts['positive'] == 3, f"Expected 4 positives, got {counts['positive']}"
     
     # Expected Negatives: 20.0, 30.0, 45.0
     assert counts['negative'] == 3, f"Expected 3 negatives, got {counts['negative']}"

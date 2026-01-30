@@ -1,41 +1,49 @@
-import copy
-from pathlib import Path
+"""Module for obtaining labeled segments from BAW event taggings and verifications.
+
+Pipeline steps:
+1.  Data Retrieval: Fetches events and verification data from the BAW API 
+    (`get_events_with_verifications_and_tags`).
+2.  Classifies events as Verified Positive, Verified  Negative, or Implied Negative 
+    (using confusing species) (`compile_label_proposition_types`).
+3.  Segmentation: Splits variable-length events into fixed 5-second "EventSegments" 
+    (`get_event_segments`).
+4.  Reformatting: Converts from having a list of events, each containing a list of its EventSegments
+    to a list of unique segments, each containing a list of LabelPropositions (EventSegments + LabelPropositionType) that overlap it.  
+5.  Conflict Resolution: Determines the definitive label type for each label for each for each segment by 
+    weighing any positive and negative event segments inside (`resolve_conflicts`).
+6.  Formatting: Pivots the data from a time-centric view to a label-centric 
+    view required for database insertion (`resolve_conflicts_and_format`).
+"""
+
 import logging
 import numpy as np
-import dataclasses
-from typing import Any, Dict, List, Optional
-import re
-from collections import Counter
-from recognizer_workshop.app.agile_modeling_helpers import list_audio_files
-from perch_hoplite import audio_io
-from perch_hoplite.db import interface as hoplite_interface
+from typing import List, Dict
+
 from collections import UserDict
 from recognizer_workshop.app.services.db_labels.dataclasses import LabelName, LabelProposition, PropositionType, EventSegment
 
-from baw_helpers.baw_utils import extract_arid_and_domain
-
-from recognizer_workshop.app.services.db_labels.dataclasses import LabelCounts, DatabaseSummary
-from baw_helpers.baw_helpers import get_events_for_sites, get_verifications_for_sites
-from recognizer_workshop.app.agile_modeling_helpers import get_embeddings_by_source
-from recognizer_workshop.app.create_database.create_database import add_parquet_to_db
+from baw_helpers.baw_helpers import get_events_for_sites
 
 log = logging.getLogger(__name__)
 
 
-
 def labels_from_event_taggings(api, filter_params, target_labels: List[LabelName], target_negatives: UserDict):
-    """
-    For the given audio recording filter params
+    """Does the full process of fetching and compiling labels from BAW event taggings and verifications:
+
     - gets all events for the target labels
-    - TODO: gets events for specified negatives of target labels. (e.g. fairy wren gets confused for grasswren, so use all fairwren as negative examples for grasswren) 
+    - gets events for specified negatives of target labels. (e.g. fairy wren gets confused for grasswren, so use all fairwren as negative examples for grasswren) 
     - includes verification summaries for those events
     - determine the 5-second segments that each event covers
-    - consolodate them into sets of labels for each unique segment (overlapping events might have duplicate segments with different or conflicting labels)
-    @param api: BAW API client
-    @param filter_params: dict of filter params for which sites/projects/regions to get events for
-    @param target_labels: list of LabelName objects representing the target labels to get events for
-    @param target_negatives: dict of target label string -> list of negative label strings, to get events for those negative labels 
-    @return: dict of source -> label -> {pos: [offsets], neg: [offsets]}, and counts of positive and negative labels
+    - consolidate them into sets of labels for each unique segment (overlapping events might have duplicate segments with different or conflicting labels)
+
+    Args:
+        api: BAW API client
+        filter_params: dict of filter params for which sites/projects/regions to get events for
+        target_labels: list of LabelName objects representing the target labels to get events for
+        target_negatives: dict of target label string -> list of negative label strings, to get events for those negative labels
+
+    Returns:
+        dict of source -> label -> {pos: [offsets], neg: [offsets]}, and counts of positive and negative labels
     """
 
     # convert our target label objects to baw tags:
@@ -133,20 +141,29 @@ def labels_from_event_taggings(api, filter_params, target_labels: List[LabelName
     return resolve_conflicts_and_format(items)
                     
  
-
-
 def compile_label_proposition_types(event, target_labels: list[LabelName], target_negatives: UserDict[LabelName, list[LabelName]]):
-    """
-    For each target label assigns a label proposition type (e.g. VERIFIED_POS, VERIFIED_NEG, IMPLIED_NEG) for this event,
-    """
+    """Assigns label proposition types to the given event for each target label.
 
-    # there may be overlapping events, such as a "positive for grasswren" event overlapping with a "negative for grasswren" event
-    # or, conflicts between target-negatives and actual targets. E.g. "positive for target species grasswren" but "positive for non-target species fairywren, which is a negative example for grasswren"
-    # leading to contradictory labels for the same segment of the source. 
-    # let's compile a list of label propositions for each target label on this event, then later we can resolve conflicts when we consolodate segments across events.
-    # IMPLIED_NEG: negative label based on non-target positive tagging. 
-    # VERIFIED_POS: positive label based on target positive tagging or verification
-    # VERIFIED_NEG: negative label based on target negative verification
+    This function categorizes the event's relevance to the target species to help 
+    resolve downstream conflicts (e.g., when a "Positive" for a confusing species 
+    should be treated as a "Negative" for the target).
+
+    The resulting propositions are stored in the event dictionary:
+        * VERIFIED_POS: Explicit positive tag or verification for the target.
+        * VERIFIED_NEG: Explicit negative verification for the target.
+        * IMPLIED_NEG: Positive tag for a known "confusing species" (non-target) 
+          that serves as a negative example for the target.
+
+    Args:
+        event: The event dictionary to modify in-place.
+        target_labels: The list of target species to check against.
+        target_negatives: Mapping of target 
+            labels to their specific negative (confusing) species.
+
+    Modifies:
+        event: Adds a 'label_proposition_types' key mapping target labels to 
+        PropositionType enums.
+    """
 
     event['label_proposition_types'] = {}
     for target_label in target_labels:
@@ -167,14 +184,29 @@ def compile_label_proposition_types(event, target_labels: list[LabelName], targe
                     break
                     
  
+def resolve_conflicts_and_format(items: Dict[str, Dict[float, Dict[str, List[LabelProposition]]]]) -> tuple[dict, dict]:
+    """Resolves label conflicts and reshapes segments for database insertion.
 
-def resolve_conflicts_and_format(items):
+    items is a structured dict hierarchy assigning a list of LabelPropositions to each
+    label, for each 5-second segment of each source:
+    source -> offset -> label -> list[LabelProposition]
 
-    # we now have, for each 5sec seg of audio that overlapped with any of the events, for each target label a list of propositions (including empty lists) 
+    LabelProposition lists are resolved to a single label type   
 
-    # reshape into the format that is best for inserting into the hoplite database.
-    # also resolve conflicts (multiple prpopositions for the same label at the same offset of the same source) by priority
-    # i.e. instead of nesting labels under offsets, we nest offsets under labels.
+    It pivots the data structure from time-centric (source -> offset -> label) 
+    to label-centric (source -> label -> list of offsets) to facilitate database insertion.
+
+    Args:
+        items (dict): A nested dictionary of propositions structured as 
+            source -> offset -> label -> list[LabelProposition].
+
+    Returns:
+        tuple: A tuple containing:
+            - items_for_insert (dict): Formatted data structured as 
+              source -> label -> {'pos': [offsets], 'neg': [offsets]}.
+            - counts (dict): A summary of 'positive' and 'negative' counts 
+              per label.
+    """
     items_for_insert = {}
     counts = {}
     for source in items:
@@ -208,24 +240,15 @@ def resolve_conflicts_and_format(items):
 
 
 def should_use_negative_tag_for_target(target_label, target_negatives_tag_text, spec):
-    """
-    Given a specification of which tags to use as negatives for a given positive tags,
-    determine if the target is in the list.  
+    """Given a specification of which tags to use as negatives for a given positive tags, determine if the target is in the list."""
 
-    """
     if target_label not in spec:
         return False
     return target_negatives_tag_text in spec[target_label]
 
 
-
 def get_events_with_verifications_and_tags(api, filter_params, target_tags=None):
-    """
-    Get all events for the given filter params (site, project, region etc). 
-    We don't filter by tags here, because we want to get non-target events too, to use as negative examples.
-    Then get all verifications for those events, and attach them to the taggings. 
-    """
-
+    """Get all events for the given filter params (site, project, region etc), filtering by the specified tags."""
 
     if target_tags is None:
         target_tags = []
@@ -238,25 +261,22 @@ def get_events_with_verifications_and_tags(api, filter_params, target_tags=None)
     log.info(f"Found {len(events)} events for: {filter_params}")
 
     # we have a verification summary on the event, which is a list of verification counts for each tag id.
- 
     return events
 
 
+def get_event_segments(event: dict, segment_duration: int = 5) -> list[EventSegment]:
+    """Analyzes a single event and breaks it down into non-overlapping fixed-length segments.
 
-def get_event_segments(event: dict, segment_duration: int = 5) -> list[dict]:
-    """
-    Analyzes a single event and breaks it down into non-overlapping fixed-lengthsegments.
-
-    For each 5-second segment the event touches, it calculates the proportion
+    For each segment the event touches, it calculates the proportion
     of the segment covered by the event and the proportion of the event
     that lies within the segment (these can be used later to decide whether to apply the labels to the segment)
 
     Args:
-        event (dict): A dictionary with "start_time_seconds" and "end_time_seconds".
-        segment_duration (int): The duration of each segment in seconds.
+        event: A dictionary with "start_time_seconds" and "end_time_seconds".
+        segment_duration: The duration of each segment in seconds.
 
     Returns:
-        list[dict]: A list of dictionaries, each representing a covered segment.
+        A list of EventSegment objects, each representing a the intersection of an event and a segment
     """
     event_start = event["start_time_seconds"]
     event_end = event["end_time_seconds"]
@@ -297,26 +317,24 @@ def get_event_segments(event: dict, segment_duration: int = 5) -> list[dict]:
     return results
 
 
+def calculate_proposition_weights(event_segment: EventSegment, num_slots: int, slot_duration: float) -> tuple[int, int, np.ndarray]:
+    """Calculates the weights for an event segment based on its position within the event and the event's duration.
 
+    This gives less weight to the edges of long events, allowing some tolerance for imprecise boundaries especially where events overlap.
 
-def calculate_proposition_weights(p: LabelProposition, num_slots: int, slot_duration: float) -> tuple[int, int, np.ndarray]:
-    """
-    Calculates the weight array for a single proposition, applying gradient logic
-    to penalize edges of events based on 'event_cover'.
-    
     Returns:
-        (start_index, end_index, weights_array)
-        - start_index: The index in the global slot array where this prop starts.
-        - end_index: The index where it ends (exclusive).
-        - weights_array: An array of floats (0.0 to 1.0) for these specific slots.
+        Tuple containing:
+            - start_index: The index in the global slot array where this prop starts.
+            - end_index: The index where it ends (exclusive).
+            - weights_array: An array of floats (0.0 to 1.0) for these specific slots.
     """
     MAX_RAMP_SECONDS = 2.0
     RAMP_PERCENTAGE = 0.10
 
-    event_len_sec = p.event_segment.event_duration
+    event_len_sec = event_segment.event_duration
 
     if event_len_sec <= 0:
-        # probably unnecessary safety check
+        # Safety check for zero or negative event duration
         event_len_sec = 5.0
 
     total_event_slots = int(event_len_sec / slot_duration)
@@ -324,15 +342,15 @@ def calculate_proposition_weights(p: LabelProposition, num_slots: int, slot_dura
     # 2. Ramp Calculation
     num_ramp_slots = min(MAX_RAMP_SECONDS / slot_duration, int(total_event_slots * RAMP_PERCENTAGE))
     
-    # 3. Base Edge Weight
-    edge_weight = p.event_segment.event_cover # Assumes upstream value is valid (0.0-1.0)
+    # 3. Base Edge Weight from event_cover
+    edge_weight = event_segment.event_cover # Assumes upstream value is valid (0.0-1.0)
 
     # 4. Determine Bounds in Segment
-    start_slot = max(0, int(p.event_segment.start_offset_in_segment / slot_duration))
-    end_slot = min(num_slots, int(p.event_segment.end_offset_in_segment / slot_duration))
+    start_slot = max(0, int(event_segment.start_offset_in_segment / slot_duration))
+    end_slot = min(num_slots, int(event_segment.end_offset_in_segment / slot_duration))
     
     # Pre-calculate offset relative to event start
-    prop_start_in_event_slots = int(p.event_segment.start_offset_in_event / slot_duration)
+    prop_start_in_event_slots = int(event_segment.start_offset_in_event / slot_duration)
     
     # Create the weights for just this slice
     length = end_slot - start_slot
@@ -358,10 +376,13 @@ def calculate_proposition_weights(p: LabelProposition, num_slots: int, slot_dura
             
     return start_slot, end_slot, weights
 
+
 def resolve_conflicts(propositions: List[LabelProposition]):
-    """
-    Resolves labeling conflicts (Positive vs Negative) by assigning scores for pos or neg to 
-    each slot of time.
+    """Resolves labeling conflicts (Positive vs Negative) by assigning scores for pos or neg to each short
+       time slot within a 5-second segment. Then applies decision logic based on thresholds to determine final label type. 
+
+    Returns:
+        'positive', 'negative', or None depending on the weighted evidence and conflict thresholds.
     """
     
     SEG_LENGTH_SECONDS = 5.0
@@ -371,6 +392,7 @@ def resolve_conflicts(propositions: List[LabelProposition]):
     MAX_CONFLICT_SCORE = 10.0 
     MAX_POS_CONFLICT_RATIO = 0.5 
     MAX_TOLERATED_POS_FOR_NEG = 1.0
+    MIN_IMPLIED_NEG_SCORE = 4.0
 
  
     pos_weights = np.zeros(NUM_SLOTS, dtype=float)
@@ -384,7 +406,7 @@ def resolve_conflicts(propositions: List[LabelProposition]):
         # an array of slot weights for this proposition. 
         # different parts of the event that overlap with this segment are trusted more or less
         # depending on the duration of the event and how far from the edge of the event the slot is
-        start_idx, end_idx, prop_weights = calculate_proposition_weights(p, NUM_SLOTS, slot_duration)
+        start_idx, end_idx, prop_weights = calculate_proposition_weights(p.event_segment, NUM_SLOTS, slot_duration)
         
         if len(prop_weights) == 0:
             continue
@@ -437,7 +459,7 @@ def resolve_conflicts(propositions: List[LabelProposition]):
 
         
     # Implied Negative Fallback
-    if total_raw_pos_score < MIN_NET_POS_SCORE and np.sum(implied_weights) > 0:
+    if total_raw_pos_score < MIN_NET_POS_SCORE and np.sum(implied_weights) > MIN_IMPLIED_NEG_SCORE:
         return 'negative'
         
     return None
