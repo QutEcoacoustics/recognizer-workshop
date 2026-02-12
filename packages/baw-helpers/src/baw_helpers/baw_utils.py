@@ -34,6 +34,12 @@ FILE_ID_TO_UID_PATTERN = re.compile(r".*(?:^|_)(\d+)\.")
 
 # regex to extract the domain and recording id from a full recording URL
 FULL_RECORDING_PATTERN = re.compile(r"(https?://.+?)/audio_recordings/(\d+)/original")
+CANONICAL_FILE_PATTERN = pattern = re.compile(
+    r'^(?P<timestamp>\d{8}T\d{6}(?:[+-]\d{4,6}|Z))_'  # Timestamp
+    r'(?P<site_name>.+)_'                             # Site Name (greedy)
+    r'(?P<arid>\d+)\.'                                # Arid
+    r'(?P<extension>.+)$'                             # Extension
+)
 
 BAW_DOMINS_ALLOWLIST = ["api.acousticobservatory.org", "api.ecosounds.org", "api.staging.ecosounds.org"]
 
@@ -56,11 +62,25 @@ def extract_arid_from_filename(filename: str | Path) -> int | None:
       return None
 
 
+def parse_canonical_filename(filename: str) -> tuple[int | None, str | None, str | None]:
+    match = pattern.match(filename)
+
+    arid, site, timestamp = None, None, None
+
+    if match:
+        # Extracting by name
+        timestamp = match.group('timestamp')
+        site = match.group('site_name')
+        arid = int(match.group('arid'))
+        
+    return timestamp, site, arid
+
+
 def make_baw_audio_url_from_file_id(
     file_id: str,
     offset_s: float,
     window_size_s: float,
-    baw_domain: str = "api.acousticobservatory.org",
+    baw_domain: str = "https://api.acousticobservatory.org",
     extension: str = "flac"
 ) -> str:
   """Construct an baw audio URL."""
@@ -84,7 +104,7 @@ def make_baw_audio_url_from_arid(
     arid: str,
     offset_s: float,
     window_size_s: float,
-    baw_domain: str = "api.acousticobservatory.org",
+    baw_domain: str = "https://api.acousticobservatory.org",
     extension: str = "flac",
     check_baw_domains = False
 ) -> str:
@@ -94,7 +114,9 @@ def make_baw_audio_url_from_arid(
 
   offset_s = int(offset_s)
   # See: https://api.staging.ecosounds.org/api-docs/index.html
-  audio_path = f"https://{baw_domain}/audio_recordings/{arid}/media.{extension}"
+  audio_path = f"{baw_domain}/audio_recordings/{arid}/media.{extension}"
+  if not audio_path.startswith(("http://", "https://")):
+      audio_path = f"https://{audio_path}"
   if offset_s <= 0 and window_size_s <= 0:
     return audio_path
   params = {}
@@ -110,8 +132,6 @@ def original_baw_audio_url_from_arid(arid: int | str, domain: str) -> str:
   if not domain.startswith(("http://", "https://")):
          domain = f"https://{domain}"
   return f"{domain}/audio_recordings/{arid}/original"
-
-
 
 
 def make_baw_listen_link_from_arid(
@@ -147,19 +167,27 @@ def extract_arid_and_domain(file_id: str) -> tuple[str | None, int | None]:
               use extract_domain_and_arid instead.
   Extract the domain and recording ID from a full recording url or a canonical file name.
   """
-  match = FULL_RECORDING_PATTERN.match(file_id)
-  if match:
-    domain = match.group(1)
-    arid = int(match.group(2))
-    return domain, arid
-  else:
-    return None, None
+  return extract_domain_and_arid(file_id)
   
 
-def extract_domain_and_arid(file_id: str) -> tuple[str, int]:
-  """Extract the domain and recording ID from a full recording url or a canonical file name."""
-  return extract_arid_and_domain(file_id)
-  
+def extract_domain_and_arid(file_id: str, default_domain: str = "https://api.ecosounds.org") -> tuple[str | None, int | None]:
+    """Extract the domain and recording ID from a full recording url or a canonical file name."""
+
+    match = FULL_RECORDING_PATTERN.match(file_id)
+    if match:
+        domain = match.group(1)
+        arid = int(match.group(2))
+        return domain, arid
+    else:
+        # no match for full recording url. Try canonical filename
+        _timestamp, _site, arid = parse_canonical_filename(file_id)
+        if arid is not None:
+            return default_domain, arid  # domain is unknown in this case
+    
+    return None, None 
+
+
+
 
 def load_baw_audio(
     audio_url: str,

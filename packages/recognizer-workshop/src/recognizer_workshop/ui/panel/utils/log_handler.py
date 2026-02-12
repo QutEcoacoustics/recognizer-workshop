@@ -64,12 +64,12 @@ class PanelLogHandler(logging.Handler):
                 f'<span style="color: #d4d4d4;">{message}</span>'
                 f'</div>'
             )
-            print(f"[DEBUG] HTML line: {html_line[:100]}")  # ADD THIS
+ 
             self.log_buffer.append(html_line)
             
-            print(f"[DEBUG] Buffer size: {len(self.log_buffer)}")  # ADD THIS
+ 
             self._update_pane()
-            print(f"[DEBUG] Pane updated, object length: {len(self.pane.object) if self.pane.object else 0}")  # ADD THIS
+ 
 
 
         except Exception:

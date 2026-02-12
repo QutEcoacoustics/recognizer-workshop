@@ -20,14 +20,14 @@ import numpy as np
 from typing import List, Dict
 
 from collections import UserDict
-from recognizer_workshop.app.services.db_labels.dataclasses import LabelName, LabelProposition, PropositionType, EventSegment
+from recognizer_workshop.app.services.db_labels.dataclasses import LabelName, LabelProposition, PropositionType, EventSegment, TargetNegatives
 
 from baw_helpers.baw_helpers import get_events_for_sites
 
 log = logging.getLogger(__name__)
 
 
-def labels_from_event_taggings(api, filter_params, target_labels: List[LabelName], target_negatives: UserDict):
+def labels_from_event_taggings(api, filter_params, target_labels: List[LabelName], target_negatives: TargetNegatives | None = None):
     """Does the full process of fetching and compiling labels from BAW event taggings and verifications:
 
     - gets all events for the target labels
@@ -50,6 +50,9 @@ def labels_from_event_taggings(api, filter_params, target_labels: List[LabelName
     tags = [l.get_baw_tags()[0] for l in target_labels]
 
     # flatten negative tags for each target into a single list
+    if target_negatives is None:
+        target_negatives = TargetNegatives()
+
     extra_tags = [tag.get_baw_tags()[0] for neg_list in target_negatives.values() if isinstance(neg_list, list) for tag in neg_list]
   
     all_tags = list(set(tags + extra_tags))

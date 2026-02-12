@@ -45,4 +45,4 @@ def test_create_db_from_project_1189(prod_api_client, tmp_path):
     # (Optional) sanity: file parses and has 'data' list
     with jsons[0].open("r", encoding="utf-8") as f:
         payload = json.load(f)
-    assert isinstance(payload, dict) and "data" in payload and isinstance(payload["data"], list)
+    assert isinstance(payload, list) and len(payload) > 0

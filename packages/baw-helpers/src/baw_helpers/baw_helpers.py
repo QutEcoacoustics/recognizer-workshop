@@ -42,7 +42,7 @@ def simple_filter(
     add_filter_param("sites.id", site_ids)
     add_filter_param("id", arids)
     if len(filter_params) == 0:
-        return None
+        raise ValueError("At least one filter parameter must be provided.")
     
     return {
         "filter": filter_params
@@ -53,15 +53,15 @@ def wrap_filter(filter_params: dict) -> dict:
     return filter_params if "filter" in filter_params else {"filter": filter_params}
 
 
-def get_filter_result(
+def sample_filter_pages(
     api,                       
     model: str,
     filter_params: dict,
     save_path: str | Path,        
-    qsp: dict | None = None,
+    page_size: int = 500,
+    limit: int | None = None,
     use_cache: bool = True,
     *,
-    include_qsp_in_hash: bool = True,
     pretty: bool = True,
 ) -> tuple[Any | None, Path]:
     """
@@ -76,15 +76,18 @@ def get_filter_result(
       - Hash is computed over the *complete* 'filter' dict.
       - If include_qsp_in_hash=True, the qsp is included in the hash basis.
     """
+
+    if page_size > 500:
+        page_size = 500  # enforce max page size to prevent server error (baw server limits filter page to 500, I think)
+
     payload = wrap_filter(filter_params)
-    basis = {"filter_payload": payload}
-    if include_qsp_in_hash and qsp:
-        basis["qsp"] = qsp
+    basis = {"filter_payload": payload, "model": model, "page_size": page_size, "limit": limit}
     # 3 bytes = 6 hex chars for ~16m possible values. 
     h = stable_hash(basis, digest_size=3)  # deterministic across key order/types
     out_dir = Path(save_path)
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / f"{model}_{h}.json"
+
 
     if use_cache and out_file.exists():
         try:
@@ -93,19 +96,47 @@ def get_filter_result(
             data = None  # corrupted cache; caller can decide what to do
         return data, out_file
 
+    all_items = []
+    cur_page = 1
+    every_x_pages = 1
+    total_pages = None # unknown until we get the 1st page
 
-    data = api.baw_filter(model, payload, qsp=qsp)
-    if data is None:
-        # API layer already handled/logged; return path so caller knows where it would be
-        return None, out_file
+    while True:
+        current_qsp = {"page": cur_page, "items": page_size}
+        log.info("Fetching page %s for model '%s' with filter hash %s...", cur_page, model, h)
+        page_response = api.baw_filter(model, payload, qsp=current_qsp)
+        if page_response is None or page_response.get("meta") is None:
+            # If any page fails, the whole dataset is compromised.
+            # Return None so the caller knows something went wrong.
+            return None, out_file
+        
+        if cur_page == 1:
+
+            # figure out how many pages to skip each time to 
+            # get the desired number of results (limit) while still spreading out across the dataset.   
+            total_items = page_response["meta"]["paging"]["total"]
+            total_pages = (total_items + page_size - 1) // page_size
+            log.info("Page %s fetched: %s items (total %s)", cur_page, len(page_response.get("data", [])), total_items)
+            if limit is not None and total_items > limit:
+                pages_needed = limit // page_size
+                every_x_pages = max(1, total_pages // pages_needed) if pages_needed > 0 else 1
+
+        
+        new_items = page_response.get('data', [])
+        all_items.extend(new_items)
+        if len(new_items) < page_size:
+            break # last page
+        cur_page += every_x_pages
+        if total_pages and cur_page > total_pages:
+            break
 
     with out_file.open("w", encoding="utf-8") as f:
         if pretty:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+            json.dump(all_items, f, ensure_ascii=False, indent=2)
         else:
-            json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
+            json.dump(all_items, f, ensure_ascii=False, separators=(",", ":"))
 
-    return data, out_file
+    return all_items, out_file
 
 
 def get_random_audio_recordings(
@@ -139,21 +170,19 @@ def get_random_audio_recordings(
             "direction": order_direction,
         }
 
-    qsp = {"disable_paging": 'true'}
-    data, cache_path = get_filter_result(
+    recordings, cache_path = sample_filter_pages(
         api=api,
         model="audio_recordings",
         filter_params=payload,
         save_path=save_dir,
-        qsp=qsp,
-        use_cache=use_cache,
-        include_qsp_in_hash=True
+        page_size=500,
+        limit=limit*5, # fetch more than needed to allow for randomness while still being efficient; adjust multiplier as needed
+        use_cache=use_cache
     )
 
-    if not data or "data" not in data:
+    if not recordings:
         raise ValueError("No data found in response (or cached file) for audio_recordings filter")
 
-    recordings = data["data"]
     if not isinstance(recordings, list):
         raise ValueError("Unexpected response format: 'data' is not a list")
 
@@ -197,6 +226,25 @@ def get_embeddings(
     log.info(result)
 
     return result
+
+
+def get_embedding_counts(
+    baw_api,
+    filter_params: dict,
+    analysis_job_id: int=3,
+    analysis_name="perch-embeddings_4"):
+    """
+    For a particular filter (e.g., project, region, site), get counts of
+    audio recordings and counts of embeddings.
+    """
+    recordings = baw_api.baw_filter(model="audio_recordings", filter_params=filter_params)
+    results = baw_api.baw_filter(model=f"analysis_jobs/{analysis_job_id}/items", filter_params=filter_params)
+    num_recordings = recordings['meta']['paging']['total']
+    num_embeddings = results['meta']['paging']['total']
+    return recordings, results
+
+    # print(f"Found {len(recordings.get('data', []))} audio recordings.")
+    # print(f" Found {len(results.get('data', []))} embeddings.")
 
 
 def get_events_for_sites_old(baw_api, filter_params, tags=None):
@@ -249,12 +297,16 @@ def get_events_for_sites(baw_api, filter_params, tags=None):
     
     ae_filter = filter_params.copy()
 
+    if "filter" in ae_filter:
+        ae_filter = ae_filter["filter"]
+
     if tags is not None:
         if isinstance(tags, str):
             tags = [tags]
         ae_filter['tags.text'] = { "in": tags }
 
-    ae_filter["projection"] = {
+    data = {"filter": ae_filter, 
+            "projection": {
             "only": [
                 "id",
                 "audio_recording_id",
@@ -268,8 +320,9 @@ def get_events_for_sites(baw_api, filter_params, tags=None):
                 "verification_summary"
             ]
         }
+    }
 
-    response = baw_api.post("/audio_events/filter?disable_paging=true", data={"filter": ae_filter})
+    response = baw_api.post("/audio_events/filter?disable_paging=true", data=data)
     # maybe site by site? or if not then paging, but that is complicated
 
     events =  response.get("data", [])

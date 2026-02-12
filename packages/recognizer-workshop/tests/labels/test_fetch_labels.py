@@ -500,7 +500,71 @@ def full_flow_results(mock_api):
     return items[source_url][label_key], counts[label_key]
 
 
-# --- 2. The Parametrized Tests ---
+
+def test_full_flow_without_target_negatives(mock_api):
+    """
+    Integration test ensuring that if target_negatives is None, 
+    confusing species events (implied negatives) are ignored.
+    """
+    magpieSong = LabelName("Magpie", "song")
+    
+    # Same as the fixture
+    events = [
+        # Ev 1: Verified Positive (11-17)
+        {
+            'start_time_seconds': 11.0, 'end_time_seconds': 17.0,
+            'taggings': [{'tag_id': 888}],
+            'verification_summary': [{'tag_id': 888, 'correct': 5, 'incorrect': 0}], 
+        },
+        # Ev 2: Verified Negative (18-38)
+        {
+            'start_time_seconds': 18.0, 'end_time_seconds': 38.0,
+            'taggings': [{'tag_id': 888}],
+            'verification_summary': [{'tag_id': 888, 'correct': 0, 'incorrect': 5}],
+        },
+        # Ev 5: Implied Negative 'Fairy Wren' (39-48)
+        # WITHOUT target_negatives mapping, this should be ignored completely.
+        {
+            'start_time_seconds': 39.0, 'end_time_seconds': 48.0,
+            'taggings': [{'tag_id': 777}], 
+            'verification_summary': [{'tag_id': 777, 'correct': 5, 'incorrect': 0}],
+        }
+    ]
+
+    for i, event in enumerate(events):
+        event['id'] = i + 1
+        event['audio_recording_id'] = 999
+        event['provenance_id'] = 10
+
+    target_labels = [magpieSong]
+    
+    # 2. Run WITHOUT target negatives
+    with patch.object(target_module, 'get_events_for_sites', return_value=events):
+        items, counts = target_module.labels_from_event_taggings(
+            mock_api,
+            filter_params={},
+            target_labels=target_labels
+        )
+
+    source_url = "https://api.ecosounds.org/audio_recordings/999/original"
+    label_key = str(magpieSong)
+    results = items[source_url][label_key]
+    
+    
+    # Check 10.0 (Event 1): Should still be Positive
+    assert 10.0 in results['pos']
+    
+    # Check 20.0 (Event 2): Should still be Negative
+    assert 20.0 in results['neg']
+    
+    assert 45.0 not in results['pos']
+    assert 45.0 not in results['neg']
+    
+    assert counts[label_key]['positive'] == 2
+    assert counts[label_key]['negative'] == 3
+
+
+
 
 @pytest.mark.parametrize("offset, expected_type, reason", [
     (10.0, 'pos', "From Event 1 only"),

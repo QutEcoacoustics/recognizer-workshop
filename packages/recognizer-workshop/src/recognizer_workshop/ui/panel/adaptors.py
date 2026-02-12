@@ -156,7 +156,7 @@ class PanelUI(param.Parameterized):
                     value=label.call_type, 
                     placeholder="(optional) e.g., song")
                 remove_btn = pn.widgets.Button(name="Remove", icon="trash", button_type="danger")
-                remove_btn.on_click(partial(_remove_label, label))
+                remove_btn.on_click(partial(_remove_label, i))
 
                 def _update_species(event, index=i):
                     # Replace the LabelName instance instead of mutating it

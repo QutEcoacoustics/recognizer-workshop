@@ -23,8 +23,8 @@ from perch_hoplite.agile.convert_legacy import load_embedding_config
 from recognizer_workshop.perch_hoplite_custom_modifications import sqlite_usearch_impl as sqlite_usearch_impl_custom
 from baw_helpers import baw_api
 from baw_helpers.baw_api import AuthenticationError
-from baw_helpers.baw_helpers import get_filter_result, simple_filter, get_random_audio_recordings
-from baw_helpers.baw_utils import extract_arid_and_domain, original_baw_audio_url_from_arid, extract_arid_from_filename
+from baw_helpers.baw_helpers import simple_filter, get_random_audio_recordings
+from baw_helpers.baw_utils import extract_arid_and_domain, original_baw_audio_url_from_arid, extract_domain_and_arid, extract_arid_from_filename
 
 from recognizer_workshop.app.create_database.embedding_config_loader import load_baw_embedding_config
 
@@ -39,11 +39,11 @@ DEFAULT_BAW_ANALYSIS_NAME = "perch-embeddings_4"
 
 def convert_source_to_original_url(source: str, domain='https://api.ecosounds.org') -> str:
     """
-    perch runner currently puts the canonical filename in the source column. We really want the url to the audio file
+    perch runner currently puts the canonical filename in the source column. We really want the url to the original audio file
     TODO: I don't think this is true anymore
     TODO: move this to baw utils with the rest of those functions
     """
-    extracted_domain, arid = extract_arid_and_domain(source)
+    extracted_domain, arid = extract_domain_and_arid(source)
     if extracted_domain is None:
         return f"{domain}/audio_recordings/{arid}/original"
     else:
