@@ -24,7 +24,7 @@ from recognizer_workshop.perch_hoplite_custom_modifications import sqlite_usearc
 from baw_helpers import baw_api
 from baw_helpers.baw_api import AuthenticationError
 from baw_helpers.baw_helpers import simple_filter, get_random_audio_recordings
-from baw_helpers.baw_utils import extract_arid_and_domain, original_baw_audio_url_from_arid, extract_domain_and_arid, extract_arid_from_filename
+from baw_helpers.baw_utils import extract_arid_and_domain, original_baw_audio_url_from_arid, get_original_url, extract_arid_from_filename
 
 from recognizer_workshop.app.create_database.embedding_config_loader import load_baw_embedding_config
 
@@ -43,12 +43,7 @@ def convert_source_to_original_url(source: str, domain='https://api.ecosounds.or
     TODO: I don't think this is true anymore
     TODO: move this to baw utils with the rest of those functions
     """
-    extracted_domain, arid = extract_domain_and_arid(source)
-    if extracted_domain is None:
-        return f"{domain}/audio_recordings/{arid}/original"
-    else:
-        # if we extracted the domain, it's probably already how we want it
-        return source
+    return get_original_url(source, default_domain=domain)
 
 
 def create_database_from_baw(

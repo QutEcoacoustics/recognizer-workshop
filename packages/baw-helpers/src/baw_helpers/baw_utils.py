@@ -100,6 +100,38 @@ def make_baw_audio_url_from_file_id(
       extension=extension
   )
 
+
+
+def get_original_url(
+    source: str,
+    default_domain: str = "https://api.ecosounds.org",
+) -> str:
+    """
+    Attempt to get an original url
+    Accepts:
+      - full original URLs
+      - canonical filenames
+      - other strings containing an arid
+    """
+    if not source:
+        return source
+
+    # Already in canonical original URL format
+    if FULL_RECORDING_PATTERN.match(source):
+        return source
+
+    # Try full URL or canonical filename extraction
+    domain, arid = extract_domain_and_arid(source, default_domain=default_domain)
+    if arid is None:
+        # Fallback: pure filename (no timestamp/site)
+        arid = extract_arid_from_filename(source)
+
+    if arid is None:
+        return source
+
+    return original_baw_audio_url_from_arid(arid, domain or default_domain)
+
+
 def make_baw_audio_url_from_arid(
     arid: str,
     offset_s: float,
