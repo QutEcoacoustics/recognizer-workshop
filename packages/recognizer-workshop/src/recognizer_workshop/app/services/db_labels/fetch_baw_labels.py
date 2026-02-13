@@ -71,7 +71,11 @@ def labels_from_event_taggings(api, filter_params, target_labels: List[LabelName
         requires_verification = event['provenance_id'] is not None
 
         if requires_verification:
-            for verification_summary_item in event['verification_summary']:
+            vs = event.get('verification_summary')
+            if vs is None:
+                log.warning(f"Event {event['id']} is marked as requiring verification but has no verification summary.")
+                continue
+            for verification_summary_item in vs:
                 tag_id = int(verification_summary_item['tag_id'])
                 tag = api.tags.get_by_id(tag_id)
                 if tag is None:

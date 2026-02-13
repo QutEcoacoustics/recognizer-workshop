@@ -1,5 +1,6 @@
 import copy
 import json
+import threading
 
 import pandas as pd
 import panel as pn
@@ -16,8 +17,18 @@ def build(vm):
     btn_add   = pn.widgets.Button(name="Add fetched labels to DB", button_type="success", disabled=True)
     log       = pn.pane.Markdown("")
     # Initialize tables with empty DataFrames to prevent None value errors
-    summary_table = pn.pane.DataFrame(pd.DataFrame(), sizing_mode="stretch_width")
-    outcomes_table = pn.pane.DataFrame(pd.DataFrame(), sizing_mode="stretch_width")
+    summary_table = pn.widgets.Tabulator(
+        value=pd.DataFrame(),
+        sizing_mode="stretch_width",
+        show_index=False,
+        disabled=True
+    )
+    outcomes_table = pn.widgets.Tabulator(
+        value=pd.DataFrame(),
+        sizing_mode="stretch_width",
+        show_index=False,
+        disabled=True
+    )
     
     # Details table - shows ALL outcomes, sortable and filterable
     # Initialize with empty DataFrame that has the expected columns
@@ -327,26 +338,52 @@ def build(vm):
 
     def _fetch(_):
         if not vm.eng: return vm.notify("Initialize on Config tab first.", "error")
-        try:
-            result = vm.eng.fetch_labels()
-            stash["result_sets"] = result
-            
-            # Create and display summary table
-            summary_df = _create_fetch_summary_table(result)
-            if summary_df is not None:
-                # Configure the DataFrame to not show index
-                summary_table.object = summary_df.style.hide(axis='index')
+        btn_fetch.disabled = True
+        btn_add.disabled = True
+        log.object = "Fetching labels…"
+        doc = pn.state.curdoc
+
+        def _schedule(fn):
+            if doc:
+                doc.add_next_tick_callback(fn)
             else:
-                summary_table.object = pd.DataFrame()  # Use empty DataFrame instead of None
-            
-            total_labels = sum(len(rs['labels']) for rs in result)
-            log.object = f"Successfully fetched **{total_labels}** labels across {len(result)} result sets."
-            btn_add.disabled = False
-            vm.notify("Fetch successful. Ready to add to DB.", "success")
-        except Exception as e:
-            log.object = f"Error: {e}"
-            summary_table.object = pd.DataFrame()  # Use empty DataFrame instead of None
-            vm.notify(f"Fetch failed: {e}", "error")
+                # Fallback when no document is available; run directly.
+                fn()
+
+        def _do_fetch():
+            try:
+                result = vm.eng.fetch_labels()
+
+                def _apply_success():
+                    stash["result_sets"] = result
+
+                    summary_df = _create_fetch_summary_table(result)
+                    summary_table.value = summary_df if summary_df is not None else pd.DataFrame()
+
+                    total_labels = sum(len(rs['labels']) for rs in result)
+                    log.object = (
+                        f"Successfully fetched **{total_labels}** labels across {len(result)} result sets."
+                    )
+                    btn_add.disabled = False
+                    vm.notify("Fetch successful. Ready to add to DB.", "success")
+
+                _schedule(_apply_success)
+            except Exception as e:
+
+                def _apply_error():
+                    log.object = f"Error: {e}"
+                    summary_table.value = pd.DataFrame()
+                    vm.notify(f"Fetch failed: {e}", "error")
+
+                _schedule(_apply_error)
+            finally:
+
+                def _enable_fetch():
+                    btn_fetch.disabled = False
+
+                _schedule(_enable_fetch)
+
+        threading.Thread(target=_do_fetch, daemon=True).start()
 
     def _add(_):
         if not vm.eng: return vm.notify("Initialize first.", "error")
@@ -368,7 +405,7 @@ def build(vm):
             outcomes_df = _create_outcomes_summary_table(outcomes_list)
             
             if outcomes_df is not None:
-                outcomes_table.object = outcomes_df.style.hide(axis='index')
+                outcomes_table.value = outcomes_df
                 details_df = _create_outcomes_details_table(outcomes_list)
                 if details_df is not None:
                     details_table.value = details_df
@@ -377,7 +414,7 @@ def build(vm):
                     details_table.value = pd.DataFrame(columns=['Filter', 'Species', 'Type', 'Source', 'Offset', 'Outcome'])
                     details_title.object = "### No outcome details available"
             else:
-                outcomes_table.object = pd.DataFrame()  # Use empty DataFrame instead of None
+                outcomes_table.value = pd.DataFrame()  # Use empty DataFrame instead of None
                 details_table.value = pd.DataFrame(columns=['Filter', 'Species', 'Type', 'Source', 'Offset', 'Outcome'])
                 details_title.object = ""
 

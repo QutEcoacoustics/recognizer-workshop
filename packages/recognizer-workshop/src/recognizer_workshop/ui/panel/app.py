@@ -15,7 +15,7 @@ from recognizer_workshop.ui.panel.adaptors import PanelUI
 os.environ.setdefault("MPLBACKEND", "module://matplotlib_inline.backend_inline")
 
 # Load necessary extensions
-pn.extension('tabulator', sizing_mode="stretch_width")
+pn.extension('tabulator', 'material', sizing_mode="stretch_width")
 hv.extension('bokeh')
 
 # --- Global Error Handling Setup ---

@@ -236,7 +236,7 @@ def build(vm):
         
         recent_files = get_recent_files()
         file_selector = pn.widgets.FileSelector(Path.home(), only_files=True)
-        recent_selector = pn.widgets.Select(name="Recent Files", options=recent_files)
+        recent_selector = pn.widgets.Select(name="Recent Files", options=recent_files, value=None)
         
         dialog_content = pn.Column(
             "### Open from disk", 
@@ -254,7 +254,8 @@ def build(vm):
 
 
         def _on_open(event):
-            path = recent_selector.value or (file_selector.value[0] if file_selector.value else None)
+            # Prefer an explicit file selection over the recent list.
+            path = (file_selector.value[0] if file_selector.value else None) or recent_selector.value
             if path:
                 try:
                     vm.config = AgileConfig.load(path)

@@ -121,6 +121,11 @@ class TagCache:
         return {tag_id: self._tags.get(tag_id) for tag_id in tag_ids}
 
 
+    def get_by_id(self, tag_id: int) -> Optional[dict]:
+        """Return a single tag dict by id, or None if missing."""
+        return self._tags.get(int(tag_id))
+
+
     def get_all_tag_texts(self) -> List[str]:
         tag_list = [tag['text'] for tag in self._tags.values()]
         tag_list.sort()
