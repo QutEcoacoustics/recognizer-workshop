@@ -11,6 +11,8 @@ from perch_hoplite.db import interface as hoplite_interface
 from perch_hoplite.db import search_results as hoplite_search_results
 from perch_hoplite import audio_io
 
+from baw_helpers.baw_utils import make_baw_listen_link_from_arid, extract_domain_and_arid
+
 def _default_load_audio(uri: str, sample_rate_hz: int) -> np.ndarray:
 
     return np.array(audio_io.load_audio(uri, sample_rate_hz))
@@ -168,6 +170,15 @@ class PanelEmbeddingDisplay(pn.Column):
         self.window_size_s = float(window_size_s)
         self._melspec_layer = melspec_layer or get_melspec_layer(self.sample_rate_hz)
         self._audio_loader = audio_loader or (lambda u, sr: audio_io.load_audio(u, sr))
+        self.listen_link = None
+        domain, arid = extract_domain_and_arid(uri)
+        if domain and arid:
+            self.listen_link = make_baw_listen_link_from_arid(
+                arid = arid,
+                offset_s = self.offset_s,
+                window_size_s = self.window_size_s,
+                baw_domain = domain,
+                padding = 5)
 
         # --- state caches ---
         self._audio: Optional[np.ndarray] = None
@@ -204,13 +215,19 @@ class PanelEmbeddingDisplay(pn.Column):
         self._buttons_grid = self._build_label_buttons(button_columns)
 
         # assemble
+        title_text = (
+            f'<a href="{self.listen_link}" target="_blank" rel="noopener noreferrer">'
+            f'Embedding {self.embedding_id}</a>'
+            if self.listen_link
+            else f"Embedding {self.embedding_id}"
+        )
         card = pn.Card(
             meta,
             self._spec_container,
             pn.Row(self._audio_pane, sizing_mode="stretch_width"),
             self._buttons_grid,
             self._status,
-            title=f"Embedding {self.embedding_id}",
+            title=title_text,
             collapsible=False,
             sizing_mode="stretch_width",
         )

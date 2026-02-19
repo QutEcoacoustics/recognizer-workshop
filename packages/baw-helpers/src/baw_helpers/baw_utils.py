@@ -41,12 +41,12 @@ CANONICAL_FILE_PATTERN = pattern = re.compile(
     r'(?P<extension>.+)$'                             # Extension
 )
 
-BAW_DOMINS_ALLOWLIST = ["api.acousticobservatory.org", "api.ecosounds.org", "api.staging.ecosounds.org"]
+BAW_DOMINS_ALLOWLIST = ["https://api.acousticobservatory.org", "https://api.ecosounds.org", "https://api.staging.ecosounds.org"]
 
 # Bit of a hack to provide website listen links for BAW audio segments
 WEBSITE_DOMAIN_MAP = {
-    "api.acousticobservatory.org": "data.acousticobservatory.org",
-    "api.ecosounds.org": "www.ecosounds.org",
+    "https://api.acousticobservatory.org": "https://data.acousticobservatory.org",
+    "https://api.ecosounds.org": "https://www.ecosounds.org",
 }
 
 
@@ -161,19 +161,28 @@ def make_baw_audio_url_from_arid(
 
 
 def original_baw_audio_url_from_arid(arid: int | str, domain: str) -> str:
-  if not domain.startswith(("http://", "https://")):
-         domain = f"https://{domain}"
+
   return f"{domain}/audio_recordings/{arid}/original"
 
 
+def ensure_scheme(url: str) -> str:
+  """Iron out some historical inconsistencies how domains were used. We want to include the https://"""
+  if not url.startswith(("http://", "https://")):
+      return f"https://{url}"
+  return url
+
 def make_baw_listen_link_from_arid(
-    arid: str,
+    arid: str | int,
     offset_s: float,
     window_size_s: float,
     baw_domain: str = "data.acousticobservatory.org",
-    check_baw_domains = False
+    check_baw_domains = False,
+    padding: int = 0
 ) -> str:
   """Construct an baw media query URL."""
+
+  baw_domain = ensure_scheme(baw_domain)
+
   if check_baw_domains and baw_domain not in BAW_DOMINS_ALLOWLIST:
     raise ValueError(f"Invalid domain: {baw_domain}. Valid domains are: {BAW_DOMINS_ALLOWLIST}")
 
@@ -181,14 +190,15 @@ def make_baw_listen_link_from_arid(
   # See: https://api.staging.ecosounds.org/api-docs/index.html
   if baw_domain in WEBSITE_DOMAIN_MAP:
     baw_domain = WEBSITE_DOMAIN_MAP[baw_domain]
-  audio_path = f"https://{baw_domain}/listen/{arid}/"
+  audio_path = f"{baw_domain}/listen/{str(arid)}/"
   if offset_s <= 0 and window_size_s <= 0:
     return audio_path
   params = {}
   if offset_s > 0:
-    params["start"] = offset_s
+    params["start"] = offset_s - padding
   if window_size_s > 0:
-    params["end"] = offset_s + int(window_size_s)
+    params["end"] = offset_s + int(window_size_s) + padding
+
   audio_path = audio_path + "?" + urllib.parse.urlencode(params)
   return audio_path
 
