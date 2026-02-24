@@ -165,6 +165,9 @@ class AgileConfig:
         with open(config_path, 'r') as f:
             data = json.load(f)
 
+        # Normalize legacy baw_config shapes to {domain: token}
+        data['baw_config'] = cls._normalize_baw_config(data.get('baw_config'))
+
         # Resolve paths: if a path in the JSON is not absolute, join it with the base_dir
         for field_name in cls._PATH_FIELDS:
             if field_name in data and data[field_name] is not None:
@@ -179,9 +182,42 @@ class AgileConfig:
         )
 
         return instance
-    
 
- 
+
+    @staticmethod
+    def _normalize_baw_config(baw_config: Any) -> Dict[str, Any]:
+        """
+        Normalizes legacy BAW config shapes to a dict of {domain: token}.
+
+        Supported legacy shapes:
+        - {"domain": "https://...", "token": "..."}
+        - {"domain": "https://...", "auth_token": "..."}
+        """
+        if baw_config is None:
+            return {}
+
+        # Already in desired dict form
+        if isinstance(baw_config, dict) and 'domain' not in baw_config:
+            return baw_config
+
+        # Legacy dict that might also include new-format keys
+        if isinstance(baw_config, dict) and 'domain' in baw_config:
+            legacy_keys = {'domain', 'token', 'auth_token'}
+            new_format_items = {
+                key: value for key, value in baw_config.items()
+                if key not in legacy_keys
+            }
+
+            if new_format_items:
+                return new_format_items
+
+            domain = baw_config.get('domain')
+            token = baw_config.get('token', baw_config.get('auth_token', ''))
+            return {domain: token} if domain else {}
+
+        # Fallback: unknown shape
+        return {}
+     
 
     def _to_json(self, config_path: str | Path, relative_to: str | Path | None = None) -> None:
         """

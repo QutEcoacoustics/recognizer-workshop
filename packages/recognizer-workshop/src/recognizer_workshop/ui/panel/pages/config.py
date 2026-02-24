@@ -35,6 +35,12 @@ def build(vm):
 
     print("[DEBUG] Building configuration page...")
 
+    if not getattr(build, "_password_css_added", False):
+        pn.config.raw_css.append(
+            ".password-with-eye .bk-input { padding-right: 2.5rem; }"
+        )
+        build._password_css_added = True
+
     dialogs_container = pn.Column()  
 
     recent_files = get_recent_files()
@@ -90,10 +96,24 @@ def build(vm):
     
     default_api_domain = "https://api.ecosounds.org"
 
+    def _get_baw_domain_token():
+        """Return the single BAW domain/token pair for the UI fields."""
+        if not vm.config.baw_config:
+            return "", ""
+
+        domain_val, token_val = next(iter(vm.config.baw_config.items()))
+        return domain_val or "", token_val or ""
+
+    initial_domain, initial_token = _get_baw_domain_token()
+
     # text inputs for config fields, with values coming from the loaded config
     annotator_id = pn.widgets.TextInput(name="Annotator", value=vm.config.annotator_id)
-    domain = pn.widgets.TextInput(name="Workbench API domain", value=vm.config.baw_config.get("domain", ""))
-    auth_token = pn.widgets.TextInput(name="Workbench API token", value=vm.config.baw_config.get("auth_token", ""))
+    domain = pn.widgets.TextInput(name="Workbench API domain", value=initial_domain)
+    auth_token = pn.widgets.PasswordInput(
+        name="Workbench API token",
+        value=initial_token,
+        css_classes=["password-with-eye"],
+    )
 
     # Create help buttons for key fields
     annotator_help_btn = vm.help_system.create_help_button("help-annotator-id", "Help: Annotator ID")
@@ -130,12 +150,13 @@ def build(vm):
             vm.config.predictions_folder = default_paths['predictions_folder']
             
         # Set default API domain if not already set
-        if not vm.config.baw_config.get("domain"):
-            vm.config.baw_config["domain"] = default_api_domain
+        if not vm.config.baw_config:
+            vm.config.baw_config = {default_api_domain: ""}
 
     def toggle_advanced_visibility(*_):
         """Toggle visibility of advanced path settings."""
         advanced_section.visible = show_advanced.value
+
 
     def _has_custom_paths():
         """Check if any custom paths are set in the config."""
@@ -156,8 +177,9 @@ def build(vm):
         sync_config_to_ui._syncing = True
         try:
             annotator_id.value = vm.config.annotator_id
-            domain.value = vm.config.baw_config.get("domain", default_api_domain)
-            auth_token.value = vm.config.baw_config.get("auth_token", "")
+            config_domain, config_token = _get_baw_domain_token()
+            domain.value = config_domain or default_api_domain
+            auth_token.value = config_token
             _print_paths("1.")
             
             # Capture all path values at once to avoid side effects from individual access
@@ -189,8 +211,10 @@ def build(vm):
         # will trigger watchers of the config_state
         vm.obs.bump("config_state")
         vm.config.annotator_id = annotator_id.value
-        vm.config.baw_config["domain"] = domain.value
-        vm.config.baw_config["auth_token"] = auth_token.value
+        if domain.value:
+            vm.config.baw_config = {domain.value: auth_token.value}
+        else:
+            vm.config.baw_config = {}
         
         # Always update paths from widgets (they contain default values when not advanced)
         vm.config.db_path = Path(db_path.value) if db_path.value else None

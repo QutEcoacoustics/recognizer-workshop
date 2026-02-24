@@ -2,20 +2,46 @@ import matplotlib
 matplotlib.use('Agg')
 
 import asyncio
+import html
 import panel as pn
 import numpy as np
 from matplotlib import pyplot as plt
 from perch_hoplite.agile.embedding_display import QueryDisplay, get_melspec_layer
-from typing import Callable, List, Optional, Sequence, Dict
+from typing import Callable, List, Optional, Sequence, Dict, Any
 from perch_hoplite.db import interface as hoplite_interface
 from perch_hoplite.db import search_results as hoplite_search_results
 from perch_hoplite import audio_io
 
-from baw_helpers.baw_utils import make_baw_listen_link_from_arid, extract_domain_and_arid
+from datetime import datetime, timedelta
+from baw_helpers.baw_utils import make_baw_listen_link_from_arid, extract_domain_and_arid, parse_canonical_filename
 
 def _default_load_audio(uri: str, sample_rate_hz: int) -> np.ndarray:
 
     return np.array(audio_io.load_audio(uri, sample_rate_hz))
+
+
+def _parse_baw_timestamp(timestamp: str | None) -> datetime | None:
+    if not timestamp:
+        return None
+    ts = timestamp
+    if ts.endswith("Z"):
+        ts = ts[:-1] + "+0000"
+    for fmt in ("%Y%m%dT%H%M%S%z", "%Y%m%dT%H%M%S"):
+        try:
+            return datetime.strptime(ts, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _format_recording_time(recording_info: dict | None, offset_s: float) -> str:
+    canonical_name = (recording_info or {}).get("canonical_file_name")
+    timestamp, _site, _arid = parse_canonical_filename(canonical_name) if canonical_name else (None, None, None)
+    base_dt = _parse_baw_timestamp(timestamp)
+    if not base_dt:
+        return "Unknown time"
+    offset_dt = base_dt + timedelta(seconds=offset_s)
+    return offset_dt.isoformat(sep=" ", timespec="seconds")
 
 
 class PanelQuerySelector(pn.Column):
@@ -147,6 +173,9 @@ class PanelEmbeddingDisplay(pn.Column):
         uri: str,
         offset_s: float,
         score: float,
+        recording_info: Optional[dict[str, Any]] = None,
+        domain: Optional[str] = None,
+        arid: Optional[int] = None,
         labels: Sequence[str] = (),  
         sample_rate_hz: int = 32000,
         frame_rate: int = 100,
@@ -164,6 +193,9 @@ class PanelEmbeddingDisplay(pn.Column):
         self.uri = str(uri)
         self.offset_s = float(offset_s)
         self.score = float(score)
+        self.recording_info = recording_info or {}
+        self.domain = domain
+        self.arid = arid
         self.labels = list(labels)
         self.sample_rate_hz = int(sample_rate_hz)
         self.frame_rate = int(frame_rate)
@@ -171,14 +203,25 @@ class PanelEmbeddingDisplay(pn.Column):
         self._melspec_layer = melspec_layer or get_melspec_layer(self.sample_rate_hz)
         self._audio_loader = audio_loader or (lambda u, sr: audio_io.load_audio(u, sr))
         self.listen_link = None
-        domain, arid = extract_domain_and_arid(uri)
-        if domain and arid:
+        listen_domain = self.domain
+        listen_arid = self.arid
+        if not (listen_domain and listen_arid):
+            listen_domain, listen_arid = extract_domain_and_arid(uri)
+        if listen_domain and listen_arid:
             self.listen_link = make_baw_listen_link_from_arid(
-                arid = arid,
+                arid=listen_arid,
                 offset_s = self.offset_s,
                 window_size_s = self.window_size_s,
-                baw_domain = domain,
+                baw_domain = listen_domain,
                 padding = 5)
+
+        site_name = self.recording_info.get("sites.name")
+        if not site_name:
+            canonical_name = self.recording_info.get("canonical_file_name")
+            _timestamp, parsed_site, _arid = parse_canonical_filename(canonical_name) if canonical_name else (None, None, None)
+            site_name = parsed_site
+        self.site_name = site_name or "Unknown site"
+        self.recording_time_text = _format_recording_time(self.recording_info, self.offset_s)
 
         # --- state caches ---
         self._audio: Optional[np.ndarray] = None
@@ -204,10 +247,34 @@ class PanelEmbeddingDisplay(pn.Column):
         self._spec_container = pn.Column(loading_msg, sizing_mode="stretch_width")
         self._audio_pane = pn.pane.Audio(name="audio", sizing_mode="stretch_width", sample_rate=self.sample_rate_hz)
 
-        # metadata line
-        meta = pn.pane.Markdown(
-            f"**eid:** {self.embedding_id} &nbsp;&nbsp; **offset:** {self.offset_s:.2f}s "
-            f"&nbsp;&nbsp; **score:** {self.score:.2f} &nbsp;&nbsp; *{self.dataset_name}*",
+        region_name = self.recording_info.get("regions.name")
+        if isinstance(region_name, list):
+            region_name = ", ".join([str(item) for item in region_name if item])
+
+        site_id = self.recording_info.get("site_id")
+        duration = self.recording_info.get("duration_seconds")
+
+        info_lines = [
+            f"eid: {self.embedding_id}",
+            f"offset: {self.offset_s:.2f}s",
+            f"dataset: {self.dataset_name}",
+            f"domain: {self.domain or 'Unknown'}",
+            f"arid: {self.arid or 'Unknown'}",
+            f"site: {self.site_name}",
+        ]
+        if site_id is not None:
+            info_lines.append(f"site_id: {site_id}")
+        if region_name:
+            info_lines.append(f"region: {region_name}")
+        if duration is not None:
+            info_lines.append(f"duration: {duration}s")
+
+        info_title = "\n".join(info_lines)
+        info_icon = pn.pane.HTML(
+            f"<div style='text-align: right;'>"
+            f"<span title='{html.escape(info_title)}' "
+            f"style='cursor: help; pointer-events: auto; display: inline-block;'>ℹ️</span>"
+            f"</div>",
             sizing_mode="stretch_width",
         )
 
@@ -215,14 +282,15 @@ class PanelEmbeddingDisplay(pn.Column):
         self._buttons_grid = self._build_label_buttons(button_columns)
 
         # assemble
+        score_text = f"score {self.score:.2f}"
+        title_label = f"{self.recording_time_text} • {self.site_name} • {score_text}"
         title_text = (
-            f'<a href="{self.listen_link}" target="_blank" rel="noopener noreferrer">'
-            f'Embedding {self.embedding_id}</a>'
+            f'<a href="{self.listen_link}" target="_blank" rel="noopener noreferrer">{title_label}</a>'
             if self.listen_link
-            else f"Embedding {self.embedding_id}"
+            else title_label
         )
         card = pn.Card(
-            meta,
+            info_icon,
             self._spec_container,
             pn.Row(self._audio_pane, sizing_mode="stretch_width"),
             self._buttons_grid,
@@ -381,16 +449,24 @@ class PanelEmbeddingDisplayGroup(pn.Column):
         audio_loader=None,
         **kwargs,
     ) -> "PanelEmbeddingDisplayGroup":
+        _ = db
         items = []
         for r in results:
-            src = db.get_embedding_source(r.embedding_id)
+            metadata = getattr(r, "metadata", None) or {}
+            source = metadata.get("source")
+            if source is None:
+                raise ValueError("Search results missing metadata.source; call attach_metadata_to_search_results")
+            recording_info = metadata.get("recording_info")
             items.append(
                 PanelEmbeddingDisplay(
                     embedding_id=int(r.embedding_id),
-                    dataset_name=src.dataset_name,
-                    uri=src.source_id,
-                    offset_s=float(src.offsets[0]),
+                    dataset_name=source.dataset_name,
+                    uri=source.source_id,
+                    offset_s=float(source.offsets[0]),
                     score=float(getattr(r, "sort_score", 0.0)),
+                    recording_info=recording_info,
+                    domain=metadata.get("domain"),
+                    arid=metadata.get("arid"),
                     labels=list(labels),
                     sample_rate_hz=sample_rate_hz,
                     frame_rate=frame_rate,

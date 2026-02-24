@@ -52,7 +52,7 @@ def build(vm):
 
     def _update_button_state():
         """Enable/disable create button based on whether we have a valid token."""
-        has_token = vm.eng and vm.eng.baw_api and vm.eng.baw_api.token
+        has_token = vm.eng and vm.eng.active_client and vm.eng.active_client.token
         btn_create.disabled = not has_token
         auth_warning.visible = not has_token
         
@@ -84,7 +84,7 @@ def build(vm):
                     create_database_from_baw, 
                     db_path=db_dir, 
                     filelist_path=filelist_path,
-                    client=vm.eng.baw_api if vm.eng else None, 
+                    client=vm.eng.active_client if vm.eng else None, 
                     filter=filters[0],
                     max_files=max_files.value, 
                     max_embeddings=max_embeddings.value

@@ -139,7 +139,7 @@ class PanelUI(param.Parameterized):
         def _build_labels_ui():
             labels_container.clear()
 
-            if not hasattr(eng, 'baw_api') or eng.baw_api is None:
+            if not hasattr(eng, 'active_client') or eng.active_client is None:
                 return
 
 
@@ -192,7 +192,7 @@ class PanelUI(param.Parameterized):
 
 
         def _init():
-            has_baw_api = hasattr(eng, 'baw_api') and eng.baw_api is not None
+            has_baw_api = hasattr(eng, 'active_client') and eng.active_client is not None
             label_editor_section.visible = has_baw_api
             
             if has_baw_api:
@@ -232,7 +232,7 @@ class PanelUI(param.Parameterized):
 
         # Load species list from BAW (taxonomic tags)
         try:
-            tags = eng.baw_api.baw_filter(
+            tags = eng.active_client.baw_filter(
                 '/tags', {'is_taxonomic': {'eq': True}}, qsp="disable_paging=true"
             ).get('data', [])
             species_options = sorted([t['text'] for t in tags])

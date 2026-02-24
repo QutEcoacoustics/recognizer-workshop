@@ -2,12 +2,11 @@ import json
 from pathlib import Path
 import numpy as np
 import random
-
-from typing import Optional, Callable
+from typing import Optional, Callable, Any
 from ml_collections import config_dict
 import multiprocessing
-
 import logging
+from urllib.parse import urlparse
 
 from perch_hoplite.agile import audio_loader
 from perch_hoplite.agile import classifier
@@ -46,7 +45,8 @@ class agile_state:
     model_class = None
     _embedding_model = None
     audio_filepath_loader = None
-    baw_api = None
+    baw_api_clients = {}
+    active_client = None
     _active_label: Optional[LabelName] = None  
 
     # search results from the last search, whether it's a single example query
@@ -327,11 +327,88 @@ class agile_state:
         if self.search_results is None:
             self.search_results = {} # dict for each target label
 
+        self.attach_metadata_to_search_results(results)
+
         self.search_results[str(target_label)] = results
         if getattr(self, "search_scores", None) is None:
             self.search_scores = {}
 
         self.search_scores[str(target_label)] = all_scores
+
+
+    def attach_metadata_to_search_results(self, search_results):
+        """
+        fetches audio recording info for each search result source
+        attaches a "source" and "metadata" to each result item. 
+        """
+        results_list = list(search_results)
+
+        sources = {}
+        domain_arids = {}
+        for result in results_list:
+            source = self.db.get_embedding_source(result.embedding_id)
+            source_id = source.source_id
+            result.source_id = source_id
+            result.metadata: dict[str, Any] = {
+                "source": source
+            }
+            if source_id not in sources:
+                domain, arid = baw_utils.extract_domain_and_arid(source_id)
+                result.metadata["domain"] = domain
+                result.metadata["arid"] = arid
+                sources[source_id] = {
+                    "domain": domain,
+                    "arid": arid
+                }
+                if domain and arid is not None:
+                    domain_arids.setdefault(domain, set()).add(arid)
+                else:
+                    log.warning(f"Could not extract domain and arid from source_id {source_id}")
+
+        # for each domain, fetch the recording info for all arids in that domain in a single filter request
+        domain_recording_info = {}
+        for domain, arids in domain_arids.items():
+            client = self.baw_api_clients.get(domain)
+
+            if client is None:
+                log.warning("No BAW API client found for domain %s; skipping metadata fetch", domain)
+                continue
+
+            response = client.post(
+                "/audio_recordings/filter/?disable_paging=true",
+                data={
+                    "filter": {"id": {"in": sorted(arids)}},
+                    "projection": {
+                        "include": [
+                            "id",
+                            "site_id",
+                            "canonical_file_name",
+                            "sites.name",
+                            "regions.name",
+                            "regions.id",
+                            "duration_seconds",
+                        ]
+                    },
+                },
+            )
+
+            if response is None:
+                log.warning("BAW API returned no response for domain %s", domain)
+                continue
+
+            records = response.get("data", [])
+            # dict of arid to recording info for this each domain
+            domain_recording_info[domain] = {
+                rec.get("id"): rec for rec in records if rec.get("id") is not None
+            }
+
+        for result in results_list:
+            recording_info = domain_recording_info.get(result.metadata.get("domain"), {}).get(result.metadata.get("arid"))
+            result.metadata["recording_info"] = recording_info
+
+        return search_results
+
+
 
 
 
@@ -340,11 +417,9 @@ class agile_state:
         Returns a single, unified audio loader function.
         This function can handle both local file paths and remote BAW URLs.
         """
-        baw_domain = self.config.baw_config.get('domain')
-        baw_token = self.config.baw_config.get('auth_token', '')
-
-        window_size_s=self.db_model_config.model_config.window_size_s
-        sample_rate_hz=self.db_model_config.model_config.sample_rate
+        # baw_config is expected to be a dict of {domain: token}
+        window_size_s = self.db_model_config.model_config.window_size_s
+        sample_rate_hz = self.db_model_config.model_config.sample_rate
 
         # untested attempt to support non-baw-url sources (local audio paths)
         filepath_loader = None
@@ -359,9 +434,19 @@ class agile_state:
                     )
 
         # This is the actual loader function that will be returned.
-        # It has access to 'self' from the outer scope, so it can use self.baw_api.
+        # It has access to 'self' from the outer scope, so it can use stuff like self.config 
         def _loader(uri: str, offset: float | int) -> np.ndarray:
-            if baw_domain and uri.startswith((baw_domain)):
+
+            baw_token = None
+            baw_domain = None
+            if self.config.baw_config:
+                for domain, token in self.config.baw_config.items():
+                    if domain and uri.startswith(domain):
+                        baw_domain = domain
+                        baw_token = token or ''
+                        break
+
+            if baw_domain:
                 # It's a URL, so use the baw utils to download and load the audio data.
                 # TODO: We need to support public projects that don't need a token.
                 try:
@@ -557,7 +642,7 @@ class agile_state:
 
         # baw_filters is a list, so repeat the process for each one
         for filter_params in baw_filters:
-            labels, counts = labels_from_event_taggings(self.baw_api, filter_params, self.config.target_labels)
+            labels, counts = labels_from_event_taggings(self.active_client, filter_params, self.config.target_labels)
             all_results.append({
                 "filter_params": filter_params,
                 "counts": counts,
@@ -576,7 +661,7 @@ class agile_state:
         if not result_sets:
             raise ValueError("No result sets provided to commit.")
 
-        if not self.baw_api:
+        if not self.active_client:
              raise ValueError("BAW API client not initialized.")
         
         if not self.db:
@@ -590,7 +675,7 @@ class agile_state:
                 db=self.db, 
                 config=self.config, 
                 items=result_set["labels"], 
-                api_client=self.baw_api 
+                api_client=self.active_client 
             )
             
             filter_params = result_set.get('filter_params', {})
@@ -623,7 +708,7 @@ class agile_state:
         inference_service_run_inference(self.classifier,
                         self.db,
                         output_filepath,
-                        self.baw_api,
+                        self.active_client,
                         threshold=threshold,
                         labels=labels,
                         subset=subset,
@@ -647,66 +732,84 @@ class agile_state:
         #todo: maybe project id or current date too
         upload_name = f"Agile Modelling: {self.get_target_label_description()}"
         success_status, link = upload_detections(csv_path=csv_path, upload_name=upload_name, 
-                          project_id=project_id, limit=limit, baw_api=self.baw_api)
+                          project_id=project_id, limit=limit, baw_api=self.active_client)
         return success_status, link
         
 
+    def set_active_client_by_domain(self, domain):
+        """
+        Sets the active BAW API client based on the domain.
+        This is useful when we have multiple clients for different domains.
+        """
+        if domain in self.baw_api_clients:
+            self.active_client = self.baw_api_clients[domain]
+            log.info(f"Active client set to domain {domain}")
+        else:
+            log.warning(f"No BAW API client found for domain {domain}. Active client not changed.")
 
-    def init_workbench(self, token=None, allow_prompt=True):
+
+    def init_workbench(self, allow_prompt=True):
         """
         Inits our workbench client for interacting with Ecosounds. 
         """
         log.debug(f"Initializing workbench")
 
-        if token is None:
-            token = self.config.baw_config.get('auth_token', None)
-
-
-        baw_config = getattr(self.config, 'baw_config', {}) or {}
-        log.debug(f"BAW config: {baw_config}")
-
-
-        self.baw_api = baw_api(token=token,
-                            base_url=self.config.baw_config.get('domain', None),
-                            allow_prompt=allow_prompt)
+        if self.config.baw_config is None:
+            log.warning("No BAW config found in config. Workbench features will be disabled.")
+            return
         
-        cache_path = Path(self.config.config_path).parent / "tags_cache.json"
-        self.baw_api.enable_tag_cache(cache_path)
+        self.baw_api_clients = {}
+
+        for domain, token in self.config.baw_config.items():
+
+            parsed_url = urlparse(domain)
+
+            cur_client = baw_api(
+                token=token,
+                base_url=domain,
+                allow_prompt=allow_prompt
+            )
+
+            self.baw_api_clients[domain] = cur_client
+
+            if cur_client and not self.active_client:
+                self.active_client = cur_client
+                log.info(f"Set active workbench client to domain {domain}")
+
+            cache_path = Path(self.config.config_path).parent / f"tags_cache_{parsed_url.netloc}.json"
+            self.baw_api_clients[domain].enable_tag_cache(cache_path)
             
-        # Don't think we need this anymore, since we are allowing anonymous access now.
-        # if self.baw_api.token is not None:
-        #     # token supplied was valid OR was loaded from env and valid OR was prompted for and valid
-        #     # update our config to sync with the baw_api loaded token
-        #     log.debug("Auth token set")
-        #     self.config.baw_config['auth_token'] = self.baw_api.token
-        #     return True
-        # else:
-        #     log.warning("No auth token set")
-        #     return False
+        
+            
 
 
     def fetch_workbench_tags(self):
         """
         """
         self.workbench_tags = []
+        workbench_tags = []
 
+        for domain, client in self.baw_api_clients.items():
 
-        # get all taxonomic tags from the workbench
-        if self.baw_api is None:
-            log.warning("Tags not fetched, BAW API is not initialized")
-            return False
-        else:
-        
-            response = self.baw_api.baw_filter('/tags', {'is_taxonomic': {'eq': True}}, qsp={"disable_paging":"true"})
-            
-            if response is None:
-                log.warning("Tags not fetched, BAW API request failed")
+            # get all taxonomic tags from the workbench
+            if client is None:
+                log.warning(f"Tags not fetched for {domain}, BAW API is not initialized")
                 return False
             else:
-                self.workbench_tags = sorted([l['text'] for l in response.get('data', [])])
-                log.info(f"Fetched {len(self.workbench_tags)} workbench tags")
-                return True
             
+                response = client.baw_filter('/tags', {'is_taxonomic': {'eq': True}}, qsp={"disable_paging":"true"})
+                
+                if response is None:
+                    log.warning("Tags not fetched, BAW API request failed")
+                else:
+                    workbench_tags.extend([l['text'] for l in response.get('data', [])])
+                    log.info(f"Fetched {len(self.workbench_tags)} workbench tags")
+
+        self.workbench_tags = sorted(list(set(workbench_tags)))
+        return self.workbench_tags
+
+        
+                
 
     # def fetch_events(self):
     #     """
