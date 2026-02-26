@@ -10,20 +10,16 @@ def build(vm):
 
     # Create help buttons
     refine_help_btn = vm.help_system.create_help_button("help-refine-overview", "Help: Refine")
-    active_learning_help_btn = vm.help_system.create_help_button("help-active-learning", "Help: Active Learning")
 
     results_box  = vm.ui.get_region_box("refine.results")
 
     # inputs for how many results to fetch, target score
-    num_results = pn.widgets.IntInput(name="Num results", value=10, start=1)
-    target_score = pn.widgets.TextInput(name="Target score (float or 'None')", value="None")
+    num_results = pn.widgets.IntInput(name="Num results", value=10, start=1, width=140)
+    target_score = pn.widgets.TextInput(name="Target score (float or 'None')", value="None", width=180)
     active_label_picker = build_active_label_picker(vm)
 
     btn_search = pn.widgets.Button(name="Search with classifier", button_type="primary")
 
-    # we don't want a save button. it should save as soon as the label is picked
-    # but for now we will keep it
-    btn_save = pn.widgets.Button(name="Save Labels to DB", button_type="warning")
 
     vm.ui.render(pn.pane.Markdown("_No results yet._"), "refine.results")
 
@@ -33,7 +29,8 @@ def build(vm):
         ts = parse_target_score(target_score.value)
         vm.ui.search_with_classifier(vm.eng, 
                                      num_results=int(num_results.value), 
-                                     target_score=ts)
+                                     target_score=ts,
+                                     on_save=_save)
 
 
     def _save(_):
@@ -51,13 +48,11 @@ def build(vm):
 
 
     btn_search.on_click(_search)
-    btn_save.on_click(_save)
 
 
     return pn.Column(
         pn.Row("## Refine Model", pn.Spacer(), refine_help_btn),
-        pn.Row("Active Learning Search", pn.Spacer(), active_learning_help_btn),
-        pn.Row(active_label_picker, num_results, target_score, btn_search, btn_save, sizing_mode="stretch_width"),
+        pn.Row(active_label_picker, num_results, target_score, btn_search, sizing_mode="stretch_width"),
         results_box,
         sizing_mode="stretch_both",
     )

@@ -354,16 +354,18 @@ class agile_state:
             }
             if source_id not in sources:
                 domain, arid = baw_utils.extract_domain_and_arid(source_id)
-                result.metadata["domain"] = domain
-                result.metadata["arid"] = arid
                 sources[source_id] = {
                     "domain": domain,
-                    "arid": arid
+                    "arid": arid,
                 }
                 if domain and arid is not None:
                     domain_arids.setdefault(domain, set()).add(arid)
                 else:
                     log.warning(f"Could not extract domain and arid from source_id {source_id}")
+
+            cached = sources.get(source_id, {})
+            result.metadata["domain"] = cached.get("domain")
+            result.metadata["arid"] = cached.get("arid")
 
         # for each domain, fetch the recording info for all arids in that domain in a single filter request
         domain_recording_info = {}
@@ -387,6 +389,7 @@ class agile_state:
                             "regions.name",
                             "regions.id",
                             "duration_seconds",
+                            "recorded_date"
                         ]
                     },
                 },

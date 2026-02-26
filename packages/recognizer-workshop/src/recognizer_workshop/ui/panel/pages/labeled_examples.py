@@ -16,33 +16,18 @@ def build(vm):
     btn_fetch = pn.widgets.Button(name="Fetch labels from server", button_type="primary")
     btn_add   = pn.widgets.Button(name="Add fetched labels to DB", button_type="success", disabled=True)
     log       = pn.pane.Markdown("")
-    # Initialize tables with empty DataFrames to prevent None value errors
-    summary_table = pn.widgets.Tabulator(
-        value=pd.DataFrame(),
-        sizing_mode="stretch_width",
-        show_index=False,
-        disabled=True
-    )
-    outcomes_table = pn.widgets.Tabulator(
-        value=pd.DataFrame(),
-        sizing_mode="stretch_width",
-        show_index=False,
-        disabled=True
-    )
-    
-    # Details table - shows ALL outcomes, sortable and filterable
-    # Initialize with empty DataFrame that has the expected columns
-    empty_details_df = pd.DataFrame(columns=['Filter', 'Species', 'Type', 'Source', 'Offset', 'Outcome'])
-    details_table = pn.widgets.Tabulator(
-        value=empty_details_df,
-        sizing_mode="stretch_width", 
-        pagination='remote', 
-        page_size=50,
-        sorters=[{'field': 'Outcome', 'dir': 'asc'}],
-        show_index=False,
-        disabled=True  # Make read-only
-    )
+    summary_table = None
+    outcomes_table = None
+    details_table = None
+
+    summary_placeholder = pn.pane.Markdown("_No summary yet._")
+    outcomes_placeholder = pn.pane.Markdown("_No outcomes yet._")
+    details_placeholder = pn.pane.Markdown("_No outcome details yet._")
+
+    summary_container = pn.Column(summary_placeholder, sizing_mode="stretch_width")
+    outcomes_container = pn.Column(outcomes_placeholder, sizing_mode="stretch_width")
     details_title = pn.pane.Markdown("")
+    details_container = pn.Column(details_title, details_placeholder, sizing_mode="stretch_width")
     stash     = {"result_sets": None, "outcomes": None}
     
     project_ids_input = pn.widgets.TextInput(name="Project IDs (comma-separated)", placeholder="e.g., 123, 456")
@@ -132,6 +117,38 @@ def build(vm):
             filter_parts.append(f"Sites: {site_ids}")
         
         return ' + '.join(filter_parts) if filter_parts else fallback_name
+
+
+    def _ensure_tables():
+        nonlocal summary_table, outcomes_table, details_table
+        if summary_table is not None:
+            return
+        pn.extension('tabulator')
+        summary_table = pn.widgets.Tabulator(
+            value=pd.DataFrame(),
+            sizing_mode="stretch_width",
+            show_index=False,
+            disabled=True,
+        )
+        outcomes_table = pn.widgets.Tabulator(
+            value=pd.DataFrame(),
+            sizing_mode="stretch_width",
+            show_index=False,
+            disabled=True,
+        )
+        empty_details_df = pd.DataFrame(columns=['Filter', 'Species', 'Type', 'Source', 'Offset', 'Outcome'])
+        details_table = pn.widgets.Tabulator(
+            value=empty_details_df,
+            sizing_mode="stretch_width",
+            pagination='remote',
+            page_size=50,
+            sorters=[{'field': 'Outcome', 'dir': 'asc'}],
+            show_index=False,
+            disabled=True,
+        )
+        summary_container.objects = [summary_table]
+        outcomes_container.objects = [outcomes_table]
+        details_container.objects = [details_title, details_table]
 
 
     def _create_fetch_summary_table(result_sets):
@@ -355,6 +372,7 @@ def build(vm):
                 result = vm.eng.fetch_labels()
 
                 def _apply_success():
+                    _ensure_tables()
                     stash["result_sets"] = result
 
                     summary_df = _create_fetch_summary_table(result)
@@ -372,6 +390,7 @@ def build(vm):
 
                 def _apply_error():
                     log.object = f"Error: {e}"
+                    _ensure_tables()
                     summary_table.value = pd.DataFrame()
                     vm.notify(f"Fetch failed: {e}", "error")
 
@@ -403,6 +422,7 @@ def build(vm):
 
             stash["outcomes"] = outcomes_list
             outcomes_df = _create_outcomes_summary_table(outcomes_list)
+            _ensure_tables()
             
             if outcomes_df is not None:
                 outcomes_table.value = outcomes_df
@@ -462,12 +482,11 @@ def build(vm):
         log,
         pn.layout.Divider(),
         pn.pane.Markdown("### Label Summary"),
-        summary_table,
+        summary_container,
         pn.layout.Divider(),
         pn.pane.Markdown("### Database Insert Outcomes"),
-        outcomes_table,
+        outcomes_container,
         pn.layout.Divider(),
-        details_title,
-        details_table,
+        details_container,
         sizing_mode="stretch_both",
     )

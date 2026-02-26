@@ -26,6 +26,11 @@ def _parse_baw_timestamp(timestamp: str | None) -> datetime | None:
     ts = timestamp
     if ts.endswith("Z"):
         ts = ts[:-1] + "+0000"
+    if "-" in ts:
+        try:
+            return datetime.fromisoformat(ts.replace("+0000", "+00:00"))
+        except ValueError:
+            pass
     for fmt in ("%Y%m%dT%H%M%S%z", "%Y%m%dT%H%M%S"):
         try:
             return datetime.strptime(ts, fmt)
@@ -34,14 +39,34 @@ def _parse_baw_timestamp(timestamp: str | None) -> datetime | None:
     return None
 
 
-def _format_recording_time(recording_info: dict | None, offset_s: float) -> str:
-    canonical_name = (recording_info or {}).get("canonical_file_name")
-    timestamp, _site, _arid = parse_canonical_filename(canonical_name) if canonical_name else (None, None, None)
-    base_dt = _parse_baw_timestamp(timestamp)
+def _format_recording_datetime_parts(recording_info: dict | None, offset_s: float) -> tuple[str, str]:
+    info = recording_info or {}
+    base_dt = _parse_baw_timestamp(info.get("recorded_date"))
     if not base_dt:
-        return "Unknown time"
+        canonical_name = info.get("canonical_file_name")
+        timestamp, _site, _arid = parse_canonical_filename(canonical_name) if canonical_name else (None, None, None)
+        base_dt = _parse_baw_timestamp(timestamp)
+    if not base_dt:
+        return "Unknown date", "Unknown time"
+
     offset_dt = base_dt + timedelta(seconds=offset_s)
-    return offset_dt.isoformat(sep=" ", timespec="seconds")
+    tz_offset = offset_dt.utcoffset()
+    date_text = offset_dt.strftime("%Y-%m-%d")
+    if tz_offset is None:
+        time_text = offset_dt.strftime("%H:%M:%S")
+        return date_text, time_text
+
+    total_minutes = int(tz_offset.total_seconds() // 60)
+    sign = "+" if total_minutes >= 0 else "-"
+    abs_minutes = abs(total_minutes)
+    hours = abs_minutes // 60
+    minutes = abs_minutes % 60
+    if minutes == 0:
+        tz_text = f"{sign}{hours:02d}"
+    else:
+        tz_text = f"{sign}{hours:02d}:{minutes:02d}"
+    time_text = f"{offset_dt.strftime('%H:%M:%S')} {tz_text}"
+    return date_text, time_text
 
 
 class PanelQuerySelector(pn.Column):
@@ -221,7 +246,10 @@ class PanelEmbeddingDisplay(pn.Column):
             _timestamp, parsed_site, _arid = parse_canonical_filename(canonical_name) if canonical_name else (None, None, None)
             site_name = parsed_site
         self.site_name = site_name or "Unknown site"
-        self.recording_time_text = _format_recording_time(self.recording_info, self.offset_s)
+        self.recording_date_text, self.recording_time_text = _format_recording_datetime_parts(
+            self.recording_info,
+            self.offset_s,
+        )
 
         # --- state caches ---
         self._audio: Optional[np.ndarray] = None
@@ -239,13 +267,17 @@ class PanelEmbeddingDisplay(pn.Column):
             "<div style='text-align: center; padding: 60px; color: #666;'>"
             "<div style='font-size: 16px;'>🔄 Loading spectrogram...</div>"
             "</div>", 
-            height=240, 
+            height=200,
             sizing_mode="stretch_width"
         )
-        self._spec_pane = pn.pane.Matplotlib(tight=True, height=240, sizing_mode="stretch_width")
+        self._spec_pane = pn.pane.Matplotlib(tight=True, height=200, sizing_mode="stretch_width")
         # Use a Column to switch between loading and spec
-        self._spec_container = pn.Column(loading_msg, sizing_mode="stretch_width")
-        self._audio_pane = pn.pane.Audio(name="audio", sizing_mode="stretch_width", sample_rate=self.sample_rate_hz)
+        self._spec_container = pn.Column(loading_msg, sizing_mode="stretch_width", margin=(0, 0, 4, 0))
+        self._audio_pane = pn.pane.Audio(
+            name="audio",
+            sizing_mode="stretch_width",
+            sample_rate=self.sample_rate_hz,
+        )
 
         region_name = self.recording_info.get("regions.name")
         if isinstance(region_name, list):
@@ -260,6 +292,7 @@ class PanelEmbeddingDisplay(pn.Column):
             f"dataset: {self.dataset_name}",
             f"domain: {self.domain or 'Unknown'}",
             f"arid: {self.arid or 'Unknown'}",
+            f"date: {self.recording_date_text}",
             f"site: {self.site_name}",
         ]
         if site_id is not None:
@@ -282,8 +315,15 @@ class PanelEmbeddingDisplay(pn.Column):
         self._buttons_grid = self._build_label_buttons(button_columns)
 
         # assemble
-        score_text = f"score {self.score:.2f}"
-        title_label = f"{self.recording_time_text} • {self.site_name} • {score_text}"
+        score_text = f"({self.score:.2f})"
+        title_left = f"{self.recording_time_text} • {self.site_name}"
+        title_label = (
+            "<div style='display: flex; align-items: baseline; justify-content: space-between; gap: 8px; "
+            "font-size: 12px;'>"
+            f"<span>{html.escape(title_left)}</span>"
+            f"<span>{html.escape(score_text)}</span>"
+            "</div>"
+        )
         title_text = (
             f'<a href="{self.listen_link}" target="_blank" rel="noopener noreferrer">{title_label}</a>'
             if self.listen_link
@@ -292,7 +332,7 @@ class PanelEmbeddingDisplay(pn.Column):
         card = pn.Card(
             info_icon,
             self._spec_container,
-            pn.Row(self._audio_pane, sizing_mode="stretch_width"),
+            pn.Row(self._audio_pane, sizing_mode="stretch_width", margin=(0, 0, 4, 0)),
             self._buttons_grid,
             self._status,
             title=title_text,
@@ -368,7 +408,7 @@ class PanelEmbeddingDisplay(pn.Column):
                     cmap='Greys',
                     ax=ax,
                 )
-                ax.set_title(f"Window spectrogram ({self.window_size_s:.2f}s @ {self.offset_s:.2f}s)")
+                fig.subplots_adjust(left=0.06, right=0.995, top=0.99, bottom=0.08)
                 return fig
             
             fig = await asyncio.to_thread(_create_plot)
@@ -410,20 +450,49 @@ class PanelEmbeddingDisplayGroup(pn.Column):
     """
     Displays a grid of PanelEmbeddingDisplay items with pagination.
     """
-    def __init__(self, items: List[PanelEmbeddingDisplay], page_size: int = 10, **kwargs):
+    def __init__(
+        self,
+        items: List[PanelEmbeddingDisplay],
+        page_size: int = 10,
+        item_width: int = 300,
+        item_margin: int = 8,
+        on_save: Optional[Callable[[], None]] = None,
+        save_label: str = "Save responses",
+        **kwargs,
+    ):
         self._items = items
         self._page_size = max(1, int(page_size))
         self._page = 0
-        self._list_box = pn.Column(sizing_mode="stretch_width")
+        self._item_width = max(1, int(item_width))
+        self._item_margin = max(0, int(item_margin))
+        self._list_box = pn.FlexBox(
+            sizing_mode="stretch_width",
+            flex_wrap="wrap",
+            justify_content="flex-start",
+            align_content="flex-start",
+        )
 
-        self._prev = pn.widgets.Button(name="Prev", button_type="default")
-        self._next = pn.widgets.Button(name="Next", button_type="default")
+        self._prev = pn.widgets.Button(name="Prev", button_type="default", width=60, sizing_mode="fixed")
+        self._next = pn.widgets.Button(name="Next", button_type="default", width=60, sizing_mode="fixed")
         self._label = pn.pane.Markdown("", sizing_mode="stretch_width")
+        self._save_btn = None
+
+        if on_save:
+            self._save_btn = pn.widgets.Button(
+                name=save_label,
+                button_type="warning",
+                width=160,
+                sizing_mode="fixed",
+            )
+            self._save_btn.on_click(lambda _event: on_save())
 
         self._prev.on_click(lambda _: self._goto(-1))
         self._next.on_click(lambda _: self._goto(+1))
 
-        header = pn.Row(self._prev, self._next, self._label, sizing_mode="stretch_width")
+        header_items = [self._prev, self._next, self._label]
+        if self._save_btn:
+            header_items.extend([pn.Spacer(), self._save_btn])
+        header = pn.Row(*header_items, sizing_mode="stretch_width")
         super().__init__(header, self._list_box, sizing_mode="stretch_both", **kwargs)
         self._refresh()
 
@@ -442,6 +511,10 @@ class PanelEmbeddingDisplayGroup(pn.Column):
         db: hoplite_interface.HopliteDBInterface,
         labels: Sequence[str],
         page_size: int = 10,
+        item_width: int = 300,
+        item_margin: int = 8,
+        on_save: Optional[Callable[[], None]] = None,
+        save_label: str = "Save responses",
         sample_rate_hz: int = 32000,
         frame_rate: int = 100,
         window_size_s: float = 5.0,
@@ -473,9 +546,19 @@ class PanelEmbeddingDisplayGroup(pn.Column):
                     window_size_s=window_size_s,
                     melspec_layer=melspec_layer,
                     audio_loader=audio_loader,
+                    width=item_width,
+                    margin=item_margin,
                 )
             )
-        return cls(items=items, page_size=page_size, **kwargs)
+        return cls(
+            items=items,
+            page_size=page_size,
+            item_width=item_width,
+            item_margin=item_margin,
+            on_save=on_save,
+            save_label=save_label,
+            **kwargs,
+        )
 
     # --- internals ---
     def _pages(self) -> int:
@@ -493,8 +576,12 @@ class PanelEmbeddingDisplayGroup(pn.Column):
 
     def _refresh(self):
         current = self._slice()
+        for item in current:
+            item.width = self._item_width
+            item.sizing_mode = "fixed"
+            item.margin = self._item_margin
         self._list_box[:] = current
-        self._label.object = f"Page {self._page + 1} of {self._pages() + 1} — showing {len(current)} / {len(self._items)}"
+        self._label.object = f"Page {self._page + 1} of {self._pages() + 1}"
         # Enable/disable nav
         self._prev.disabled = (self._page == 0)
         self._next.disabled = (self._page >= self._pages())

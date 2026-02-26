@@ -1,18 +1,23 @@
 import asyncio
 
-import colorcet as cc
-import datashader as ds
-import holoviews as hv
 import panel as pn
-from bokeh.palettes import Category20
-from holoviews import opts, streams
-from holoviews.operation import datashader
-from holoviews.operation.datashader import dynspread
-
-from recognizer_workshop.app.services import umap_service
 
 
 def build(vm):
+    def _get_umap_service():
+        from recognizer_workshop.app.services import umap_service
+        return umap_service
+
+    def _lazy_imports():
+        import colorcet as cc
+        import datashader as ds
+        import holoviews as hv
+        from bokeh.palettes import Category20
+        from holoviews import streams
+        from holoviews.operation import datashader
+        from holoviews.operation.datashader import dynspread
+        return cc, ds, hv, Category20, streams, datashader, dynspread
+
     # Create help buttons
     explore_help_btn = vm.help_system.create_help_button("help-explore-overview", "Help: Explore")
     umap_help_btn = vm.help_system.create_help_button("help-umap-visualization", "Help: UMAP Visualization")
@@ -58,6 +63,7 @@ def build(vm):
 
         btn_generate.disabled = False
         db_path = vm.eng.config.db_path
+        umap_service = _get_umap_service()
         model_path, coords_path = umap_service._get_umap_paths(db_path) # Use helper from service
 
         if model_path.exists() and coords_path.exists():
@@ -80,7 +86,7 @@ def build(vm):
         try:
 
             await asyncio.to_thread(
-                umap_service.generate_umap_cache,
+                _get_umap_service().generate_umap_cache,
                 db=vm.eng.db,
                 db_path=vm.eng.config.db_path,
                 fit_subset_size=fit_subset_size.value,
@@ -103,7 +109,8 @@ def build(vm):
 
 
     def _create_and_display_plot():
-        df_plot = umap_service.load_umap_data(vm.eng.db, vm.eng.config.db_path)
+        cc, ds, hv, Category20, streams, datashader, dynspread = _lazy_imports()
+        df_plot = _get_umap_service().load_umap_data(vm.eng.db, vm.eng.config.db_path)
         if df_plot is None or df_plot.empty:
             plot_pane.objects = [pn.pane.Alert("Could not load UMAP data.", alert_type='warning')]
             return

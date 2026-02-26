@@ -11,6 +11,12 @@ log = logging.getLogger(__name__)
 
 
 def build(vm):
+    def _ensure_tabulator():
+        if getattr(_ensure_tabulator, "_loaded", False):
+            return
+        pn.extension('tabulator')
+        _ensure_tabulator._loaded = True
+
     # Create help buttons
     inference_help_btn = vm.help_system.create_help_button("help-inference-overview", "Help: Inference")
     batch_inference_help_btn = vm.help_system.create_help_button("help-batch-inference", "Help: Batch Processing")
@@ -82,6 +88,7 @@ def build(vm):
         
         # Create tabulator widget for preview
         # Use pagination to handle large datasets efficiently
+        _ensure_tabulator()
         tabulator_widget = pn.widgets.Tabulator(
             info['preview_df'],
             pagination='remote',  # This enables server-side pagination

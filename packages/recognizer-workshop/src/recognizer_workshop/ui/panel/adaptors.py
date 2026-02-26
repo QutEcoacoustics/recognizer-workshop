@@ -2,7 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
-from typing import Any, Iterable, Literal, Optional, Sequence
+from typing import Any, Iterable, Literal, Optional, Sequence, Callable
 import logging
 
 import numpy as np
@@ -294,6 +294,7 @@ class PanelUI(param.Parameterized):
         *,
         num_results: int = 10,
         target_score=None,
+        on_save: Optional[Callable[[], None]] = None,
         selector_region: str = "search.query_selector",
         results_region: str = "search.results",
     ):
@@ -324,7 +325,7 @@ class PanelUI(param.Parameterized):
         log.info(f'Starting search for label {active_label}...')
         eng.search_with_query(num_results=num_results, sample_size=None, target_score=target_score, target_label=active_label)
         log.info(f'Search completed for label {active_label}, showing results.')
-        self.show_results(eng, active_label, results_region=results_region)
+        self.show_results(eng, active_label, results_region=results_region, on_save=on_save)
         log.info(f'Results rendered for label {active_label}.')
 
 
@@ -334,6 +335,7 @@ class PanelUI(param.Parameterized):
         *,
         num_results: int = 10,
         target_score=None,
+        on_save: Optional[Callable[[], None]] = None,
         results_region: str = "refine.results",
     ):
         """Read samples from the selector, embed, run search, then render results."""
@@ -344,7 +346,12 @@ class PanelUI(param.Parameterized):
         if not active_label:
             self.render(pn.pane.Alert("Pick target label(s) on the Config tab.", alert_type="warning"), results_region)
             return
-        self.show_results(eng, active_label, results_region=results_region)
+        self.show_results(
+            eng,
+            active_label,
+            results_region=results_region,
+            on_save=on_save,
+        )
 
 
 
@@ -355,6 +362,7 @@ class PanelUI(param.Parameterized):
         *,
         results_region: str,
         page_size: int = 10,
+        on_save: Optional[Callable[[], None]] = None,
     ):
         """Render a pageable group for a label’s TopK results."""
         label_str = str(label)
@@ -371,6 +379,7 @@ class PanelUI(param.Parameterized):
             db=eng.db,
             labels=[label_str],
             page_size=page_size,
+            on_save=on_save,
             sample_rate_hz=eng.db_model_config.model_config.sample_rate,
             frame_rate=100,
             window_size_s=5.0,

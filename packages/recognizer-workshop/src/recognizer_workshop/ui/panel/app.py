@@ -3,20 +3,24 @@ import base64
 import logging
 import os
 import sys
+import time
+import importlib
 from pathlib import Path
 
+print(f"[startup] app.py import start {time.time():.3f}")
 import holoviews as hv
 import panel as pn
 
 from recognizer_workshop.ui.panel.view_model import ViewModel
-from recognizer_workshop.ui.panel.pages import config, create_database, labeled_examples, search, explore, train, refine, inference, status, log
 from recognizer_workshop.ui.panel.adaptors import PanelUI
 
 os.environ.setdefault("MPLBACKEND", "module://matplotlib_inline.backend_inline")
 
 # Load necessary extensions
-pn.extension('tabulator', 'material', sizing_mode="stretch_width")
+pn.extension(sizing_mode="stretch_width")
+print(f"[startup] panel extension loaded {time.time():.3f}")
 hv.extension('bokeh')
+print(f"[startup] holoviews extension loaded {time.time():.3f}")
 
 # --- Global Error Handling Setup ---
 error_banner = pn.pane.Alert(visible=False, sizing_mode="stretch_width")
@@ -34,12 +38,43 @@ def global_exception_handler(ex):
 pn.config.exception_handler = global_exception_handler
 
 
+def _import_page(name: str):
+    start = time.time()
+    module = importlib.import_module(f"recognizer_workshop.ui.panel.pages.{name}")
+    print(f"[startup] imported pages.{name} {time.time() - start:.3f}s")
+    return module
+
+
+config = _import_page("config")
+create_database = _import_page("create_database")
+labeled_examples = _import_page("labeled_examples")
+search = _import_page("search")
+explore = _import_page("explore")
+train = _import_page("train")
+refine = _import_page("refine")
+inference = _import_page("inference")
+status = _import_page("status")
+log = _import_page("log")
+print(f"[startup] pages imported {time.time():.3f}")
+
+_LOGO_CACHE: dict[Path, str] = {}
+
+
 def encode_png_to_base64(path: Path) -> str:
     """Reads a PNG file and returns a base64 encoded data URI."""
     with open(path, "rb") as f:
         binary_data = f.read()
     encoded_data = base64.b64encode(binary_data).decode("utf-8")
     return f"data:image/png;base64,{encoded_data}"
+
+
+def _get_cached_logo(path: Path) -> str:
+    cached = _LOGO_CACHE.get(path)
+    if cached:
+        return cached
+    encoded = encode_png_to_base64(path)
+    _LOGO_CACHE[path] = encoded
+    return encoded
 
 
 def build_app(vm):
@@ -49,22 +84,6 @@ def build_app(vm):
 
     vm.setup_help_system()
 
-    # DEBUG: Check if handler is attached
-    test_logger = logging.getLogger('recognizer_workshop')
-    print(f"Logger handlers: {test_logger.handlers}")
-    print(f"Logger level: {test_logger.level}")
-    print(f"VM log handler: {vm.log_handler}")
-    print(f"Log pane type: {type(vm.log_pane)}")
-    print(f"Log pane object: {vm.log_pane.object}")
-    
-    # Test logs
-    test_logger.info("🚀 Application started - this is a test log message")
-    test_logger.warning("⚠️ This is a warning test")
-    test_logger.error("❌ This is an error test")
-
-    # Check again after logging
-    print(f"Log pane object after logging: {vm.log_pane.object[:200] if vm.log_pane.object else 'EMPTY!'}")
-   
     template = pn.template.FastListTemplate(
         title="Recognizer Workshop",
         sidebar_width=400,
@@ -106,15 +125,14 @@ def build_app(vm):
     </div>
     """)
 
-    # seems to be problematic to do a relative src to the image files in the html, but
-    # we can read and encode them here. TODO: maybe cache this for load time improvement?
+    # seems to be problematic to do a relative src to the image files in the html
     app_dir = Path(__file__).parent
     qut_logo_path = app_dir / "assets" / "qut_logo_2.png"
     ardc_logo_path = app_dir / "assets" / "ardc_logo_2.png"
     perch_logo_path = app_dir / "assets" / "perch_humpback2.png"
-    qut_logo_base64 = encode_png_to_base64(qut_logo_path)
-    ardc_logo_base64 = encode_png_to_base64(ardc_logo_path)
-    perch_logo_base64 = encode_png_to_base64(perch_logo_path)
+    qut_logo_base64 = _get_cached_logo(qut_logo_path)
+    ardc_logo_base64 = _get_cached_logo(ardc_logo_path)
+    perch_logo_base64 = _get_cached_logo(perch_logo_path)
 
     header_logos = pn.pane.HTML(f"""
     <div style="display: flex; align-items: center;  justify-content: space-between; width: 290px; gap: 20px; background: white; padding: 5px 10px; border-radius: 2px;">
@@ -124,7 +142,6 @@ def build_app(vm):
     </div>
     """)
     
-    # 3. Create the main content (tabs)
     tabs = pn.Tabs(
         ("Config", config.build(vm)),
         ("Database", create_database.build(vm)),
@@ -135,11 +152,10 @@ def build_app(vm):
         ("Refine", refine.build(vm)),
         ("Inference", inference.build(vm)),
         ("Status", status.build(vm)),
-        #("Logs", vm.log_pane),
-        ("Logs",  log.build(vm)),
+        ("Logs", log.build(vm)),
         sizing_mode="stretch_width",
         min_height=500,
-        scroll=True
+        scroll=True,
     )
 
 

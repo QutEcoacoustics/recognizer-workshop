@@ -1,7 +1,12 @@
 
 import os, sys, argparse
+import time
+print(f"[startup] serve.py import start {time.time():.3f}")
 import panel as pn
+print(f"[startup] panel imported {time.time():.3f}")
+
 from recognizer_workshop.ui.panel.app import create_app_session
+print(f"[startup] app module imported {time.time():.3f}")
 
 
 import logging, sys, os, asyncio
@@ -49,6 +54,7 @@ def _setup_logging():
         pass
 
 _setup_logging()
+print(f"[startup] logging configured {time.time():.3f}")
 log = logging.getLogger("serve")
 
 
@@ -61,12 +67,16 @@ def main(argv=None):
     p.add_argument("--autoreload", action="store_true")
     p.add_argument("--singleton", action="store_true")
     args = p.parse_args(argv)
+    print(f"[startup] main parsed args {time.time():.3f}")
 
     def get_app():
+        print(f"[startup] create_app_session start {time.time():.3f}")
         app, _vm = create_app_session()
+        print(f"[startup] create_app_session end {time.time():.3f}")
         return app
     
     what_to_serve = get_app() if args.singleton else get_app
+    print(f"[startup] pn.serve starting {time.time():.3f}")
 
     pn.serve(
         {"/": what_to_serve},
@@ -76,6 +86,7 @@ def main(argv=None):
         show=False,
         autoreload=args.autoreload,
     )
+    print(f"[startup] pn.serve returned {time.time():.3f}")
 
 if __name__ == "__main__":
     main()

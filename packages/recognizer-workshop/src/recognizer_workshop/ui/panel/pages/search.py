@@ -38,9 +38,6 @@ def build(vm):
     # todo: change text if the duration is < 5s
     btn_search = pn.widgets.Button(name="Select 5s window and search", button_type="primary")
 
-    # we don't want a save button. it should save as soon as the label is picked
-    # but for now we will keep it
-    btn_save = pn.widgets.Button(name="Save Labels to DB", button_type="warning")
 
     # --- Input method switcher ---
     input_tabs = pn.Tabs(
@@ -106,7 +103,12 @@ def build(vm):
         if not vm.eng:
             return vm.notify("Initialize first.", "error")
         ts = parse_target_score(target_score.value)
-        await vm.ui.search_with_selected_window(vm.eng, num_results=int(num_results.value), target_score=ts)
+        await vm.ui.search_with_selected_window(
+            vm.eng,
+            num_results=int(num_results.value),
+            target_score=ts,
+            on_save=_save,
+        )
 
     def _save(_):
         if not vm.eng:
@@ -122,7 +124,6 @@ def build(vm):
 
     btn_load_uri.on_click(_load_remote)
     btn_search.on_click(_search)
-    btn_save.on_click(_save)
 
 
 
@@ -132,7 +133,7 @@ def build(vm):
         pn.Row("## Search (single example)", pn.Spacer(), search_help_btn),
         input_tabs, # tab for choosing between xeno canto and file upload
         selector_box,
-        pn.Row(active_label_picker, num_results, target_score, btn_search, btn_save, sizing_mode="stretch_width"),
+        pn.Row(active_label_picker, num_results, target_score, btn_search, sizing_mode="stretch_width"),
         results_box,
         sizing_mode="stretch_both",
     )
