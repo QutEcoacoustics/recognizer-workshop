@@ -1,3 +1,4 @@
+import logging
 import numpy as np
 import tqdm
 from etils import epath
@@ -7,13 +8,16 @@ from perch_hoplite.db import interface as db_interface
 from typing import Any, Iterator, Sequence
 from concurrent import futures
 
+import logging
+log = logging.getLogger(__name__)
+
 
 def csv_worker_initializer_factory(row_func: Any = None) -> None:
   """
   Initialize the CSV worker.
   row_func: optional function. will return extra column headings if called with no arguments.
   """
-  csv_header = 'idx,dataset_name,source_id,offset,label,logits'
+  csv_header = 'idx,dataset_name,source_id,offset,label,score'
   extras = row_func() if row_func is not None else []
   csv_header = ','.join([csv_header] + extras)
 
@@ -101,4 +105,4 @@ def write_inference_csv(
       kept_idxes = batch_idxes[keep_rows]
       executor.submit(csv_worker_fn, kept_idxes, logits, state)
       detection_count += detections.sum()
-  print(f'Wrote {detection_count} detections to {output_filepath}')
+  log.info(f'Wrote {detection_count} detections to {output_filepath}')

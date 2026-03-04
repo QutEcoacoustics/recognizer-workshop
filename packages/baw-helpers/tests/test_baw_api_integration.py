@@ -7,15 +7,15 @@ import pytest
 
 pytestmark = pytest.mark.integration  # run with: pytest -m integration
 
-def test_status_ok(api_client):
+def test_status_ok(staging_api_client):
     """GET /status returns 2xx and JSON (or None if empty body)."""
-    resp = api_client.get("/status", timeout=15)
+    resp = staging_api_client.get("/status", timeout=15)
     # We don't assume exact schema; just ensure request worked.
-    assert api_client.last_response is not None
-    assert 200 <= api_client.last_response.status_code < 300
+    assert staging_api_client.last_response is not None
+    assert 200 <= staging_api_client.last_response.status_code < 300
     assert resp is None or isinstance(resp, (dict, list))
 
-def test_baw_filter_smoke(api_client):
+def test_baw_filter_smoke(staging_api_client):
     """
     POST /audio_recordings/filter/ with a minimal, harmless filter.
     We don't assume response schema; just assert it is 2xx and JSON-ish.
@@ -23,20 +23,20 @@ def test_baw_filter_smoke(api_client):
     # A super-safe filter: IDs greater than 0, and page down the result set
     qsp = {"per": 1, "page": 1}
     payload = {"filter": {"id": {"gt": 0}}}
-    resp = api_client.baw_filter("audio_recordings", payload, qsp=qsp)
+    resp = staging_api_client.baw_filter("audio_recordings", payload, qsp=qsp)
     # Assert transport worked
-    r = api_client.last_response
+    r = staging_api_client.last_response
     assert r is not None and 200 <= r.status_code < 300
     # Assert JSON-ish
     assert resp is None or isinstance(resp, (dict, list))
 
-def test_download_streams_to_disk(api_client, tmp_path):
+def test_download_streams_to_disk(staging_api_client, tmp_path):
     """
     Stream a small endpoint to disk to exercise download path.
     /status is JSON but streaming works regardless of content type.
     """
     dest = tmp_path / "status.json"
-    saved = api_client.download("/status", str(dest), timeout=15)
+    saved = staging_api_client.download("/status", str(dest), timeout=15)
     assert saved == str(dest)
     assert dest.exists() and dest.stat().st_size > 0
 
@@ -50,14 +50,14 @@ def test_download_streams_to_disk(api_client, tmp_path):
         pass
 
 @pytest.mark.parametrize("workers", [1, 3])
-def test_thread_safety_smoke(api_client, workers):
+def test_thread_safety_smoke(staging_api_client, workers):
     """
     Fire several concurrent GETs to ensure no crashes and sessions per thread behave.
     We don't assert thread-local internals; just that all calls succeed.
     """
     urls = ["/status"] * 5
     with ThreadPoolExecutor(max_workers=workers) as ex:
-        futs = [ex.submit(api_client.get, path, timeout=15) for path in urls]
+        futs = [ex.submit(staging_api_client.get, path, timeout=15) for path in urls]
         for f in as_completed(futs):
             resp = f.result()
             # Any of these are acceptable: dict/list JSON body or None (204/empty)

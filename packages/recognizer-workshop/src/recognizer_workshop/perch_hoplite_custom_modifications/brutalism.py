@@ -33,7 +33,12 @@ def brute_search_worker_fn(emb_ids: Sequence[int], state: dict[str, Any]):
   name = threading.current_thread().name
   emb_ids, embeddings = state[name + 'db'].get_embeddings(emb_ids)
   scores = state['score_fn'](embeddings, state['query_embedding'])
-  top_locs = np.argpartition(scores, state['search_list_size'], axis=-1)
+  if len(scores) > state['search_list_size']:
+    top_locs = np.argpartition(scores, state['search_list_size'], axis=-1)
+  else:
+    # if the number of items in the batch is less than the search size, return all
+    # this can happen with the last batch
+    top_locs = np.arange(len(scores))  
   return emb_ids[top_locs], scores[top_locs]
 
 

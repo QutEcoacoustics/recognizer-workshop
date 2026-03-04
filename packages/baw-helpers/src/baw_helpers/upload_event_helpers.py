@@ -1,8 +1,11 @@
+import logging
 from baw_helpers import baw_helpers
 from hashlib import sha256
 import json
 from pathlib import Path
 import pandas as pd
+
+log = logging.getLogger(__name__)
 
 
 def lookup_arid(api, original_filename, filter_params):
@@ -15,10 +18,10 @@ def lookup_arid(api, original_filename, filter_params):
     
     data = response.get('data', [])
     if len(data) == 0:
-        print(f"No audio recording found for original filename: {original_filename}")
+        log.warning(f"No audio recording found for original filename: {original_filename}")
         return None
     elif len(data) > 1:
-        print(f"Warning: Multiple audio recordings found for original filename: {original_filename}. Returning None.")
+        log.warning(f"Warning: Multiple audio recordings found for original filename: {original_filename}. Returning None.")
         return None
     # Return the first audio recording ID found
     return data[0].get('id', None)
@@ -39,7 +42,7 @@ def make_arid_map(api, original_filenames, filter_params, cache=None):
     arid_map_hash =  sha256(''.join([Path(original_filenames).name 
                                      for original_filenames in original_filenames] + [str(item) for pair in filter_params.items() for item in pair]).encode()).hexdigest()[0:7]
     if (cache / f'arid_map_{arid_map_hash}.json').exists():
-        print(f"Loading ARID map from cache: {cache / f'arid_map_{arid_map_hash}.json'}")
+        log.info(f"Loading ARID map from cache: {cache / f'arid_map_{arid_map_hash}.json'}")
         with open(cache / f'arid_map_{arid_map_hash}.json', 'r') as f:
             arid_map = json.load(f)
     else:
@@ -50,11 +53,11 @@ def make_arid_map(api, original_filenames, filter_params, cache=None):
             if arid:
                 arid_map[str(original_filename)] = arid
             else:
-                print(f"Audio Recording ID not found for {original_filename}")
+                log.warning(f"Audio Recording ID not found for {original_filename}")
         # Save the ARID map to cache
         with open(cache / f'arid_map_{arid_map_hash}.json', 'w') as f:
             json.dump(arid_map, f, indent=2)
-        print(f"ARID map saved to cache: {cache / f'arid_map_{arid_map_hash}.json'}")
+        log.info(f"ARID map saved to cache: {cache / f'arid_map_{arid_map_hash}.json'}")
 
     return arid_map
 
@@ -87,7 +90,7 @@ def get_original_filename_and_type(file_path, type=None, prefix=None):
     if type == 'avianz':
         original_filename=basename.rsplit('.data', 1)[0]
 
-    print(f"Prepared file path: {basename}")
+    log.info(f"Prepared file path: {basename}")
 
     return original_filename, type
 
@@ -121,7 +124,7 @@ def process_files(api, file_paths, filter_params, extra_labels=None, prefix=None
             df = process_arbimon_file(item['file_path'], arid=arid, extra_labels=extra_labels)
         else:
             # warning for unknown file type
-            print(f"Warning: Unknown file type '{item['type']}' for file {item['file_path']}. Skipping.")
+            log.warning(f"Unknown file type '{item['type']}' for file {item['file_path']}. Skipping.")
             continue
 
         all_dfs.append(df)
@@ -135,7 +138,7 @@ def process_files(api, file_paths, filter_params, extra_labels=None, prefix=None
         csv_path = Path(csv_path)
         csv_path.parent.mkdir(parents=True, exist_ok=True)
         all_events_df.to_csv(csv_path, index=False)
-        print(f"Events saved to {csv_path}")
+        log.info(f"Events saved to {csv_path}")
 
     return all_events_df
 
@@ -152,7 +155,7 @@ def process_avianz_file(file_path,
     # read file_path as json
     with open(file_path, 'r') as f:
         avianz_data = json.load(f)
-        print(f"Data loaded from {file_path}.json: {avianz_data}")
+        log.debug(f"Data loaded from {file_path}.json: {avianz_data}")
 
     #pretty print the data
     #print(json.dumps(avianz_data, indent=2))
@@ -163,9 +166,9 @@ def process_avianz_file(file_path,
     #     arid = lookup_arid(api, project_id=project_id, original_filename=original_filename)
 
     if arid:
-        print(f"Audio Recording ID: {arid}")
+        log.info(f"Audio Recording ID: {arid}")
     else:
-        print("Audio Recording ID not found for the given file path.")
+        log.warning("Audio Recording ID not found for the given file path.")
 
     events = []
     
@@ -206,15 +209,15 @@ def process_raven_file(file_path,
                 arid=None,
                 extra_labels="RavenLite"):
     """Prepare the file path for Raven."""
-    print(f"Processing Raven file not implemented yet: {file_path}")
+    log.warning(f"Processing Raven file not implemented yet: {file_path}")
     return None
 
 def process_arbimon_file(file_path, 
                 project_id=None,
                 arid=None,
                 extra_labels="Arbimon"):
-    """Prepare the file path for Raven."""
-    print(f"Processing Raven file not implemented yet: {file_path}")
+    """Prepare the file path for Arbimon."""
+    log.warning(f"Processing Arbimon file not implemented yet: {file_path}")
     return None
 
 

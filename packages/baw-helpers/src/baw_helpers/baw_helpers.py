@@ -1,6 +1,8 @@
 """
 Helpers for BAW API interactions for agile modelling
 """
+import concurrent.futures
+import logging
 import random
 from . import baw_api
 import csv
@@ -10,6 +12,9 @@ import json
 from typing import Any, Union
 
 from baw_helpers.utils import stable_hash
+
+
+log = logging.getLogger(__name__)
 
 
 def simple_filter(
@@ -38,7 +43,7 @@ def simple_filter(
     add_filter_param("sites.id", site_ids)
     add_filter_param("id", arids)
     if len(filter_params) == 0:
-        return None
+        raise ValueError("At least one filter parameter must be provided.")
     
     return {
         "filter": filter_params
@@ -49,38 +54,46 @@ def wrap_filter(filter_params: dict) -> dict:
     return filter_params if "filter" in filter_params else {"filter": filter_params}
 
 
-def get_filter_result(
+def sample_filter_pages(
     api,                       
     model: str,
     filter_params: dict,
     save_path: str | Path,        
-    qsp: dict | None = None,
+    page_size: int = 500,
+    limit: int | None = None,
     use_cache: bool = True,
+    workers: int = 4,
     *,
-    include_qsp_in_hash: bool = True,
     pretty: bool = True,
 ) -> tuple[Any | None, Path]:
     """
-    Get filter result with simple file cache.
+    Fetch filtered results with per-page and full-result caching.
 
     Returns:
-        (data, path) where:
-          - data is parsed JSON (dict/list) or None on failure
-          - path is the full cache file path (even if not written due to failure)
+            (data, path) where:
+                - data is a list of items or None on failure
+                - path is the full cache file path (even if not written due to failure)
 
     Notes:
-      - Hash is computed over the *complete* 'filter' dict.
-      - If include_qsp_in_hash=True, the qsp is included in the hash basis.
+        - Hash is computed over the full payload (filter, model, page_size, limit).
+        - The first page is fetched to determine total pages and stride.
+        - Remaining pages are fetched concurrently when workers > 1.
+        - Each page is cached under a page file; the combined result is cached too.
     """
+
+    if page_size > 500:
+        page_size = 500  # enforce max page size to prevent server error (baw server limits filter page to 500, I think)
+
     payload = wrap_filter(filter_params)
-    basis = {"filter_payload": payload}
-    if include_qsp_in_hash and qsp:
-        basis["qsp"] = qsp
+    basis = {"filter_payload": payload, "model": model, "page_size": page_size, "limit": limit}
     # 3 bytes = 6 hex chars for ~16m possible values. 
     h = stable_hash(basis, digest_size=3)  # deterministic across key order/types
     out_dir = Path(save_path)
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / f"{model}_{h}.json"
+    pages_dir = out_dir / f"{model}_{h}_pages_{page_size}"
+    pages_dir.mkdir(parents=True, exist_ok=True)
+
 
     if use_cache and out_file.exists():
         try:
@@ -89,19 +102,109 @@ def get_filter_result(
             data = None  # corrupted cache; caller can decide what to do
         return data, out_file
 
-    # Miss or bypass: call API
-    data = api.baw_filter(model, payload, qsp=qsp)
-    if data is None:
-        # API layer already handled/logged; return path so caller knows where it would be
+    all_items = []
+    cur_page = 1
+    every_x_pages = 1
+    total_pages = None # unknown until we get the 1st page
+
+    def load_or_fetch_page(page_num: int) -> dict | None:
+        current_qsp = {"page": page_num, "items": page_size}
+        of_str = f" of ~{total_pages}" if total_pages else ""
+        page_file = pages_dir / f"page_{page_num}.json"
+        page_response = None
+
+        if use_cache and page_file.exists():
+            try:
+                page_response = json.loads(page_file.read_text(encoding="utf-8"))
+                log.info(
+                    "Loaded cached page %s%s for model '%s' with filter hash %s...",
+                    page_num,
+                    of_str,
+                    model,
+                    h,
+                )
+            except Exception:
+                page_response = None
+
+        if page_response is None:
+            log.info("Fetching page %s%s for model '%s' with filter hash %s...", page_num, of_str, model, h)
+            page_response = api.baw_filter(model, payload, qsp=current_qsp)
+            if page_response is None:
+                return None
+
+            with page_file.open("w", encoding="utf-8") as f:
+                if pretty:
+                    json.dump(page_response, f, ensure_ascii=False, indent=2)
+                else:
+                    json.dump(page_response, f, ensure_ascii=False, separators=(",", ":"))
+
+        return page_response
+
+    first_page_response = load_or_fetch_page(cur_page)
+    if first_page_response is None:
         return None, out_file
+
+    # figure out how many pages to skip each time to
+    # get the desired number of results (limit) while still spreading out across the dataset.
+    total_items = first_page_response["meta"]["paging"]["total"]
+    total_pages = (total_items + page_size - 1) // page_size
+    log.info("Page %s fetched: %s items (total %s)", cur_page, len(first_page_response.get("data", [])), total_items)
+    if limit is not None and total_items > limit:
+        pages_needed = limit // page_size
+        every_x_pages = max(1, total_pages // pages_needed) if pages_needed > 0 else 1
+
+    new_items = first_page_response.get("data", [])
+    all_items.extend(new_items)
+    if len(new_items) < page_size:
+        total_pages = cur_page
+
+    # generate a list of page number we will be fetching
+    page_numbers = []
+    next_page = cur_page + every_x_pages
+    while total_pages and next_page <= total_pages:
+        page_numbers.append(next_page)
+        next_page += every_x_pages
+
+    page_results: dict[int, dict] = {}
+    if page_numbers:
+        if workers is None or workers < 1:
+            workers = 1
+
+        if workers == 1:
+            for page_num in page_numbers:
+                page_response = load_or_fetch_page(page_num)
+                if page_response is None:
+                    return None, out_file
+                page_results[page_num] = page_response
+        else:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = {
+                    executor.submit(load_or_fetch_page, page_num): page_num
+                    for page_num in page_numbers
+                }
+                for future in concurrent.futures.as_completed(futures):
+                    page_num = futures[future]
+                    try:
+                        page_response = future.result()
+                    except Exception:
+                        return None, out_file
+                    if page_response is None:
+                        return None, out_file
+                    page_results[page_num] = page_response
+
+    for page_num in sorted(page_results):
+        new_items = page_results[page_num].get("data", [])
+        all_items.extend(new_items)
+        if len(new_items) < page_size:
+            break
 
     with out_file.open("w", encoding="utf-8") as f:
         if pretty:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+            json.dump(all_items, f, ensure_ascii=False, indent=2)
         else:
-            json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
+            json.dump(all_items, f, ensure_ascii=False, separators=(",", ":"))
 
-    return data, out_file
+    return all_items, out_file
 
 
 def get_random_audio_recordings(
@@ -121,13 +224,19 @@ def get_random_audio_recordings(
     """
 
     payload = wrap_filter(filter_params)
-    
 
     if "projection" not in payload:
         payload["projection"] = {
-                "include": ["id", "site_id", "canonical_file_name", "sites.name", 
-                            "regions.name", "regions.id", "duration_seconds"]
-            }
+            "include": [
+                "id",
+                "site_id",
+                "canonical_file_name",
+                "sites.name",
+                "regions.name",
+                "regions.id",
+                "duration_seconds",
+            ]
+        }
 
     if "sorting" not in payload:
         payload["sorting"] = {
@@ -135,31 +244,28 @@ def get_random_audio_recordings(
             "direction": order_direction,
         }
 
-    qsp = {"disable_paging": 'true'}
-    data, cache_path = get_filter_result(
+    recordings, cache_path = sample_filter_pages(
         api=api,
         model="audio_recordings",
         filter_params=payload,
         save_path=save_dir,
-        qsp=qsp,
+        page_size=500,
+        limit=limit * 5,  # fetch more than needed to allow for randomness while still being efficient
         use_cache=use_cache,
-        include_qsp_in_hash=True
     )
 
-    if not data or "data" not in data:
+    if not recordings:
         raise ValueError("No data found in response (or cached file) for audio_recordings filter")
 
-    recordings = data["data"]
     if not isinstance(recordings, list):
         raise ValueError("Unexpected response format: 'data' is not a list")
 
-    # 3) Deterministic shuffle preserving ordering
-
+    # Deterministic shuffle preserving ordering
     n = len(recordings)
     if limit >= n or limit < 0:
         return recordings, cache_path
     rng = random.Random(seed)
-    idxs = sorted(rng.sample(range(n), limit))   # pick k unique positions, then sort them
+    idxs = sorted(rng.sample(range(n), limit))
     out = [recordings[i] for i in idxs]
 
     return out, cache_path
@@ -190,19 +296,39 @@ def get_embeddings(
 
     result = baw_api.download(path, destination_file)
 
-    print(result)
+    log.info(result)
 
     return result
 
 
-def get_events_for_sites(baw_api, filter_params, tags=None):
+def get_embedding_counts(
+    baw_api,
+    filter_params: dict,
+    analysis_job_id: int=3,
+    analysis_name="perch-embeddings_4"):
+    """
+    For a particular filter (e.g., project, region, site), get counts of
+    audio recordings and counts of embeddings.
+    """
+    recordings = baw_api.baw_filter(model="audio_recordings", filter_params=filter_params)
+    results = baw_api.baw_filter(model=f"analysis_jobs/{analysis_job_id}/items", filter_params=filter_params)
+    num_recordings = recordings['meta']['paging']['total']
+    num_embeddings = results['meta']['paging']['total']
+    return recordings, results
+
+    # print(f"Found {len(recordings.get('data', []))} audio recordings.")
+    # print(f" Found {len(results.get('data', []))} embeddings.")
+
+
+def get_events_for_sites_old(baw_api, filter_params, tags=None):
     """Get any audio recordings that have events for a specific region.
     region_index is the index of the region in the regions list.
     @param num: maximum number of audio recordings to get.
 
     This we can only use site_ids, so we need to get those if project or region ids are provided.
     """
-
+    
+    # 
     site_id = filter_params.get("site_id")
     project_id = filter_params.get("project_id")
     region_id = filter_params.get("region_id")
@@ -233,6 +359,58 @@ def get_events_for_sites(baw_api, filter_params, tags=None):
 
 
     return response.get("data", [])
+
+
+def get_events_for_sites(baw_api, filter_params, tags=None):
+    """
+    Get audio_events for the filter_params provided.
+    If tags is provided, only get events with those tags.
+    Include verification summary. 
+    """
+    
+    ae_filter = filter_params.copy()
+
+    if "filter" in ae_filter:
+        ae_filter = ae_filter["filter"]
+
+    if tags is not None:
+        if isinstance(tags, str):
+            tags = [tags]
+        ae_filter['tags.text'] = { "in": tags }
+
+    data = {"filter": ae_filter, 
+            "projection": {
+            "only": [
+                "id",
+                "audio_recording_id",
+                "start_time_seconds",
+                "end_time_seconds",
+                "provenance_id",
+                "score",
+                "taggings"
+            ],
+            "add": [
+                "verification_summary"
+            ]
+        }
+    }
+
+    response = baw_api.post("/audio_events/filter?disable_paging=true", data=data)
+    # maybe site by site? or if not then paging, but that is complicated
+
+    events =  response.get("data", [])
+
+    tag_ids = list(set([tagging['tag_id'] for event in events for tagging in event.get('taggings', [])]))
+
+    tags = baw_api.tags.get_by_ids(tag_ids)
+
+    for event in events:
+        for tagging in event.get('taggings', []):
+            tagging['tag'] = tags.get(tagging['tag_id'], None)
+
+    return events
+
+
 
 
 def get_verifications_for_sites(api, event_ids=None, filter_params=None):
@@ -285,7 +463,7 @@ def get_untagged_events(api, filter_params, save_path=None):
             writer.writeheader()
             for event in events_without_taggings:
                 writer.writerow(event)
-        print(f"Saved {len(events_without_taggings)} untagged events to {save_path}")
+        log.info(f"Saved {len(events_without_taggings)} untagged events to {save_path}")
     
     return events_without_taggings
 
@@ -322,7 +500,7 @@ def annotation_upload_csv(api, filepath_to_csv, provenance_id, import_name, comm
         if response and 'data' in response:
             import_id = response['data']['id']
         else:
-            print("Failed to create a new audio_event_import record.")
+            log.error("Failed to create a new audio_event_import record.")
             return
 
     event_file_upload_endpoint = f"/audio_event_imports/{import_id}/files"
@@ -339,24 +517,29 @@ def annotation_upload_csv(api, filepath_to_csv, provenance_id, import_name, comm
                 'commit': commit
             }
 
-            print(f"Uploading '{filepath_to_csv.name}' to the '{event_file_upload_endpoint}' endpoint...")
+            log.info(f"Uploading '{filepath_to_csv.name}' to the '{event_file_upload_endpoint}' endpoint...")
             
-            # 5. Call the post_multipart method
-            response = api.post_files(  
-                endpoint=event_file_upload_endpoint,
-                files=files_payload,
-                params=params
-            )
+            try:
+                response = api.post_files(
+                    endpoint=event_file_upload_endpoint,
+                    files=files_payload,
+                    params=params
+                )
+            except Exception as e:
+                log.error(f"An error occurred during the upload: {e}")
+                return
+        
 
-            print("\n--- API Response ---")
+
+            log.info("\n--- API Response ---")
             if response:
                 api.print_response(response)
             else:
-                print("Upload failed. Check the error messages above.")
+                log.error("Upload failed. Check the error messages above.")
 
             return response
 
     except FileNotFoundError:
-        print(f"ERROR: The file was not found at the path: {filepath_to_csv}")
+        log.error(f"ERROR: The file was not found at the path: {filepath_to_csv}")
     except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+        log.error(f"An unexpected error occurred: {e}")

@@ -4,7 +4,83 @@
   // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
   "version": "0.2.0",
   "configurations": [
-    
+
+    {
+        // use the serve module in the recognizer_workshop package
+        // to run the panel app 
+        "name": "Panel: recognizer-workshop-serve (local)",
+        "type": "python",
+        "request": "launch",
+        "module": "recognizer_workshop.ui.panel.serve",
+        "args": ["--port", "5006", "--address", "127.0.0.1"],
+        "console": "integratedTerminal",
+        "justMyCode": false,
+        "env": {
+            "CUDA_VISIBLE_DEVICES": "-1",
+            "TF_METAL_DEVICE_NS": "0",
+            "TF_ENABLE_ONEDNN_OPTS": "0"
+        }
+    }
+    {
+        "name": "Panel: Debug Notebook App",
+        "type": "python",
+        "request": "launch",
+        // Use "module" to run "python -m panel"
+        "module": "panel",
+        // These are the arguments passed to "panel serve"
+        "args": [
+            "serve",
+            "${workspaceFolder}/packages/recognizer-workshop/src/recognizer_workshop/ui/panel/app.ipynb",
+            "--show",
+            // Panel's default debug port is 5006
+            "--port",
+            "5006",
+            // The --debug flag enables Panel's verbose logging
+            "--log-level",
+            "debug"
+        ],
+        "console": "integratedTerminal",
+        "justMyCode": false
+    },
+    {
+        "name": "JupyterLab: Launch and Debug Panel App",
+        "type": "python",
+        "request": "launch",
+        "module": "jupyter",
+        "args": [
+            "lab",
+            "--no-browser"
+        ],
+        "justMyCode": false,
+        "console": "integratedTerminal"
+    },
+    {
+        "name": "Python: Attach to Panel App",
+        "type": "python",
+        "request": "attach",
+        "connect": {
+            "host": "localhost",
+            "port": 5678
+        },
+        "pathMappings": [
+            {
+                "localRoot": "${workspaceFolder}",
+                "remoteRoot": "${workspaceFolder}"
+            }
+        ]
+    },
+    {
+        "name": "Panel: Run with Autoreload",
+        "type": "python",
+        "request": "launch",
+        // This tells VS Code to run the script directly,
+        // which correctly handles the sys.path modifications.
+        "program": "${workspaceFolder}/scripts/run_server.py",
+        "args": [],
+        "jinja": true,
+        "justMyCode": true 
+    },
+
     {
       "name": "Python Debugger: Current File",
       "type": "debugpy",

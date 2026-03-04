@@ -1,0 +1,380 @@
+<div class="help-container">
+    <h2 class="help-title">🚀 Recognizer Workshop Help</h2>
+    <p>Welcome to the the Recognizer Workshop.</p>
+    <p>In this workshop we will be using a database of <a href="https://www.nature.com/articles/s41598-023-49989-z" target="_blank">Perch embeddings</a> 
+        of recordings located on <a href="https://www.ecosounds.org/" target="_blank">Ecosounds</a> to train a linear classifier. </p>
+    
+    <div class="quick-nav">
+        <h3>📑 Quick Navigation</h3>
+        <ul>
+            <li><a href="#help-config-overview">Configuration</a></li>
+            <li><a href="#help-database-overview">Database</a></li>
+            <li><a href="#help-labeled-examples-overview">Labeled Examples</a></li>
+            <li><a href="#help-search-overview">Search</a></li>
+            <li><a href="#help-explore-overview">Explore</a></li>
+            <li><a href="#help-train-overview">Train</a></li>
+            <li><a href="#help-refine-overview">Refine</a></li>
+            <li><a href="#help-inference-overview">Inference</a></li>
+        </ul>
+    </div>
+    
+    <!-- CONFIGURATION PAGE -->
+    <div id="help-config-overview" class="help-section help-section-config">
+        <h2>📋 Configuration Page</h2>
+        <p>The Configuration page is your starting point. Set up your project settings, API connections, and folder paths here before proceeding to other tabs.</p>
+        
+        <div id="help-project-file" class="help-subsection">
+            <h4>📄 Project File Management</h4>
+            <ul>
+                <li><strong>New:</strong> Create a fresh configuration</li>
+                <li><strong>Open:</strong> Load an existing configuration file</li>
+                <li><strong>Save:</strong> Save current settings (auto-saves as you type)</li>
+                <li><strong>Save As:</strong> Save to a new location</li>
+            </ul>
+        </div>
+        
+        <div id="help-annotator-id" class="help-subsection-alt">
+            <h4>👤 Annotator ID</h4>
+            <p>Just put your name in here. It's not really important.</p>
+        </div>
+        
+        <div id="help-api-domain" class="help-subsection-alt">
+            <h4>🌐 API Domain</h4>
+            <p>The base URL for your Workbench API server - either:</p>
+            <ul>
+                <li>https://api.ecosounds.org</li>
+                <li>https://api.acousticobservatory.org (not supported yet)<li>
+            </ul>
+        </div>
+        
+        <div id="help-api-token" class="help-subsection-alt">
+            <h4>🔑 API Token</h4>
+            <p>Your personal authentication token for accessing the Workbench API. To find your token</p>
+            <ol>
+                <li>Log into the Workbench website (Ecosounds)</li>
+                <li>Go to your profile page (top right corner)
+                    <ul><li><a href="https://www.ecosounds.org/my_account" target="_blank">https://www.ecosounds.org/my_account</a> </li></ul>
+                </li>
+                <li>At the bottom left of that page, there is a section for your API token, including a button to copy it</li>
+                <li>Paste the token here. Don't share it with anyone</li>
+            </ol>
+        </div>
+        
+        <div id="help-folder-config" class="help-subsection-alt">
+            <h4>📁 Advanced Folder Configuration</h4>
+            <p>Customize where your project files are stored. Leave empty to use sensible defaults.</p>
+            <ul>
+                <li><strong>DB Path:</strong> Local database files (default: ./db)</li>
+                <li><strong>Labeled Examples:</strong> Training examples (default: ./labeled_examples)</li>
+                <li><strong>Models:</strong> Trained models (default: ./models)</li>
+                <li><strong>Predictions:</strong> Results (default: ./predictions)</li>
+            </ul>
+            <p class="help-tip">💡 Tip: Use the folder buttons to browse and select directories.</p>
+        </div>
+        
+        <div id="help-engine" class="help-subsection-alt">
+            <h4>🚀 Engine Initialization</h4>
+            <p>Once you have configured your settings, click this button to initialise the project.</p>
+        </div>
+        
+        <div id="help-target-labels" class="help-subsection-alt">
+            <h4>🎯 Target Labels Configuration</h4>
+            <p>Select which species or sound types you want to detect and work with.</p>
+            <ul>
+                <li>Under "species" Choose from tags available in Ecosounds.</li>
+                <li>If your target species is not listed, contact the admins to get it added</li>
+                <li>If you are building a recognizer to distinguish between multiple call types of the same species, add separate entries for each call type.</li>
+            </ul>
+        </div>
+    </div>
+    
+    <!-- DATABASE PAGE -->
+    <div id="help-database-overview" class="help-section help-section-database">
+        <h2>🗄️ Database Page</h2>
+        <p>This Recognizer Workshop uses "embeddings" to represent audio data in a way that makes it easier to analyze and classify sounds.</p>
+        <p>Embeddings are numerical representations of audio segments that capture their acoustic features. By converting audio into embeddings, 
+            the system can efficiently compare and group similar sounds, making tasks like searching, exploring, and training models more effective.</p>
+        <p>Specficially this workshop uses <i>Perch</i> embeddings. These are generated by the perch embedding and classification deep neurual network.</p>
+        <p>Because this Recognizer Workshop is integrated with ecosounds, we can take advantage of the fact that the embeddings are computed by the ecosounds platform.</p>
+        <p>This step downloads embeddings for your ecosounds project and builds a USEARCH index and sqlite database. 
+            This makes is possible to efficiently search and compare embedded audio segments.
+            The database also keeps track of the labelled examples we find which are used to build our recognizer. 
+        </p>
+
+        
+        <div id="help-db-creation-settings" class="help-subsection">
+            <h4>📍 Database Creation Settings</h4>
+            <p>This process is quite slow and, although the emebdding representation is quite small, we still need a fair amount of space to build an embedding database
+                for very large numbers of audio files. Therefore, for the recognizer training process, we typically use a random subset of the audio. 
+                (Once the recognizer has been trained, and saved as an artefact, it can be applied to the full dataset)
+            </p>
+            <ul>
+                <li>The number of recordings to add to the database (the maximum for this setting is 1000), or</li>
+                <li>The maximum number of 5-sec segments to add to the database</li>
+            </ul>
+        </div>
+        
+
+        <div id="help-recordings-filter" class="help-subsection-alt">
+            <h4>🔧 Database Management</h4>
+            <p>You can define the set of Ecsounds audio recordings to work with by entering ids for one of the following.</p>
+            <ul>
+                <li>Project ids </li>
+                <li>Region ids </li>
+                <li>Site ids </li>
+            </ul>
+            <p>These ids can be found in the Ecosounds web interface. Log in and search for your project to find the relevant ids.</p>
+        </div>
+    </div>
+    
+    <!-- LABELED EXAMPLES PAGE -->
+    <div id="help-labeled-examples-overview" class="help-section help-section-labeled-examples">
+        <h2>🏷️ Labeled Examples Page</h2>
+        <p> 
+            Your database of embedded audio segments can be used to train a classifier if some of those examples have labels.          
+            The Agile modelling workflow involves adding positive or negative labels to these embedded audio examples.
+        </p>
+        <p>
+            In the next sections you can do that through searching for similar examples to reference examples you provide, and then by using the initial version of the classifier
+            to search and incrementally improve it. 
+        </p>
+        <p>
+            But, we can also download any existing labels from Ecosounds as a starting point. 
+        </p>
+        
+
+        <div id="help-recordings-filter-labelled-examples" class="help-subsection-alt">
+            <h4>Dataset identifier</h4>
+            <p>Enter the project, region or site id to search Ecosounds for any existing labelled examples. This should match the projects or sites that your 
+                database of embeddings comes from. We can only add labels to examples that are already part of your database. This step does not add new examples to your database.</p>
+            <p>These can be found in the Ecosounds web interface. Log in and search for your project to find the relevant ids.</p>
+            <p>Once you have entered the ids, can pull all the labels from your Ecosounds project or site. A summary of what was found will be displayed. 
+                labelled examples for tags that don't match your target labels will used as negative examples for your target labels. 
+            </p>
+        </div>
+
+    </div>
+    
+    <!-- SEARCH PAGE -->
+    <div id="help-search-overview" class="help-section help-section-search">
+        <h2>🔍 Search Page</h2>
+        <p>We can add labelled examples to our database by providing a reference example and searching for similar examples in the database, 
+            then reviewing the results and labelling them as positive or negative examples. 
+        </p>
+        
+            <p>You can either</p>
+            <ul>
+                <li>Enter a Xeno canto ID (prefixed with "XC")</li>
+                <li>Enter in a url of the reference audio file</li>
+                <li>Upload an audio file</li>
+            </ul>
+
+            <p>The File you upload should be pretty short, no more than about 20 seconds</p>
+
+            <p>The next step is to select a 5s segment of the audio to use as the search query. If the audio clip you provided is shorter
+                than 5s, the whole clip will be used.
+            </p>
+
+            <p> Active label:  If you are working with multiple labels (i.e. you defined multiple rows in the Target Labels section of 
+                the configuration page), you must select which label you are searching for. 
+            </p>
+
+            <p> After uploading your query, selecting the 5s segment of it, selecting the active label, press the search button. It will be embedded using the Perch embedding model and compared to all the examples
+                in your database. The most similar examples will be returned for your review.
+            </p>
+
+            <p>Click the label under the spectrogram 
+                <ul>
+                    <li>once to turn it Green if it is a positive example</li>
+                    <li>twice to turn it Orange if it is a negative example</li>
+                    <li>Leave it unclicked or (3 times to return to the unclicked state) if you are unsure, and it won't be added </li>
+                </ul>
+
+    </div>
+    
+    <!-- EXPLORE PAGE -->
+    <div id="help-explore-overview" class="help-section help-section-explore">
+        <h2>🔍 Explore Page</h2>
+        <p>Visualize your audio data in embedding space and discover patterns.</p>
+        
+        <div id="help-umap-visualization" class="help-subsection">
+            <h4>📊 UMAP Visualization</h4>
+            <p>UMAP (Uniform Manifold Approximation and Projection) is a technique that takes the complex, 
+                high-dimensional audio embeddings and projects them onto a simple 2D plot that you can visualize. 
+                Sounds that are of similar call-type should be close together in the high-dimensional <i>embedding space</i>, but 
+                it's hard to draw a plot with 1280 dimensions. Umap figures out how to place each embedding on a 2d space, 
+                so that items that are close together in the high dimensional space are also, generally, close together in 
+                the 2dimensional projection.  This visualization helps you understand the 
+                natural groupings and patterns in your data that might not be obvious otherwise.</p>
+
+            <p>Creating the UMAP plot involves 3 steps
+                <ol>
+                    <li>Learning the function that maps high-dimensional points to the 2D space. This is very time and memory intensive, so we do this with a random subset of your database just once.</li>
+                    <li>Running all the data through that function, giving each and every audio clip a 2D position</li>
+                    <li>Rendering the positive and negative items for the labelled data</li>
+                </ol>
+
+                 If new labels are added you only need to redo step 3.
+
+            </p>
+
+            <p>The "generate UMAP model and cache" button performs steps 1 and 2 and 3</p>
+            <p>If new data audio clips are added, you need to redo step 2 (but not step 1) by clicking the </p>
+
+            <p>The position within this projection of your labelled data is shown as colored points on the plot.</p>
+            <p>Click on your labelled data or on unlabeled grey examples to hear them.</p>
+            <p>Interactive 2D representation of your audio embeddings.</p>
+
+        </div>
+               
+
+    </div>
+    
+    <!-- TRAIN PAGE -->
+    <div id="help-train-overview" class="help-section help-section-train">
+        <h2>🎓 Train Page</h2>
+        <p>Train machine learning models using your labeled examples. The training process uses several key parameters to control how the model learns from your data.</p>
+        
+        <div id="help-training-algorithm-params" class="help-subsection">
+            <h4>⚙️ Algorithm Training Parameters</h4>
+            <p>These three parameters control how the training algorithm learns:</p>
+            <ul>
+                <li><strong>Learning Rate:</strong> How much to update the model weights at each step. Higher values learn faster but may be unstable.</li>
+                <li><strong>Number of Steps:</strong> How many times to look at all the labeled examples when training. More steps can improve performance but take longer.</li>
+                <li><strong>Batch Size:</strong> How many labeled examples to look at at once. Larger batches can be more stable but require more memory.</li>
+            </ul>
+        </div>
+        
+        <div id="help-labeled-data-params" class="help-subsection-alt">
+            <h4>📊 Labeled Data Parameters</h4>
+            <p>These parameters control how your labeled data is used during training:</p>
+            <ul>
+                <li><strong>Train Ratio:</strong> A random subset of your labeled audio is not used to train the model, but instead is used to test it. This helps you know roughly how well the model does on classifying examples that it has never seen before.</li>
+                <li><strong>Weak Negative Weight:</strong> Your database contains a lot of audio, most of which is probably not your target species. By taking some random clips from your unlabeled audio and treating them as negative examples, we can train on a wider variety of negative examples than what has been explicitly labeled as negative. However, because we don't know for sure that this process didn't choose a positive example by chance, we give each one less importance in the training.</li>
+                <li><strong>Weak Negatives Batch Size:</strong> How many of these randomly chosen examples to include for each batch (on top of the number in the strongly labeled batch).</li>
+            </ul>
+        </div>
+        
+
+    </div>
+    
+    <!-- REFINE PAGE -->
+    <div id="help-refine-overview" class="help-section help-section-refine">
+        <h2>✨ Refine Page</h2>
+        <p>Improve your models through iterative refinement and active learning.</p>
+        
+        <div id="help-active-learning" class="help-subsection">
+            <h4>🎯 Active Learning</h4>
+            <p>Efficiently improve models by labeling the most informative examples.</p>
+            <ul>
+                <li>System suggests uncertain predictions for review</li>
+                <li>Focus labeling effort where it matters most</li>
+                <li>Iteratively retrain with new labels</li>
+                <li>Achieve better performance with less labeling</li>
+            </ul>
+        </div>
+        
+
+    </div>
+    
+    <!-- INFERENCE PAGE -->
+    <div id="help-inference-overview" class="help-section help-section-inference">
+        <h2>🔮 Inference Page</h2>
+        <p>Apply your trained models to new audio data for automated detection.</p>
+        
+        <div id="help-batch-inference" class="help-subsection">
+            <h4>📦 Batch Processing</h4>
+            <p>Process large amounts of audio data efficiently.</p>
+            <ul>
+                <li>Select audio files or folders to process</li>
+                <li>Choose appropriate models for each target species</li>
+                <li>Set confidence thresholds</li>
+                <li>Monitor processing progress</li>
+            </ul>
+        </div>
+        
+        <div id="help-result-review" class="help-subsection-alt">
+            <h4>📋 Result Review</h4>
+            <p>Examine and validate automated detections.</p>
+            <ul>
+                <li>Browse detections sorted by confidence</li>
+                <li>Listen to detected segments</li>
+                <li>Confirm or reject automated detections</li>
+                <li>Export validated results</li>
+            </ul>
+        </div>
+        
+        <div id="help-real-time-inference" class="help-subsection-alt">
+            <h4>⚡ Real-time Processing</h4>
+            <p>Process audio streams as they arrive.</p>
+            <ul>
+                <li>Connect to live audio sources</li>
+                <li>Set up automated alerts</li>
+                <li>Monitor detection rates</li>
+                <li>Log all detections for later review</li>
+            </ul>
+        </div>
+        
+        <div id="help-export-results" class="help-subsection-alt">
+            <h4>📤 Export Results</h4>
+            <p>Share your findings with collaborators and databases.</p>
+            <ul>
+                <li>Export to CSV, JSON, or XML formats</li>
+                <li>Include confidence scores and metadata</li>
+                <li>Upload to Workbench or other databases</li>
+                <li>Generate summary reports</li>
+            </ul>
+        </div>
+    </div>
+    
+    <!-- GENERAL TIPS -->
+    <div id="help-general-tips" class="help-section help-section-general-tips">
+        <h2>💡 General Tips & Best Practices</h2>
+        
+        <div id="help-workflow-tips" class="help-subsection">
+            <h4>🔄 Workflow Tips</h4>
+            <ul>
+                <li>Always start with the Configuration page</li>
+                <li>Save your configuration frequently</li>
+                <li>Test with small datasets before scaling up</li>
+                <li>Keep notes on parameter settings and results</li>
+                <li>Backup your models and training data</li>
+            </ul>
+        </div>
+        
+        <div id="help-troubleshooting" class="help-subsection-alt">
+            <h4>🔧 Troubleshooting</h4>
+            <ul>
+                <li>Check the Status tab for system health</li>
+                <li>Review the Logs tab for error messages</li>
+                <li>Verify your API token is correct and active</li>
+                <li>Ensure you have sufficient disk space</li>
+                <li>Restart the engine if components seem unresponsive</li>
+            </ul>
+        </div>
+        
+        <div id="help-performance-tips" class="help-subsection-alt">
+            <h4>⚡ Performance Tips</h4>
+            <ul>
+                <li>Use SSD storage for better I/O performance</li>
+                <li>Increase batch sizes if you have more RAM</li>
+                <li>Process audio in chunks for large files</li>
+                <li>Consider GPU acceleration for training</li>
+                <li>Close unused browser tabs to free memory</li>
+            </ul>
+        </div>
+    </div>
+    
+    <div class="help-footer">
+        <h3>📚 Need More Help?</h3>
+        <p>This help system covers the main features of the Recognizer Workshop. For additional support:</p>
+        <ul>
+            <li>Check the project documentation</li>
+            <li>Visit the community forums</li>
+            <li>Report bugs or request features on GitHub</li>
+            <li>Contact the development team</li>
+        </ul>
+    </div>
+</div>
+    </div>
+</div>
