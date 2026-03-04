@@ -233,3 +233,51 @@ def test_sample_filter_pages_paging_and_caching(mock_api_client, tmp_path):
     
     # 2. API should NOT have been called
     mock_api_client.baw_filter.assert_not_called()
+
+
+@pytest.mark.integration
+def test_sample_filter_pages_real_api_shape_and_cache(staging_api_client, tmp_path):
+    save_dir = tmp_path / "sample_filter_pages_real"
+    filter_params = simple_filter(project_ids=1)
+    filter_params["projection"] = {
+            "include": [
+                "id",
+                "site_id",
+                "canonical_file_name",
+                "sites.name",
+                "regions.name",
+                "regions.id",
+                "duration_seconds",
+            ]
+        }
+    data, cache_path = sample_filter_pages(
+        api=staging_api_client,
+        model="audio_recordings",
+        filter_params=filter_params,
+        save_path=save_dir,
+        page_size=50,
+        limit=120,
+        use_cache=True,
+    )
+
+    assert isinstance(data, list)
+    assert cache_path.exists()
+    assert cache_path.parent == save_dir
+    assert all(not isinstance(item, list) for item in data)
+
+    if len(data) > 0:
+        assert isinstance(data[0], dict)
+
+    data_cached, path_cached = sample_filter_pages(
+        api=staging_api_client,
+        model="audio_recordings",
+        filter_params=filter_params,
+        save_path=save_dir,
+        page_size=50,
+        limit=120,
+        use_cache=True,
+    )
+
+    assert path_cached == cache_path
+    assert isinstance(data_cached, list)
+    assert all(not isinstance(item, list) for item in data_cached)

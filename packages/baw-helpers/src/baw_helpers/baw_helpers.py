@@ -1,6 +1,7 @@
 """
 Helpers for BAW API interactions for agile modelling
 """
+import concurrent.futures
 import logging
 import random
 from . import baw_api
@@ -61,20 +62,23 @@ def sample_filter_pages(
     page_size: int = 500,
     limit: int | None = None,
     use_cache: bool = True,
+    workers: int = 4,
     *,
     pretty: bool = True,
 ) -> tuple[Any | None, Path]:
     """
-    Get filter result with simple file cache.
+    Fetch filtered results with per-page and full-result caching.
 
     Returns:
-        (data, path) where:
-          - data is parsed JSON (dict/list) or None on failure
-          - path is the full cache file path (even if not written due to failure)
+            (data, path) where:
+                - data is a list of items or None on failure
+                - path is the full cache file path (even if not written due to failure)
 
     Notes:
-      - Hash is computed over the *complete* 'filter' dict.
-      - If include_qsp_in_hash=True, the qsp is included in the hash basis.
+        - Hash is computed over the full payload (filter, model, page_size, limit).
+        - The first page is fetched to determine total pages and stride.
+        - Remaining pages are fetched concurrently when workers > 1.
+        - Each page is cached under a page file; the combined result is cached too.
     """
 
     if page_size > 500:
@@ -87,6 +91,8 @@ def sample_filter_pages(
     out_dir = Path(save_path)
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / f"{model}_{h}.json"
+    pages_dir = out_dir / f"{model}_{h}_pages_{page_size}"
+    pages_dir.mkdir(parents=True, exist_ok=True)
 
 
     if use_cache and out_file.exists():
@@ -101,33 +107,95 @@ def sample_filter_pages(
     every_x_pages = 1
     total_pages = None # unknown until we get the 1st page
 
-    while True:
-        current_qsp = {"page": cur_page, "items": page_size}
-        log.info("Fetching page %s for model '%s' with filter hash %s...", cur_page, model, h)
-        page_response = api.baw_filter(model, payload, qsp=current_qsp)
-        if page_response is None or page_response.get("meta") is None:
-            # If any page fails, the whole dataset is compromised.
-            # Return None so the caller knows something went wrong.
-            return None, out_file
-        
-        if cur_page == 1:
+    def load_or_fetch_page(page_num: int) -> dict | None:
+        current_qsp = {"page": page_num, "items": page_size}
+        of_str = f" of ~{total_pages}" if total_pages else ""
+        page_file = pages_dir / f"page_{page_num}.json"
+        page_response = None
 
-            # figure out how many pages to skip each time to 
-            # get the desired number of results (limit) while still spreading out across the dataset.   
-            total_items = page_response["meta"]["paging"]["total"]
-            total_pages = (total_items + page_size - 1) // page_size
-            log.info("Page %s fetched: %s items (total %s)", cur_page, len(page_response.get("data", [])), total_items)
-            if limit is not None and total_items > limit:
-                pages_needed = limit // page_size
-                every_x_pages = max(1, total_pages // pages_needed) if pages_needed > 0 else 1
+        if use_cache and page_file.exists():
+            try:
+                page_response = json.loads(page_file.read_text(encoding="utf-8"))
+                log.info(
+                    "Loaded cached page %s%s for model '%s' with filter hash %s...",
+                    page_num,
+                    of_str,
+                    model,
+                    h,
+                )
+            except Exception:
+                page_response = None
 
-        
-        new_items = page_response.get('data', [])
+        if page_response is None:
+            log.info("Fetching page %s%s for model '%s' with filter hash %s...", page_num, of_str, model, h)
+            page_response = api.baw_filter(model, payload, qsp=current_qsp)
+            if page_response is None:
+                return None
+
+            with page_file.open("w", encoding="utf-8") as f:
+                if pretty:
+                    json.dump(page_response, f, ensure_ascii=False, indent=2)
+                else:
+                    json.dump(page_response, f, ensure_ascii=False, separators=(",", ":"))
+
+        return page_response
+
+    first_page_response = load_or_fetch_page(cur_page)
+    if first_page_response is None:
+        return None, out_file
+
+    # figure out how many pages to skip each time to
+    # get the desired number of results (limit) while still spreading out across the dataset.
+    total_items = first_page_response["meta"]["paging"]["total"]
+    total_pages = (total_items + page_size - 1) // page_size
+    log.info("Page %s fetched: %s items (total %s)", cur_page, len(first_page_response.get("data", [])), total_items)
+    if limit is not None and total_items > limit:
+        pages_needed = limit // page_size
+        every_x_pages = max(1, total_pages // pages_needed) if pages_needed > 0 else 1
+
+    new_items = first_page_response.get("data", [])
+    all_items.extend(new_items)
+    if len(new_items) < page_size:
+        total_pages = cur_page
+
+    # generate a list of page number we will be fetching
+    page_numbers = []
+    next_page = cur_page + every_x_pages
+    while total_pages and next_page <= total_pages:
+        page_numbers.append(next_page)
+        next_page += every_x_pages
+
+    page_results: dict[int, dict] = {}
+    if page_numbers:
+        if workers is None or workers < 1:
+            workers = 1
+
+        if workers == 1:
+            for page_num in page_numbers:
+                page_response = load_or_fetch_page(page_num)
+                if page_response is None:
+                    return None, out_file
+                page_results[page_num] = page_response
+        else:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = {
+                    executor.submit(load_or_fetch_page, page_num): page_num
+                    for page_num in page_numbers
+                }
+                for future in concurrent.futures.as_completed(futures):
+                    page_num = futures[future]
+                    try:
+                        page_response = future.result()
+                    except Exception:
+                        return None, out_file
+                    if page_response is None:
+                        return None, out_file
+                    page_results[page_num] = page_response
+
+    for page_num in sorted(page_results):
+        new_items = page_results[page_num].get("data", [])
         all_items.extend(new_items)
         if len(new_items) < page_size:
-            break # last page
-        cur_page += every_x_pages
-        if total_pages and cur_page > total_pages:
             break
 
     with out_file.open("w", encoding="utf-8") as f:
@@ -156,13 +224,19 @@ def get_random_audio_recordings(
     """
 
     payload = wrap_filter(filter_params)
-    
 
     if "projection" not in payload:
         payload["projection"] = {
-                "include": ["id", "site_id", "canonical_file_name", "sites.name", 
-                            "regions.name", "regions.id", "duration_seconds"]
-            }
+            "include": [
+                "id",
+                "site_id",
+                "canonical_file_name",
+                "sites.name",
+                "regions.name",
+                "regions.id",
+                "duration_seconds",
+            ]
+        }
 
     if "sorting" not in payload:
         payload["sorting"] = {
@@ -176,8 +250,8 @@ def get_random_audio_recordings(
         filter_params=payload,
         save_path=save_dir,
         page_size=500,
-        limit=limit*5, # fetch more than needed to allow for randomness while still being efficient; adjust multiplier as needed
-        use_cache=use_cache
+        limit=limit * 5,  # fetch more than needed to allow for randomness while still being efficient
+        use_cache=use_cache,
     )
 
     if not recordings:
@@ -186,13 +260,12 @@ def get_random_audio_recordings(
     if not isinstance(recordings, list):
         raise ValueError("Unexpected response format: 'data' is not a list")
 
-    # 3) Deterministic shuffle preserving ordering
-
+    # Deterministic shuffle preserving ordering
     n = len(recordings)
     if limit >= n or limit < 0:
         return recordings, cache_path
     rng = random.Random(seed)
-    idxs = sorted(rng.sample(range(n), limit))   # pick k unique positions, then sort them
+    idxs = sorted(rng.sample(range(n), limit))
     out = [recordings[i] for i in idxs]
 
     return out, cache_path
