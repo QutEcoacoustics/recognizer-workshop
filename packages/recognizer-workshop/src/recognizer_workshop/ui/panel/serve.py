@@ -11,6 +11,7 @@ print(f"[startup] app module imported {time.time():.3f}")
 
 import logging, sys, os, asyncio
 from pathlib import Path
+from baw_helpers.settings import baw_settings
 
 def _setup_logging():
     logdir = Path.home() / ".recognizer-workshop" / "logs"
@@ -66,8 +67,13 @@ def main(argv=None):
     p.add_argument("--address", default=os.environ.get("ADDRESS", "127.0.0.1"))
     p.add_argument("--autoreload", action="store_true")
     p.add_argument("--singleton", action="store_true")
+    p.add_argument("--app-settings", type=Path, default=None, help="Path to app settings JSON")
     args = p.parse_args(argv)
     print(f"[startup] main parsed args {time.time():.3f}")
+
+    if args.app_settings:
+        os.environ["RW_APP_SETTINGS"] = str(args.app_settings.absolute())
+        app_settings.load_config()
 
     def get_app():
         print(f"[startup] create_app_session start {time.time():.3f}")

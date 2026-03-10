@@ -8,6 +8,8 @@ from pathlib import Path
 # Ensure the current directory is in the path
 sys.path.append(str(Path.cwd()))
 
+from baw_helpers.settings import baw_settings
+
 try:
     from baw_helpers.baw_utils import extract_arid_from_filename, original_baw_audio_url_from_arid
 except ImportError:
@@ -21,7 +23,10 @@ logging.basicConfig(
 )
 log = logging.getLogger("db_fixer")
 
-def fix_database_sources(db_path: Path, apply_changes: bool = False):
+def fix_database_sources(db_path: Path, apply_changes: bool = False, api_domain: str = None):
+
+    if api_domain is None:
+        api_domain = baw_settings.default_api
     
     # 1. Resolve Path
     if db_path.is_dir():
@@ -106,7 +111,7 @@ def fix_database_sources(db_path: Path, apply_changes: bool = False):
         if arid:
             new_source_url = original_baw_audio_url_from_arid(
                 arid=arid, 
-                domain="https://api.ecosounds.org"
+                domain=api_domain
             )
             if new_source_url != current_source:
                 updates.append((new_source_url, internal_id, current_source))

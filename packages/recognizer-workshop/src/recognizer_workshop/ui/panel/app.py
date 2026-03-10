@@ -17,7 +17,7 @@ from recognizer_workshop.ui.panel.adaptors import PanelUI
 os.environ.setdefault("MPLBACKEND", "module://matplotlib_inline.backend_inline")
 
 # Load necessary extensions
-pn.extension(sizing_mode="stretch_width")
+pn.extension('tabulator', sizing_mode="stretch_width")
 print(f"[startup] panel extension loaded {time.time():.3f}")
 hv.extension('bokeh')
 print(f"[startup] holoviews extension loaded {time.time():.3f}")

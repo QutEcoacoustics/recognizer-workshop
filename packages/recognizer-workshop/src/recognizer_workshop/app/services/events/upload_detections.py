@@ -19,6 +19,8 @@ def upload_detections(csv_path,
 
     """
 
+    raise NotImplementedError("This function is not implemented yet. It is a placeholder for the future implementation of the upload functionality.")
+
     if not Path(csv_path).exists():
         log.error(f'CSV file {csv_path} does not exist. Please provide a valid path.')
         return False, None

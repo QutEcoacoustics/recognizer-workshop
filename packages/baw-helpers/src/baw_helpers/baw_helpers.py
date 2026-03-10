@@ -11,7 +11,9 @@ from pathlib import Path
 import json
 from typing import Any, Union
 
+from baw_helpers.settings import baw_settings
 from baw_helpers.utils import stable_hash
+
 
 
 log = logging.getLogger(__name__)
@@ -195,8 +197,8 @@ def sample_filter_pages(
     for page_num in sorted(page_results):
         new_items = page_results[page_num].get("data", [])
         all_items.extend(new_items)
-        if len(new_items) < page_size:
-            break
+        # if len(new_items) < page_size:
+        #     break
 
     with out_file.open("w", encoding="utf-8") as f:
         if pretty:
@@ -436,7 +438,13 @@ def get_verifications_for_sites(api, event_ids=None, filter_params=None):
 
 
 
-def get_untagged_events(api, filter_params, save_path=None):
+def get_untagged_events(api, filter_params, save_path=None, domain=None):
+    """
+    For each event returned by the filter, check if it has any taggings. If not, add it to a list of untagged events.
+    For each untagged event, add a link to the event on the website. Save the list of untagged events as a csv file with columns: id, audio_recording_id
+    """
+    if domain is None:
+        domain = baw_settings.default_website
 
     events = get_events_for_sites(api, filter_params)
 
@@ -451,7 +459,7 @@ def get_untagged_events(api, filter_params, save_path=None):
         # start is the start_time_seconds rounded down to the nearest 30 seconds
         start = int(event['start_time_seconds'] - (event['start_time_seconds'] % 30))
         end = start + 30
-        event['link'] = f"https://www.ecosounds.org/listen/{event['audio_recording_id']}?start={start}&end={end}"
+        event['link'] = f"{domain}/listen/{event['audio_recording_id']}?start={start}&end={end}"
 
     # save as csv file
     if save_path is not None:
@@ -468,8 +476,10 @@ def get_untagged_events(api, filter_params, save_path=None):
     return events_without_taggings
 
 
-def canonical_file_name_to_source(file_name: str, base_url="https://api.ecosounds.org") -> str:
+def canonical_file_name_to_source(file_name: str, base_url=None) -> str:
     """Convert a file name to a source URL."""
+    if base_url is None:
+        base_url = baw_settings.default_api
     # Assuming the file name is in the format 'file_id_offset.parquet'
     stem = Path(file_name).stem
     parts = stem.split('_')

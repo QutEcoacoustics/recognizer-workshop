@@ -118,7 +118,7 @@ class HelpSystem(pn.custom.JSComponent):
     def create_help_button(self, section_id, tooltip="Get help"):
         """
         Creates a ? button that opens the sidebar and triggers a scroll.
-        NOTE: Now requires the 'vm' object to be passed in.
+        args: section_id (str): the element id of the help section to scroll to when clicked
         """
         button = pn.widgets.Button(name="?", width=40, button_type='light', description=tooltip)
         
