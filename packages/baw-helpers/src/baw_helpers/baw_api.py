@@ -8,11 +8,14 @@ import os
 import re
 import sys
 import threading
+from datetime import datetime, timezone
 
 import requests
 from dotenv import find_dotenv, dotenv_values, set_key
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+from .settings import baw_settings
 
 # regex to determine default analysis results filenames based on analysis_name patterns
 ANALYSIS_FILENAME_MAP = {
@@ -30,7 +33,6 @@ class baw_api:
     """Generic client for the BAW API"""
 
     # defaults
-    base_url = "https://api.ecosounds.org"
     token = None
 
 
@@ -49,9 +51,13 @@ class baw_api:
 
         if not base_url:
             # If base_url is not provided, use the environment variable or default to ecosounds
-            base_url = os.environ.get("API_BASE_URL", "https://api.ecosounds.org")
+            base_url = os.environ.get("API_BASE_URL", baw_settings.default_api)
 
         self.base_url = base_url
+        self.auth_state = "unknown"
+        self.auth_message = None
+        self.auth_http_status = None
+        self.auth_checked_at = None
 
         self._tls = threading.local()
         self._lr_lock = threading.Lock()
@@ -66,7 +72,77 @@ class baw_api:
             else:
                 allow_prompt = bool(sys.stdin) and sys.stdin.isatty()
                 
-        self.update_token(token, allow_prompt=allow_prompt, anonymous=anonymous)
+        self.update_token(token, allow_prompt=allow_prompt, anonymous=anonymous, raise_on_auth_error=False)
+
+    def _set_auth_status(self, state: str, message: str | None = None, http_status: int | None = None):
+        self.auth_state = state
+        self.auth_message = message
+        self.auth_http_status = http_status
+        self.auth_checked_at = datetime.now(timezone.utc).isoformat()
+
+    @property
+    def auth_status(self) -> dict:
+        return {
+            "state": self.auth_state,
+            "message": self.auth_message,
+            "http_status": self.auth_http_status,
+            "checked_at": self.auth_checked_at,
+            "base_url": self.base_url,
+            "has_token": bool(self.token),
+        }
+
+    def check_auth(self, default=False, raise_on_error=False) -> dict:
+        if not self.token:
+            self._set_auth_status("missing_token", "No API token provided", None)
+            if raise_on_error:
+                raise AuthenticationError("Authentication token is missing.")
+            return {
+                "ok": False,
+                **self.auth_status,
+            }
+
+        if self.token[:1] in {"'", '"'} and self.token[-1:] != self.token[:1]:
+            log.warning("Possibly unclosed quote in your token string")
+
+        try:
+            response = self.request("GET", "/status", return_json=False)
+            log.info("Connection successful: %s", response)
+            self._set_auth_status("ok", None, 200)
+            return {
+                "ok": True,
+                **self.auth_status,
+            }
+
+        except AuthenticationError as e:
+            self._set_auth_status("invalid_token", str(e), 401)
+            if raise_on_error:
+                raise
+            return {
+                "ok": False,
+                **self.auth_status,
+            }
+
+        except requests.exceptions.HTTPError as e:
+            status_code = getattr(getattr(e, "response", None), "status_code", None)
+            state = "forbidden" if status_code == 403 else "http_error"
+            self._set_auth_status(state, str(e), status_code)
+            if raise_on_error:
+                raise
+            return {
+                "ok": False,
+                **self.auth_status,
+            }
+
+        except requests.RequestException as e:
+            self._set_auth_status("network_error", str(e), None)
+            assumption = "valid" if default else "invalid"
+            log.warning("Token can't be verified, assuming %s.", assumption)
+            if raise_on_error:
+                raise
+            return {
+                "ok": default,
+                **self.auth_status,
+            }
 
 
     def enable_tag_cache(self, cache_file="tags_cache.json"):
@@ -449,37 +525,7 @@ class baw_api:
 
     def test_token(self, default=False):
         """Test the API token on the server for validity."""
-        if not self.token:
-            log.warning("No API token provided. Please set the BAW_AUTH_TOKEN environment variable or pass a token to the baw_api constructor.")
-            return False
-        
-        if self.token[:1] in {"'", '"'} and self.token[-1:] != self.token[:1]:
-            # Token in env can be quoted or unquoted, but if it has a missing opening or closing quote, will include the quote in the value
-            log.warning("Possibly unclosed quote in your token string")
-
-        # return True if token is valid, False if not, or default if we can't verify
-        try:
-            # /status does not require auth, but will return 401 if token is provided and is invalid
-            response = self.request("GET", "/status", return_json=False)
-            log.info(f"Connection successful: {response}")
-            return True
-            
-        except requests.RequestException as e:
-            # Covers 5xx, 404, DNS failures, Timeouts
-            log.error(f"Error connecting to BAW API during test_token: {e}")
-            assumption = "valid" if default else "invalid"
-            log.warning(f"Token can't be verified, assuming {assumption}.")
-            return default
-            
-        except AuthenticationError:
-            log.error("TOKEN INVALID. Connection successful, but Authentication failed.")
-            return False
-            
-        except Exception as e:
-            log.error(f"Unexpected error during test_token: {e}")
-            assumption = "valid" if default else "invalid"
-            log.warning(f"Token can't be verified, assuming {assumption}.")
-            return default
+        return self.check_auth(default=default, raise_on_error=False).get("ok", False)
 
     @property
     def hidden_token(self):
@@ -494,7 +540,8 @@ class baw_api:
     def update_token(self, 
                      token=None, 
                      allow_prompt=True, 
-                     anonymous=None):
+                     anonymous=None,
+                     raise_on_auth_error=True):
         """
         Validate and set authentication token.
         
@@ -511,6 +558,7 @@ class baw_api:
 
         if anonymous is True:
             self.token = None
+            self._set_auth_status("anonymous", "Anonymous mode requested", None)
             log.info("Creating anonymous client as requested (no token).")
             return True
         
@@ -541,10 +589,20 @@ class baw_api:
         # we have a token, so test it. 
         if supplied_token is not None:
             self.token = supplied_token
-            if self.test_token():
+            auth_check = self.check_auth(default=False, raise_on_error=False)
+            if auth_check.get("ok"):
                 return True 
             else:
-                raise AuthenticationError(f"Supplied token {self.hidden_token} is invalid.")
+                if raise_on_auth_error:
+                    raise AuthenticationError(
+                        f"Token auth failed ({self.auth_state}) for {self.base_url}: {self.auth_message or 'unknown error'}"
+                    )
+                log.warning(
+                    "Token auth failed (%s) for %s, continuing with status tracking",
+                    self.auth_state,
+                    self.base_url,
+                )
+                return False
         else:
             log.info("No token supplied in arguments or environment.")
         
@@ -554,11 +612,13 @@ class baw_api:
 
         if anonymous is False:
             if not allow_prompt:
+                self._set_auth_status("missing_token", "Authentication required but no valid token available", None)
                 raise AuthenticationError("Authentication required but no valid token available")
             else:
                 self._prompt_for_token(env_file=env_file)
             
         if self.token is None:
+            self._set_auth_status("anonymous", "No valid token supplied; running in anonymous mode", None)
             log.warning("\n💡 No Valid Token supplied, creating anonymous client")
             log.info("\n💾 For authenticated access initialize the client with a token or:")
             log.info("   Option A: Add to your .env file:")
@@ -589,6 +649,7 @@ class baw_api:
             elif new_token.lower().strip() in ['anonymous', 'anon', 'a']:
                 log.info("Proceeding in anonymous mode as requested.")
                 self.token = None
+                self._set_auth_status("anonymous", "Anonymous mode selected by user", None)
                 return
 
             self.token = new_token 

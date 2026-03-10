@@ -8,7 +8,6 @@ import panel as pn
 from recognizer_workshop.app.services.db_labels.add_db_labels import add_labels_to_db
 
 def build(vm):
-
     # Create help buttons
     labeled_examples_help_btn = vm.help_system.create_help_button("help-labeled-examples-overview", "Help: Labeled Examples")
     filter_help_btn = vm.help_system.create_help_button("help-recordings-filter-labelled-examples", "Help: Recording Filters")
@@ -123,16 +122,17 @@ def build(vm):
         nonlocal summary_table, outcomes_table, details_table
         if summary_table is not None:
             return
-        pn.extension('tabulator')
         summary_table = pn.widgets.Tabulator(
             value=pd.DataFrame(),
             sizing_mode="stretch_width",
+            min_height=180,
             show_index=False,
             disabled=True,
         )
         outcomes_table = pn.widgets.Tabulator(
             value=pd.DataFrame(),
             sizing_mode="stretch_width",
+            min_height=220,
             show_index=False,
             disabled=True,
         )
@@ -140,6 +140,7 @@ def build(vm):
         details_table = pn.widgets.Tabulator(
             value=empty_details_df,
             sizing_mode="stretch_width",
+            min_height=260,
             pagination='remote',
             page_size=50,
             sorters=[{'field': 'Outcome', 'dir': 'asc'}],
@@ -387,12 +388,13 @@ def build(vm):
 
                 _schedule(_apply_success)
             except Exception as e:
+                error_message = str(e)
 
                 def _apply_error():
-                    log.object = f"Error: {e}"
+                    log.object = f"Error: {error_message}"
                     _ensure_tables()
                     summary_table.value = pd.DataFrame()
-                    vm.notify(f"Fetch failed: {e}", "error")
+                    vm.notify(f"Fetch failed: {error_message}", "error")
 
                 _schedule(_apply_error)
             finally:

@@ -261,18 +261,26 @@
     <!-- REFINE PAGE -->
     <div id="help-refine-overview" class="help-section help-section-refine">
         <h2>✨ Refine Page</h2>
-        <p>Improve your models through iterative refinement and active learning.</p>
+        <p>Improve your models through iterative refinement.  This is also known as "Agile Modeling" or "active learning".</p>
+
+        <ol>
+            <li>Search the database using your trained model
+                <ul>
+                    <li><strong>Active Label</strong>The label to search for</li>
+                    <li><strong>Num results</strong>Returns this many results that most closely match the target score</li>
+                    <li><strong>Target score</strong>The score to match when searching for results</li>
+                </ul>
+            </li>
+            <li>Review the results and assign positive or negative labels. 
+                <ul>
+                    <li>Tap once for green (positive)</li>
+                    <li>Tap twice for red (negative)</li>
+                    <li>Tap three times to return to no label (unsure)</li>
+                </ul>
+            </li>
+        </ol>
         
-        <div id="help-active-learning" class="help-subsection">
-            <h4>🎯 Active Learning</h4>
-            <p>Efficiently improve models by labeling the most informative examples.</p>
-            <ul>
-                <li>System suggests uncertain predictions for review</li>
-                <li>Focus labeling effort where it matters most</li>
-                <li>Iteratively retrain with new labels</li>
-                <li>Achieve better performance with less labeling</li>
-            </ul>
-        </div>
+
         
 
     </div>
@@ -280,49 +288,26 @@
     <!-- INFERENCE PAGE -->
     <div id="help-inference-overview" class="help-section help-section-inference">
         <h2>🔮 Inference Page</h2>
-        <p>Apply your trained models to new audio data for automated detection.</p>
+        <p>Apply your trained models your complete embeddings database</p>
         
-        <div id="help-batch-inference" class="help-subsection">
-            <h4>📦 Batch Processing</h4>
-            <p>Process large amounts of audio data efficiently.</p>
+        <div id="help-inference-configuration" class="help-subsection">
+            <h4>Configuration</h4>
             <ul>
-                <li>Select audio files or folders to process</li>
-                <li>Choose appropriate models for each target species</li>
-                <li>Set confidence thresholds</li>
-                <li>Monitor processing progress</li>
+                <li>Output filename: where to save the inference results</li>
+                <li>Threshold: only include results with a score above this number (default 0)</li>
+                <li>Subset Proportion: The fraction of the database to perform inference on</li>
+                <li>Labels: Which of your target labels to include</li>
             </ul>
         </div>
         
-        <div id="help-result-review" class="help-subsection-alt">
-            <h4>📋 Result Review</h4>
-            <p>Examine and validate automated detections.</p>
-            <ul>
-                <li>Browse detections sorted by confidence</li>
-                <li>Listen to detected segments</li>
-                <li>Confirm or reject automated detections</li>
-                <li>Export validated results</li>
-            </ul>
-        </div>
-        
-        <div id="help-real-time-inference" class="help-subsection-alt">
-            <h4>⚡ Real-time Processing</h4>
-            <p>Process audio streams as they arrive.</p>
-            <ul>
-                <li>Connect to live audio sources</li>
-                <li>Set up automated alerts</li>
-                <li>Monitor detection rates</li>
-                <li>Log all detections for later review</li>
-            </ul>
-        </div>
         
         <div id="help-export-results" class="help-subsection-alt">
             <h4>📤 Export Results</h4>
             <p>Share your findings with collaborators and databases.</p>
             <ul>
-                <li>Export to CSV, JSON, or XML formats</li>
-                <li>Include confidence scores and metadata</li>
-                <li>Upload to Workbench or other databases</li>
-                <li>Generate summary reports</li>
+                <li>Export to CSV</li>
+                <li>Includes confidence scores and metadata</li>
+                <li>If needed, upload to Ecosounds Workbench</li>
             </ul>
         </div>
     </div>
@@ -331,16 +316,6 @@
     <div id="help-general-tips" class="help-section help-section-general-tips">
         <h2>💡 General Tips & Best Practices</h2>
         
-        <div id="help-workflow-tips" class="help-subsection">
-            <h4>🔄 Workflow Tips</h4>
-            <ul>
-                <li>Always start with the Configuration page</li>
-                <li>Save your configuration frequently</li>
-                <li>Test with small datasets before scaling up</li>
-                <li>Keep notes on parameter settings and results</li>
-                <li>Backup your models and training data</li>
-            </ul>
-        </div>
         
         <div id="help-troubleshooting" class="help-subsection-alt">
             <h4>🔧 Troubleshooting</h4>
@@ -353,16 +328,6 @@
             </ul>
         </div>
         
-        <div id="help-performance-tips" class="help-subsection-alt">
-            <h4>⚡ Performance Tips</h4>
-            <ul>
-                <li>Use SSD storage for better I/O performance</li>
-                <li>Increase batch sizes if you have more RAM</li>
-                <li>Process audio in chunks for large files</li>
-                <li>Consider GPU acceleration for training</li>
-                <li>Close unused browser tabs to free memory</li>
-            </ul>
-        </div>
     </div>
     
     <div class="help-footer">

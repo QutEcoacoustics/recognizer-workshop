@@ -2,6 +2,7 @@ import logging
 import sys
 from pathlib import Path
 from etils import epath
+import functools
 from ml_collections import config_dict
 import numpy as np
 from perch_hoplite.agile import embed
@@ -25,6 +26,7 @@ from baw_helpers import baw_api
 from baw_helpers.baw_api import AuthenticationError
 from baw_helpers.baw_helpers import simple_filter, get_random_audio_recordings
 from baw_helpers.baw_utils import extract_arid_and_domain, original_baw_audio_url_from_arid, get_original_url, extract_arid_from_filename
+from baw_helpers.settings import baw_settings
 
 from recognizer_workshop.app.create_database.embedding_config_loader import load_baw_embedding_config
 
@@ -36,8 +38,9 @@ PARQUET_METADATA_COLUMNS = ('source', 'channel', 'offset',)
 BAW_ANALYSIS_JOB_ID = 3
 DEFAULT_BAW_ANALYSIS_NAME = "perch-embeddings_4"
 
+_DEFAULT = object()
 
-def convert_source_to_original_url(source: str, domain='https://api.ecosounds.org') -> str:
+def convert_source_to_original_url(source: str, domain: str) -> str:
     """
     perch runner currently puts the canonical filename in the source column. We really want the url to the original audio file
     TODO: I don't think this is true anymore
@@ -104,7 +107,7 @@ def convert_parquet(
     dataset_name: str = 'search_set',
     max_count: int = -1,
     max_size: int | None = None,
-    source_map_fn = convert_source_to_original_url,
+    source_map_fn = _DEFAULT,
     api_client = None
     ):
  
@@ -161,7 +164,10 @@ def remove_existing_offsets_from_df(db, df) -> 'pd.DataFrame':
     return df
 
 
-def complete_remote_source_dict(item: dict, default_domain = "https://api.ecosounds.org") -> dict:
+def complete_remote_source_dict(item: dict, default_domain = None) -> dict:
+
+    if default_domain is None:
+        default_domain = baw_settings.default_api
 
     input_id = item.get('id')
     input_domain = item.get('domain')
@@ -565,7 +571,7 @@ def add_parquet_to_existing_db(
     dataset_name: str = 'search_set',
     max_count: int = -1,
     max_size: int | None = None,
-    source_map_fn = convert_source_to_original_url
+    source_map_fn = _DEFAULT
 ):
     
     if db_type == 'sqlite_usearch':
@@ -608,14 +614,17 @@ def add_parquet_to_db(
     dataset_name: str = 'search_set',
     max_count: int = -1,
     max_size: int = None,
-    source_map_fn = convert_source_to_original_url, 
+    source_map_fn = _DEFAULT,
     hop_size_s: float = 5.0
 ):
     """Adds parquet files to an existing hoplite database."""
     
     # if the source column values in the parquet files need to be converted, e.g. from friendly filename to original recording url
+    if source_map_fn is _DEFAULT:
+        source_map_fn = functools.partial(convert_source_to_original_url, domain=api_client.base_url) if api_client is not None else None
     if source_map_fn is None:
         source_map_fn = lambda x: x
+
 
     total_inserted = 0
     files_processed = 0
@@ -649,7 +658,11 @@ def add_parquet_to_db(
     return db
 
 
-def add_df_to_db(df, db, source_map_fn=convert_source_to_original_url, max_for_df=-1, dataset_name='search_set'):
+def add_df_to_db(df,
+                 db, 
+                 source_map_fn=None,
+                 max_for_df=-1, 
+                 dataset_name='search_set'):
     if source_map_fn is None:
         source_map_fn = lambda x: x
     num_inserted = 0

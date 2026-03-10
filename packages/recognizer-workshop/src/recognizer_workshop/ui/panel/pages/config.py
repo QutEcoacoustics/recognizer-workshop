@@ -9,6 +9,7 @@ from recognizer_workshop.app.agile_engine import AgileConfig
 from recognizer_workshop.app.agile_engine import agile_state
 from recognizer_workshop.app.services.app_data import get_recent_files
 from recognizer_workshop.ui.panel.utils.delayed_init import run_after_render
+from baw_helpers.settings import baw_settings
 
 log = logging.getLogger(__name__)
 
@@ -38,6 +39,13 @@ def build(vm):
     if not getattr(build, "_password_css_added", False):
         pn.config.raw_css.append(
             ".password-with-eye .bk-input { padding-right: 2.5rem; }"
+        )
+        pn.config.raw_css.append(
+            ".rw-invalid-field .bk-input { border-color: #dc2626 !important; box-shadow: 0 0 0 1px #dc2626 inset !important; }"
+            ".rw-field-error { color: #dc2626; font-size: 0.85rem; }"
+            ".rw-status-ok { color: #16a34a; font-size: 0.9rem; }"
+            ".rw-status-error { color: #dc2626; font-size: 0.9rem; }"
+            ".rw-status-neutral { color: #6b7280; font-size: 0.9rem; }"
         )
         build._password_css_added = True
 
@@ -69,7 +77,8 @@ def build(vm):
     btn_save_as = pn.widgets.Button(name="Save As...")
     current_config_path_display = pn.widgets.StaticText()
 
-    btn_start_engine = pn.widgets.Button(name="🚀 Start Engine", button_type="primary")
+    btn_start_engine = pn.widgets.Button(name="🚀 Start Engine", button_type="primary", sizing_mode="fixed")
+    btn_start_engine.width = 150
     
     def update_engine_button():
         """Update the engine button text and state based on current engine status."""
@@ -94,31 +103,124 @@ def build(vm):
         'predictions_folder': Path("predictions"),
     }
     
-    default_api_domain = "https://api.ecosounds.org"
+    workbench_auth_widgets = {}
+    workbench_auth_section = pn.Column(sizing_mode="stretch_width")
 
-    def _get_baw_domain_token():
-        """Return the single BAW domain/token pair for the UI fields."""
-        if not vm.config.baw_config:
-            return "", ""
+    def _render_auth_status(status: dict | None) -> str:
+        if not status:
+            return "<span class='rw-status-neutral'>not initialized</span>"
 
-        domain_val, token_val = next(iter(vm.config.baw_config.items()))
-        return domain_val or "", token_val or ""
+        state = status.get("state") or "unknown"
+        label_map = {
+            "ok": "valid token",
+            "anonymous": "anonymous mode",
+            "missing_token": "token required",
+            "invalid_token": "invalid token",
+            "forbidden": "token lacks permission",
+            "network_error": "connection issue",
+            "http_error": "server error",
+            "unknown": "unknown",
+        }
 
-    initial_domain, initial_token = _get_baw_domain_token()
+        message = label_map.get(state, "Status: Unknown")
+        if state in {"invalid_token", "forbidden"}:
+            return f"<span class='rw-status-error'>{message}</span>"
+        if state == "ok":
+            return f"<span class='rw-status-ok'>{message}</span>"
+        return f"<span class='rw-status-neutral'>{message}</span>"
+
+    def _friendly_engine_error(exc: Exception) -> str:
+        text = str(exc).lower()
+
+        if "401" in text or "invalid token" in text or "invalid authentication token" in text or "expired" in text:
+            return "Invalid token"
+        if "403" in text or "forbidden" in text or "permission" in text:
+            return "Token lacks permission"
+        if "connection" in text or "timeout" in text or "dns" in text or "network" in text:
+            return "Connection issue"
+
+        return "Failed to start engine"
+
+    def _clear_token_validation(widgets: dict):
+        token_widget = widgets["token"]
+        token_widget.css_classes = [c for c in token_widget.css_classes if c != "rw-invalid-field"]
+
+    def _apply_token_validation(widgets: dict, status: dict | None):
+        _clear_token_validation(widgets)
+
+        if widgets["anonymous"].value:
+            return
+
+        if not status:
+            return
+
+        state = status.get("state")
+        http_status = status.get("http_status")
+
+        is_auth_error = (
+            state in {"invalid_token", "forbidden"}
+            or http_status in {401, 403}
+        )
+
+        if not is_auth_error:
+            return
+
+        token_widget = widgets["token"]
+        token_widget.css_classes = [*token_widget.css_classes, "rw-invalid-field"]
+
+        return
+
+    for workbench_name, workbench_info in baw_settings.domains.items():
+        api_domain = str(workbench_info["api"])
+        website_domain = str(workbench_info["website"])
+        website_with_scheme = website_domain if website_domain.startswith(("http://", "https://")) else f"https://{website_domain}"
+        heading = f"**{workbench_name.upper()}** ([{website_with_scheme}]({website_with_scheme}))"
+
+        anon_checkbox = pn.widgets.Checkbox(name="Anonymous", value=False)
+        token_input = pn.widgets.PasswordInput(
+            name=f"{workbench_name} token",
+            value="",
+            css_classes=["password-with-eye"],
+            sizing_mode="stretch_width",
+        )
+
+        def _toggle_token_state(event, token_widget=token_input):
+            token_widget.disabled = bool(event.new)
+
+        anon_checkbox.param.watch(_toggle_token_state, "value")
+
+        status_pane = pn.pane.Markdown("<span class='rw-status-neutral'></span>")
+
+        group = pn.Column(
+            pn.Row(
+                pn.pane.Markdown(heading),
+                status_pane,
+                sizing_mode="stretch_width",
+            ),
+            token_input,
+            anon_checkbox,
+            sizing_mode="stretch_width",
+        )
+
+        workbench_auth_section.append(group)
+        workbench_auth_widgets[api_domain] = {
+            "anonymous": anon_checkbox,
+            "token": token_input,
+            "status": status_pane,
+        }
+
+        def _on_token_edited(_event, current_widgets=workbench_auth_widgets[api_domain]):
+            if hasattr(sync_config_to_ui, '_syncing'):
+                return
+            _clear_token_validation(current_widgets)
+
+        token_input.param.watch(_on_token_edited, "value")
 
     # text inputs for config fields, with values coming from the loaded config
     annotator_id = pn.widgets.TextInput(name="Annotator", value=vm.config.annotator_id)
-    domain = pn.widgets.TextInput(name="Workbench API domain", value=initial_domain)
-    auth_token = pn.widgets.PasswordInput(
-        name="Workbench API token",
-        value=initial_token,
-        css_classes=["password-with-eye"],
-    )
-
     # Create help buttons for key fields
     annotator_help_btn = vm.help_system.create_help_button("help-annotator-id", "Help: Annotator ID")
     domain_help_btn = vm.help_system.create_help_button("help-api-domain", "Help: API Domain")
-    token_help_btn = vm.help_system.create_help_button("help-api-token", "Help: API Token")
     folder_help_btn = vm.help_system.create_help_button("help-folder-config", "Help: Folder Configuration")
     engine_help_btn = vm.help_system.create_help_button("help-engine", "Help: Engine")
     project_help_btn = vm.help_system.create_help_button("help-project-file", "Help: Project Files")
@@ -149,9 +251,11 @@ def build(vm):
         if not vm.config.predictions_folder:
             vm.config.predictions_folder = default_paths['predictions_folder']
             
-        # Set default API domain if not already set
         if not vm.config.baw_config:
-            vm.config.baw_config = {default_api_domain: ""}
+            vm.config.baw_config = {
+                str(workbench_info["api"]): ""
+                for workbench_info in baw_settings.domains.values()
+            }
 
     def toggle_advanced_visibility(*_):
         """Toggle visibility of advanced path settings."""
@@ -177,9 +281,19 @@ def build(vm):
         sync_config_to_ui._syncing = True
         try:
             annotator_id.value = vm.config.annotator_id
-            config_domain, config_token = _get_baw_domain_token()
-            domain.value = config_domain or default_api_domain
-            auth_token.value = config_token
+
+            current_baw_config = vm.config.baw_config or {}
+            engine_statuses = vm.eng.get_workbench_auth_statuses() if vm.eng else {}
+            for api_domain, widgets in workbench_auth_widgets.items():
+                token_value = current_baw_config.get(api_domain, "")
+                is_anonymous = token_value is None
+                widgets["anonymous"].value = is_anonymous
+                widgets["token"].value = "" if token_value is None else str(token_value)
+                widgets["token"].disabled = is_anonymous
+
+                status = engine_statuses.get(api_domain)
+                _apply_token_validation(widgets, status)
+                widgets["status"].object = _render_auth_status(status)
             _print_paths("1.")
             
             # Capture all path values at once to avoid side effects from individual access
@@ -211,10 +325,14 @@ def build(vm):
         # will trigger watchers of the config_state
         vm.obs.bump("config_state")
         vm.config.annotator_id = annotator_id.value
-        if domain.value:
-            vm.config.baw_config = {domain.value: auth_token.value}
-        else:
-            vm.config.baw_config = {}
+
+        vm.config.baw_config = {
+            api_domain: (
+                None if widgets["anonymous"].value
+                else widgets["token"].value
+            )
+            for api_domain, widgets in workbench_auth_widgets.items()
+        }
         
         # Always update paths from widgets (they contain default values when not advanced)
         vm.config.db_path = Path(db_path.value) if db_path.value else None
@@ -450,10 +568,6 @@ def build(vm):
         ),
     ]
 
-    # Connect the toggle checkbox to show/hide advanced section
-    show_advanced.param.watch(toggle_advanced_visibility, 'value')
-
-
     def _make_engine(_):
 
         # anything observing engine_state will check for updates
@@ -468,9 +582,19 @@ def build(vm):
             # initialise the API connection
             try:
                 vm.eng.init_workbench(allow_prompt=False)
-                vm.notify("API connection successful", "success")
+                workbench_statuses = vm.eng.get_workbench_auth_statuses()
+                ok_domains = [
+                    domain for domain, status in workbench_statuses.items()
+                    if status.get("state") in {"ok", "anonymous"}
+                ]
+                if ok_domains:
+                    vm.notify(f"Workbench clients initialized ({len(ok_domains)}/{len(workbench_statuses)} usable)", "success")
+                else:
+                    vm.notify("Workbench clients initialized but none are currently usable", "warn")
             except Exception as e:
-                vm.notify(f"API connection failed {e}", "error")
+                vm.notify(_friendly_engine_error(e), "error")
+
+            sync_config_to_ui()
 
             # initialise the database
             try:
@@ -484,10 +608,14 @@ def build(vm):
             else:
                 vm.notify("Database initialization failed", "error")
 
-            tags_success = vm.eng.fetch_workbench_tags()
-            if tags_success:
-                vm.notify("Tags fetched successfully", "success")
-            else:
+            try:
+                tags_success = vm.eng.fetch_workbench_tags()
+                if tags_success:
+                    vm.notify("Tags fetched successfully", "success")
+                else:
+                    vm.notify("Failed to fetch tags", "error")
+            except Exception as e:
+                log.exception("Tag fetch failed: %s", e)
                 vm.notify("Failed to fetch tags", "error")
 
             # Create labels editor regardless of tag fetch success
@@ -501,11 +629,14 @@ def build(vm):
             update_engine_button()
 
         except Exception as e:
-            vm.notify(f"Failed to start engine: {e}", "error")
+            vm.notify(_friendly_engine_error(e), "error")
 
 
     # --- BINDINGS ---
-    config_widgets = [annotator_id, domain, auth_token, show_advanced, db_path, labeled_dir, models_dir, preds_dir]
+    config_widgets = [annotator_id, show_advanced, db_path, labeled_dir, models_dir, preds_dir]
+    for widgets in workbench_auth_widgets.values():
+        config_widgets.extend([widgets["anonymous"], widgets["token"]])
+
     for widget in config_widgets:
         widget.param.watch(_autosave, 'value')
     btn_new.on_click(_on_new_click)
@@ -544,13 +675,32 @@ def build(vm):
 
     # --- LAYOUT ---
     file_buttons = pn.Row(btn_new, btn_open, btn_save, btn_save_as, sizing_mode="fixed")
-    config_status = pn.Row(current_config_path_display, save_status, sizing_mode="fixed")
+    config_status = pn.Row(
+        current_config_path_display,
+        save_status,
+        pn.Spacer(width=20),
+        annotator_id,
+        annotator_help_btn,
+        sizing_mode="stretch_width",
+    )
+
+    left_column = pn.Column(
+        pn.Row("### Workbench Connection", domain_help_btn, pn.Spacer()),
+        workbench_auth_section,
+        pn.Row(show_advanced, folder_help_btn, sizing_mode="stretch_width"),
+        advanced_section,
+        sizing_mode="stretch_width",
+        styles={"flex": "2"},
+    )
+
+    right_column = pn.Column(
+        pn.Row("### Target Labels", pn.Spacer(), labels_help_btn),
+        labels_editor_placeholder,
+        sizing_mode="stretch_width",
+        styles={"flex": "3"},
+    )
 
     return pn.Column(
-        pn.pane.Markdown(
-            "Configure your project settings, database paths, and API connections. "
-            "Click 'Start Engine' when ready to begin."
-        ),
         
         # File operations section
         pn.Row("### Project File", pn.Spacer(), project_help_btn),
@@ -559,30 +709,13 @@ def build(vm):
         
         # Configuration sections
         pn.Row(
-            # Left column - Workbench connection
-            pn.Column(
-                pn.Row("### 🌐 Workbench Connection", pn.Spacer()),
-                pn.Row(annotator_id, annotator_help_btn, sizing_mode="stretch_width"),
-                pn.Row(domain, domain_help_btn, sizing_mode="stretch_width"),
-                pn.Row(auth_token, token_help_btn, sizing_mode="stretch_width"),
-                pn.Row(show_advanced, folder_help_btn, sizing_mode="stretch_width"),
-                advanced_section,
-                width=300,
-                sizing_mode="fixed"
-            ),
-            
-            # Right column - Basic settings
-            pn.Column(
-                pn.Row("### 🎯 Target Labels", pn.Spacer(), labels_help_btn),
-                labels_editor_placeholder,
-                sizing_mode="stretch_width"
-            ),
+            left_column,
+            right_column,
             sizing_mode="stretch_width"
         ),
         
         # Engine initialization
-        pn.Row("### 🚀 Engine", pn.Spacer(), engine_help_btn),
-        pn.Row(btn_start_engine, sizing_mode="stretch_width"),
+        pn.Row(btn_start_engine, sizing_mode="fixed", align="start"),
         
        
         

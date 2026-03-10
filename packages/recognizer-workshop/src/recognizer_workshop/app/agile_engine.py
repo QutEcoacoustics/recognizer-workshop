@@ -63,6 +63,8 @@ class agile_state:
 
     def __init__(self, config):
         self.config = config
+        self.baw_api_clients = {}
+        self.active_client = None
         mp_context = multiprocessing.get_context('spawn')
         self._embed_runner = ProcessPoolExecutor(
             max_workers=1,
@@ -762,15 +764,18 @@ class agile_state:
             return
         
         self.baw_api_clients = {}
+        self.active_client = None
 
         for domain, token in self.config.baw_config.items():
 
             parsed_url = urlparse(domain)
+            use_anonymous = token is None
 
             cur_client = baw_api(
                 token=token,
                 base_url=domain,
-                allow_prompt=allow_prompt
+                allow_prompt=allow_prompt,
+                anonymous=use_anonymous,
             )
 
             self.baw_api_clients[domain] = cur_client
@@ -780,7 +785,27 @@ class agile_state:
                 log.info(f"Set active workbench client to domain {domain}")
 
             cache_path = Path(self.config.config_path).parent / f"tags_cache_{parsed_url.netloc}.json"
-            self.baw_api_clients[domain].enable_tag_cache(cache_path)
+            try:
+                self.baw_api_clients[domain].enable_tag_cache(cache_path)
+            except Exception as e:
+                log.warning(f"Failed to enable tag cache for domain {domain} at {cache_path}: {e}")
+
+    def get_workbench_auth_statuses(self) -> dict[str, dict]:
+        statuses = {}
+        for domain, client in self.baw_api_clients.items():
+            status = getattr(client, "auth_status", None)
+            if isinstance(status, dict):
+                statuses[domain] = status
+            else:
+                statuses[domain] = {
+                    "state": "unknown",
+                    "message": None,
+                    "http_status": None,
+                    "checked_at": None,
+                    "base_url": domain,
+                    "has_token": bool(getattr(client, "token", None)),
+                }
+        return statuses
             
         
             
@@ -859,6 +884,8 @@ class agile_state:
             descriptions.append(desc)
 
         return '; '.join(descriptions)
+    
+
 
 
 
