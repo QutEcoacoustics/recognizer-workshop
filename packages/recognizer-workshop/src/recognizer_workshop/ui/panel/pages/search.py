@@ -22,7 +22,7 @@ def build(vm):
 
     # text field to input the query (XC id or URL) and a button to load it
     uri = pn.widgets.TextInput(name="Query (XC id / URL )", placeholder="e.g. XC979796 or https://...")
-    btn_load_uri = pn.widgets.Button(name="Load the remote query", button_type="primary")
+    btn_load_uri = pn.widgets.Button(name="Load the remote query", button_type="primary", sizing_mode="fixed")
 
     # file input widget to upload and save local audio file
     file_input = pn.widgets.FileInput(accept="audio/*", multiple=False)
@@ -41,7 +41,7 @@ def build(vm):
 
     # --- Input method switcher ---
     input_tabs = pn.Tabs(
-        ("Search by ID / URL", pn.Column(uri, btn_load_uri)),
+        ("Search by ID / URL", pn.Row(uri, btn_load_uri, align="end", sizing_mode="stretch_width")),
         ("Search by File Upload", pn.Column(file_input))
     )
 

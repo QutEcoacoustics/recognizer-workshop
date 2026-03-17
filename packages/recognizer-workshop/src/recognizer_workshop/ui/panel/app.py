@@ -22,22 +22,6 @@ print(f"[startup] panel extension loaded {time.time():.3f}")
 hv.extension('bokeh')
 print(f"[startup] holoviews extension loaded {time.time():.3f}")
 
-# --- Global Error Handling Setup ---
-error_banner = pn.pane.Alert(visible=False, sizing_mode="stretch_width")
-
-def global_exception_handler(ex):
-    # Log the full error to the server console for your own debugging
-    logging.error("An unhandled exception occurred", exc_info=ex)
-    # Display a user-friendly message in the app's UI
-    error_banner.object = (
-        f"💥 **An unexpected error occurred!** Please try refreshing the page. {ex}"
-    )
-    error_banner.alert_type = 'danger'
-    error_banner.visible = True
-
-pn.config.exception_handler = global_exception_handler
-
-
 def _import_page(name: str):
     start = time.time()
     module = importlib.import_module(f"recognizer_workshop.ui.panel.pages.{name}")
@@ -81,6 +65,12 @@ def build_app(vm):
     """Builds the main application layout using a Panel template."""
 
     vm.ui = PanelUI(vm)
+
+    def _session_exception_handler(ex):
+        logging.error("An unhandled exception occurred", exc_info=ex)
+        vm.notify(f"An unexpected error occurred. Please try refreshing the page. {ex}", "error")
+
+    pn.config.exception_handler = _session_exception_handler
 
     vm.setup_help_system()
 
@@ -162,7 +152,6 @@ def build_app(vm):
 
     template.header.append(header_logos)
     template.header.append(dev_toggle_button)
-    template.main.append(error_banner)
     template.main.append(vm.status)
     template.main.append(tabs)
     # template.sidebar.append(vm.help_system) # append the js custom component for sidebar control
