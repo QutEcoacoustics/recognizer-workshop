@@ -152,12 +152,6 @@ def build(vm):
     # Initialize button state
     _update_button_state()
 
-    settings_card = pn.Card(
-        db_path_display, # Use the widget we defined
-        pn.Row(max_files, max_embeddings),
-        title="Creation Settings"
-    )
-
     return pn.Column(
         pn.Row("## Create New Database from BAW", pn.Spacer(), database_help_btn),
         pn.pane.Alert("This tool will build a new database in the directory specified in your current project configuration.", alert_type="info"),
@@ -165,17 +159,19 @@ def build(vm):
         pn.Row(
             pn.Column(
                 pn.Row("Creation Settings", pn.Spacer(), db_settings_help_btn),
-                settings_card
-            )
-        ),
-        pn.Row(
+                db_path_display,
+                pn.Row(max_files, max_embeddings, sizing_mode="stretch_width"),
+                sizing_mode="stretch_width",
+            ),
             pn.Column(
                 pn.Row("Recording Filters", pn.Spacer(), recordings_filter_help_btn),
-                filter_editor
-            )
+                filter_editor,
+                sizing_mode="stretch_width",
+            ),
+            sizing_mode="stretch_width",
         ),
         pn.layout.Divider(),
-        pn.Row(btn_create),
+        pn.Row(btn_create, align="start"),
         dialog_container,
         progress_bar,
         status_display,

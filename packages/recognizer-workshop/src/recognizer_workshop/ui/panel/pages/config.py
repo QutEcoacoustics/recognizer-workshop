@@ -92,8 +92,10 @@ def build(vm):
         # button is disabled until a config path is set
         btn_start_engine.disabled = not vm.config.config_path
 
-    # Label editor populated only after the engine has started successfully.
-    labels_editor_placeholder = pn.Column(sizing_mode="stretch_width")
+    labels_editor_placeholder = pn.Column(
+        vm.ui.view_target_labels(),
+        sizing_mode="stretch_width",
+    )
 
     # Default values for new configurations
     default_paths = {
@@ -322,8 +324,6 @@ def build(vm):
 
     def sync_ui_to_config():
         """Updates the vm.config object from all UI widgets."""
-        # will trigger watchers of the config_state
-        vm.obs.bump("config_state")
         vm.config.annotator_id = annotator_id.value
 
         vm.config.baw_config = {
@@ -340,6 +340,8 @@ def build(vm):
         vm.config.models_folder = Path(models_dir.value) if models_dir.value else None
         vm.config.predictions_folder = Path(preds_dir.value) if preds_dir.value else None
 
+        vm.obs.bump("config_state")
+
 
     def _autosave(*_events):
         """Syncs UI to the config object and saves it if a config path exists."""
@@ -350,9 +352,6 @@ def build(vm):
         if not vm.config.config_path:
             vm.notify("Autosave skipped: No configuration file path set.", "warn")
             return  # No path to autosave to
-
-        # will trigger watchers of the config_state
-        vm.obs.bump("config_state")
 
         sync_ui_to_config()
         if vm.config.config_path:
@@ -617,9 +616,6 @@ def build(vm):
             except Exception as e:
                 log.exception("Tag fetch failed: %s", e)
                 vm.notify("Failed to fetch tags", "error")
-
-            # Create labels editor regardless of tag fetch success
-            labels_editor_placeholder.objects = [vm.ui.view_target_labels(vm.eng)]
 
             # this will trigger anything observing these observables to update
             vm.obs.bump("engine_state")

@@ -6,6 +6,7 @@ import pandas as pd
 import panel as pn
 
 from recognizer_workshop.app.services.db_labels.add_db_labels import add_labels_to_db
+from recognizer_workshop.app.services.baw_filters import parse_csv_ints, normalize_first_filter
 
 def build(vm):
     # Create help buttons
@@ -74,10 +75,10 @@ def build(vm):
 
     def _format_filters_for_display(filters: list) -> str:
         """Human-readable formatting of the filters"""
-        if not filters or not filters[0]:
+        filter_dict = normalize_first_filter(filters)
+        if not filter_dict:
             return "No filters set. Click 'Edit' to add one."
 
-        filter_dict = filters[0]
         description_lines = []
         
         # Define the order and labels for the filters
@@ -309,10 +310,9 @@ def build(vm):
         filters = vm.eng.get_baw_filters()
         project_ids_input.value, region_ids_input.value, site_ids_input.value = "", "", ""
 
-        if not filters or not isinstance(filters, list) or not filters[0]:
+        filter_dict = normalize_first_filter(filters)
+        if not filter_dict:
             return
-            
-        filter_dict = filters[0]
 
         def get_ids(key):
             if key in filter_dict and "in" in filter_dict[key]:
@@ -335,16 +335,26 @@ def build(vm):
         if not vm.eng: return vm.notify("Initialize on Config tab first.", "error")
 
         inputs = {"projects.id": project_ids_input.value, "regions.id": region_ids_input.value, "sites.id": site_ids_input.value}
-        if not any(val.strip() for val in inputs.values()):
+        if not any((val or "").strip() for val in inputs.values()):
             vm.notify("Please enter IDs in at least one field.", "warn"); return
         new_filter = {}
-        try:
-            for key, value_str in inputs.items():
-                if not value_str.strip(): continue
-                id_list = [int(s.strip()) for s in value_str.split(',') if s.strip()]
-                if id_list: new_filter[key] = {"in": id_list}
-        except ValueError:
-            vm.notify("Invalid input. Please ensure all IDs are comma-separated numbers.", "error"); return
+        has_invalid_values = False
+        for key, value_str in inputs.items():
+            if not (value_str or "").strip():
+                continue
+            id_list = parse_csv_ints(value_str)
+            if id_list is None:
+                has_invalid_values = True
+                continue
+            new_filter[key] = {"in": id_list}
+
+        if has_invalid_values:
+            vm.notify("Invalid input. Please ensure all IDs are comma-separated numbers.", "error")
+            return
+
+        if not new_filter:
+            vm.notify("Please enter IDs in at least one field.", "warn")
+            return
         
         try:
             vm.eng.set_baw_filters([new_filter])
