@@ -39,19 +39,23 @@ def build(vm):
             return
         vm.eng.set_baw_filters(filters)
 
-    filter_editor = build_filter_editor(_get_filters, _set_filters, vm)
     engine_warning = pn.pane.Alert(
         "Initialize the engine on the 'Config' tab to set up filters.",
         alert_type="warning"
     )
     filter_section = pn.Column(sizing_mode="stretch_width")
 
+    def _build_filter_editor_widget():
+        """Build a fresh filter editor each time the engine state changes."""
+        return build_filter_editor(_get_filters, _set_filters, vm)
 
     def _update_filter_section():
         """Show filter editor when engine is ready, warning otherwise."""
         if not (vm.eng and vm.eng.db):
             filter_section.objects = [engine_warning]
         else:
+            # Rebuild the filter editor to ensure it reflects latest DB metadata
+            filter_editor = _build_filter_editor_widget()
             filter_section.objects = [filter_editor]
 
 

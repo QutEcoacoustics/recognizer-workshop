@@ -1,7 +1,9 @@
+import html
+
 import pandas as pd
 import panel as pn
 
-from recognizer_workshop.app.services.db_labels.add_db_labels import LabelCounts, DatabaseSummary
+from recognizer_workshop.app.services.db_labels.add_db_labels import DatabaseSummary
 from recognizer_workshop.app.services.version import get_git_commit_short
 from recognizer_workshop.ui.panel.view_model import ViewModel
 
@@ -19,20 +21,24 @@ def _build_status_view(vm: ViewModel):
 
     # General Status Section
     general_status_view = pn.Column(
-        "### General Status",
         pn.Row(
-            pn.pane.Markdown("**Database Loaded:**", width=200),
-            pn.pane.Markdown("✅ Yes" if status_data['db_loaded'] else "❌ No")
+            pn.pane.HTML("<strong>Database Loaded:</strong>", width=200, margin=(0, 0)),
+            pn.pane.HTML("✅ Yes" if status_data['db_loaded'] else "❌ No", margin=(0, 0)),
+            margin=(0, 0),
         ),
         pn.Row(
-            pn.pane.Markdown("**Embedding Model Loaded:**", width=200),
-            pn.pane.Markdown("✅ Yes" if status_data['embedding_model_loaded'] else "❌ No")
+            pn.pane.HTML("<strong>Embedding Runtime Ready:</strong>", width=200, margin=(0, 0)),
+            pn.pane.HTML(
+                "✅ Yes" if status_data.get('embedding_runtime_ready', status_data.get('embedding_model_loaded', False)) else "❌ No",
+                margin=(0, 0)
+            ),
+            margin=(0, 0),
         ),
         pn.Row(
-            pn.pane.Markdown("**Version:**", width=200),
-            pn.pane.Markdown(f"`{commit_display}`")
+            pn.pane.HTML("<strong>Version:</strong>", width=200, margin=(0, 0)),
+            pn.pane.HTML(commit_display, margin=(0, 0)),
+            margin=(0, 0),
         ),
-        pn.layout.Divider()
     )
 
     # Configuration Section
@@ -45,13 +51,14 @@ def _build_status_view(vm: ViewModel):
 
     # Database Summary Section
     db_summary: DatabaseSummary = status_data.get('db_summary')
+    db_metadata = status_data.get('db_metadata')
     if db_summary:
         # Create a table for the label counts
         labels_dict = db_summary.label_counts
         if labels_dict:
             # Reformat dict for better display in DataFrame
             table_data = []
-            for label, counts in labels_dict.items():
+            for _label, counts in labels_dict.items():
                 
                 table_data.append({
                     'Label': counts.label_name,
@@ -59,25 +66,61 @@ def _build_status_view(vm: ViewModel):
                     'Negative': counts.negative
                 })
             df = pd.DataFrame(table_data)
-            labels_table = pn.widgets.DataFrame(df, sizing_mode="stretch_width", show_index=False)
+            table_html = df.to_html(index=False, classes="status-table", border=0)
+            labels_table = pn.pane.HTML(
+                f"""
+                <style>
+                .status-table {{
+                    border-collapse: collapse;
+                    width: 100%;
+                    margin: 0;
+                    font-size: 0.9rem;
+                }}
+                .status-table th,
+                .status-table td {{
+                    border: 1px solid #ddd;
+                    padding: 4px 8px;
+                    text-align: left;
+                }}
+                .status-table th {{
+                    font-weight: 600;
+                }}
+                </style>
+                {table_html}
+                """,
+                sizing_mode="stretch_width",
+                margin=(0, 0),
+            )
         else:
-            labels_table = pn.pane.Markdown("*No labels found in the database.*")
+            labels_table = pn.pane.Markdown("*No labels found in the database.*", margin=(0, 0))
 
         db_summary_view = pn.Column(
             "### Database Summary",
-            pn.pane.Markdown(f"**Total Embeddings:** {db_summary.total_embeddings}"),
-            pn.pane.Markdown(f"**Datasets:** {', '.join(db_summary.datasets) if db_summary.datasets else 'None'}"),
-            pn.layout.Divider(),
-            "#### Label Counts",
-            labels_table
+            pn.pane.HTML(f"<strong>Total Embeddings:</strong> {db_summary.total_embeddings}", margin=(0, 0)),
+            pn.pane.HTML(f"<strong>Datasets:</strong> {', '.join(db_summary.datasets) if db_summary.datasets else 'None'}", margin=(0, 0)),
+            labels_table,
+            pn.pane.Markdown("#### Database Metadata"),
+            pn.pane.HTML(
+                f"""
+                <pre style=\"max-height: 150px; overflow-y: auto; margin: 0; padding: 8px; border: 1px solid #ddd; border-radius: 4px;\">{html.escape(db_metadata.to_json(indent=2) if db_metadata else '{}')}</pre>
+                """,
+                sizing_mode="stretch_width",
+                margin=(0, 0),
+            ),
+            margin=(0, 0),
         )
     else:
         db_summary_view = pn.Column("### Database Summary", pn.pane.Markdown("*Database not loaded.*"))
 
+    top_summary_row = pn.Row(
+        pn.Column(general_status_view, sizing_mode="stretch_width"),
+        pn.Column(db_summary_view, sizing_mode="stretch_width"),
+        sizing_mode="stretch_width",
+    )
+
     return pn.Column(
-        general_status_view,
+        top_summary_row,
         config_view,
-        db_summary_view,
         sizing_mode="stretch_width"
     )
 
@@ -97,7 +140,7 @@ def build(vm: ViewModel):
     
     content_pane = pn.Column(_build_status_view(vm))
 
-    def refresh_view(event):
+    def refresh_view(_event):
         """Callback for the refresh button."""
         content_pane.objects = [_build_status_view(vm)]
 
