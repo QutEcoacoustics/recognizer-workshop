@@ -8,15 +8,17 @@ from baw_helpers.baw_api import baw_api, AuthenticationError
 
 @pytest.fixture
 def mock_test_token_valid():
-    """Mock test_token to always return True."""
-    with patch.object(baw_api, 'test_token', return_value=True) as mock:
+    """Mock check_auth to always return ok=True."""
+    with patch.object(baw_api, 'check_auth', return_value={'ok': True}) as mock:
         yield mock
 
 
 @pytest.fixture
 def mock_test_token_invalid():
-    """Mock test_token to always return False."""
-    with patch.object(baw_api, 'test_token', return_value=False) as mock:
+    """Mock check_auth to always return ok=False."""
+    with patch.object(baw_api, 'check_auth', return_value={'ok': False}) as mock, \
+         patch.object(baw_api, 'auth_state', 'invalid_token', create=True), \
+         patch.object(baw_api, 'auth_message', 'Mock invalid token', create=True):
         yield mock
 
 
