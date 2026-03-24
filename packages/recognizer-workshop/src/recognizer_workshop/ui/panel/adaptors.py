@@ -113,25 +113,7 @@ class PanelUI(param.Parameterized):
     def view_target_labels(self) -> pn.layout.Panel:
         """Builds and returns the UI component for defining target labels."""
         labels_container = pn.Column(sizing_mode="stretch_width")
-        test_species_widget = pn.widgets.AutocompleteInput(
-            name="Species test",
-            options=[],
-            value="",
-            placeholder="Type to search for a species...",
-            case_sensitive=False,
-            sizing_mode="stretch_width",
-        )
-        test_call_types_widget = pn.widgets.TextInput(
-            name="Call Type",
-            value="",
-            placeholder="(optional) e.g., song",
-            sizing_mode="stretch_width",
-        )
-        test_row = pn.Row(
-            test_species_widget,
-            test_call_types_widget,
-            sizing_mode="stretch_width",
-        )
+
         btn_add_label = pn.widgets.Button(
             name="Add Label",
             icon="plus",
@@ -288,7 +270,6 @@ class PanelUI(param.Parameterized):
 
         def _init():
             label_editor_section.visible = True
-            test_species_widget.options = self.vm.eng.workbench_tags if self.vm.eng else []
             _build_labels_ui()
             sync_and_update_display(save=False)
 
@@ -306,7 +287,6 @@ class PanelUI(param.Parameterized):
         @pn.depends(self.vm.obs.ensure("target_labels").param.version, watch=True)
         def _on_target_labels_change(_):
             config_obj = _current_config()
-            test_species_widget.options = self.vm.eng.workbench_tags if self.vm.eng else []
             if _labels_signature(config_obj) != last_rendered_signature:
                 _build_labels_ui()
             else:
@@ -315,12 +295,6 @@ class PanelUI(param.Parameterized):
 
 
         return pn.Column(
-            pn.pane.Alert(
-                "Define one or more target species. For each species, you can optionally specify distinct call types.",
-                alert_type="info"
-            ),
-            pn.pane.Markdown("**Static styling test row (outside dynamic label builder):**"),
-            test_row,
             current_labels_display,
             label_editor_section,
             sizing_mode="stretch_width"

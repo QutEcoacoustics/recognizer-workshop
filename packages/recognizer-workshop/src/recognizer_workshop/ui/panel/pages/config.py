@@ -219,7 +219,7 @@ def build(vm):
         token_input.param.watch(_on_token_edited, "value")
 
     # text inputs for config fields, with values coming from the loaded config
-    annotator_id = pn.widgets.TextInput(name="Annotator", value=vm.config.annotator_id)
+    annotator_id = pn.widgets.TextInput(name="Annotator Name", value=vm.config.annotator_id)
     # Create help buttons for key fields
     annotator_help_btn = vm.help_system.create_help_button("help-annotator-id", "Help: Annotator ID")
     domain_help_btn = vm.help_system.create_help_button("help-api-domain", "Help: API Domain")
@@ -267,10 +267,10 @@ def build(vm):
     def _has_custom_paths():
         """Check if any custom paths are set in the config."""
         return bool(
-            str(vm.config.db_path) == str(default_paths['db_path']) or
-            str(vm.config.labeled_examples_folder) == str(default_paths['labeled_examples_folder']) or
-            str(vm.config.models_folder) == str(default_paths['models_folder']) or
-            str(vm.config.predictions_folder) == str(default_paths['predictions_folder'])
+            str(vm.config.db_path) != str(default_paths['db_path']) or
+            str(vm.config.labeled_examples_folder) != str(default_paths['labeled_examples_folder']) or
+            str(vm.config.models_folder) != str(default_paths['models_folder']) or
+            str(vm.config.predictions_folder) != str(default_paths['predictions_folder'])
         )
 
     def sync_config_to_ui():
@@ -313,8 +313,9 @@ def build(vm):
             
             # Show advanced section if any paths are customized (non-default)
             has_custom_paths = _has_custom_paths()
-            show_advanced.value = has_custom_paths
-            advanced_section.visible = has_custom_paths
+            if has_custom_paths:
+                show_advanced.value = True
+            advanced_section.visible = show_advanced.value or has_custom_paths
             
             path_str = str(vm.config.config_path) if vm.config.config_path else "Unsaved Configuration"
             current_config_path_display.value = f"<b>Current File:</b> {path_str}"
@@ -629,7 +630,7 @@ def build(vm):
 
 
     # --- BINDINGS ---
-    config_widgets = [annotator_id, show_advanced, db_path, labeled_dir, models_dir, preds_dir]
+    config_widgets = [annotator_id, db_path, labeled_dir, models_dir, preds_dir]
     for widgets in workbench_auth_widgets.values():
         config_widgets.extend([widgets["anonymous"], widgets["token"]])
 
