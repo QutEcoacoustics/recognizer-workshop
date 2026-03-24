@@ -7,14 +7,14 @@ from baw_helpers.baw_api import baw_api, AuthenticationError
 # ==================== Test-Specific Fixtures ====================
 
 @pytest.fixture
-def mock_test_token_valid():
+def mock_check_auth_valid():
     """Mock check_auth to always return ok=True."""
     with patch.object(baw_api, 'check_auth', return_value={'ok': True}) as mock:
         yield mock
 
 
 @pytest.fixture
-def mock_test_token_invalid():
+def mock_check_auth_invalid():
     """Mock check_auth to always return ok=False."""
     with patch.object(baw_api, 'check_auth', return_value={'ok': False}) as mock, \
          patch.object(baw_api, 'auth_state', 'invalid_token', create=True), \
@@ -27,7 +27,7 @@ def mock_test_token_invalid():
 class TestTokenPriorityChain:
     """Test #1, #7, #11, #13: Token source priority."""
     
-    def test_priority_1_explicit_valid(self, mock_env_no_token, mock_test_token_valid):
+    def test_priority_1_explicit_valid(self, mock_env_no_token, mock_check_auth_valid):
         """#1: Explicit valid token is used (even if env has tokens)."""
         with patch('baw_helpers.baw_api.find_dotenv', return_value="/fake/.env"), \
              patch('baw_helpers.baw_api.os.path.exists', return_value=True), \
@@ -43,7 +43,7 @@ class TestTokenPriorityChain:
             assert result is True
             assert api.token == "explicit_token"
     
-    def test_priority_7_env_var_valid(self, mock_env_no_token, mock_test_token_valid):
+    def test_priority_7_env_var_valid(self, mock_env_no_token, mock_check_auth_valid):
         """#7: Env var token used when no explicit token (even if .env has token)."""
         with patch('baw_helpers.baw_api.find_dotenv', return_value="/fake/.env"), \
              patch('baw_helpers.baw_api.os.path.exists', return_value=True), \
@@ -59,7 +59,7 @@ class TestTokenPriorityChain:
             assert result is True
             assert api.token == "env_var_token"
     
-    def test_priority_11_dotenv_valid(self, mock_env_no_token, mock_test_token_valid):
+    def test_priority_11_dotenv_valid(self, mock_env_no_token, mock_check_auth_valid):
         """#11: .env file token used when no explicit token or env var."""
         with patch('baw_helpers.baw_api.find_dotenv', return_value="/fake/.env"), \
              patch('baw_helpers.baw_api.os.path.exists', return_value=True), \
@@ -89,7 +89,7 @@ class TestTokenPriorityChain:
 class TestAnonymousModeNonInteractive:
     """Test #17, #18, #19: Anonymous mode with allow_prompt=False."""
     
-    def test_17_valid_explicit_authenticated(self, mock_env_no_token, mock_no_dotenv, mock_test_token_valid):
+    def test_17_valid_explicit_authenticated(self, mock_env_no_token, mock_no_dotenv, mock_check_auth_valid):
         """#17: Valid explicit token succeeds."""
         api = baw_api.__new__(baw_api)
         api.base_url = "https://test.example.com"
@@ -100,7 +100,7 @@ class TestAnonymousModeNonInteractive:
         assert result is True
         assert api.token == "valid_token"
     
-    def test_18_forced_anonymous_ignores_token(self, mock_env_no_token, mock_no_dotenv, mock_test_token_invalid):
+    def test_18_forced_anonymous_ignores_token(self, mock_env_no_token, mock_no_dotenv, mock_check_auth_invalid):
         """#18: Invalid explicit token proceeds to anonymous mode."""
         api = baw_api.__new__(baw_api)
         api.base_url = "https://test.example.com"
@@ -126,7 +126,7 @@ class TestAnonymousModeNonInteractive:
 class TestAuthRequiredNonInteractive:
     """Test #22, #23, #24: Auth required with allow_prompt=False."""
     
-    def test_22_valid_explicit_authenticated(self, mock_env_no_token, mock_no_dotenv, mock_test_token_valid):
+    def test_22_valid_explicit_authenticated(self, mock_env_no_token, mock_no_dotenv, mock_check_auth_valid):
         """#22: Valid explicit token succeeds when auth required."""
         api = baw_api.__new__(baw_api)
         api.base_url = "https://test.example.com"
@@ -137,7 +137,7 @@ class TestAuthRequiredNonInteractive:
         assert result is True
         assert api.token == "valid_token"
     
-    def test_23_invalid_explicit_auth_fails(self, mock_env_no_token, mock_no_dotenv, mock_test_token_invalid):
+    def test_23_invalid_explicit_auth_fails(self, mock_env_no_token, mock_no_dotenv, mock_check_auth_invalid):
         """#23: Invalid explicit token raises exception when auth required."""
         api = baw_api.__new__(baw_api)
         api.base_url = "https://test.example.com"
@@ -159,7 +159,7 @@ class TestAuthRequiredNonInteractive:
 class TestInteractiveAuthRequired:
     """Test #32, #34, #36: Interactive prompting with require_auth=True."""
     
-    def test_32_valid_explicit_no_prompt(self, mock_env_no_token, mock_no_dotenv, mock_test_token_valid):
+    def test_32_valid_explicit_no_prompt(self, mock_env_no_token, mock_no_dotenv, mock_check_auth_valid):
         """#32: Valid explicit token, no prompting needed."""
         api = baw_api.__new__(baw_api)
         api.base_url = "https://test.example.com"
@@ -190,7 +190,7 @@ class TestInteractiveAuthRequired:
 class TestEdgeCasesEmptyStrings:
     """Test #14, #15, #37: Empty string handling."""
     
-    def test_14_empty_explicit_falls_back_to_env_var(self, mock_env_no_token, mock_test_token_valid):
+    def test_14_empty_explicit_falls_back_to_env_var(self, mock_env_no_token, mock_check_auth_valid):
         """#14: Empty string explicit token falls back to env var."""
         with patch('baw_helpers.baw_api.find_dotenv', return_value=None), \
              patch('baw_helpers.baw_api.os.path.exists', return_value=False), \
@@ -205,7 +205,7 @@ class TestEdgeCasesEmptyStrings:
             assert result is True
             assert api.token == "env_var_token"
     
-    def test_15_empty_explicit_falls_back_to_dotenv(self, mock_env_no_token, mock_test_token_valid):
+    def test_15_empty_explicit_falls_back_to_dotenv(self, mock_env_no_token, mock_check_auth_valid):
         """#15: Empty string explicit token falls back to .env file."""
         with patch('baw_helpers.baw_api.find_dotenv', return_value="/fake/.env"), \
              patch('baw_helpers.baw_api.os.path.exists', return_value=True), \
@@ -241,7 +241,7 @@ class TestEdgeCasesEmptyStrings:
 class TestInteractivePromptingSuccess:
     """Interactive prompting with successful token entry (require_auth=True only)."""
     
-    def test_no_token_user_enters_valid_require_auth(self, mock_env_no_token, mock_test_token_valid):
+    def test_no_token_user_enters_valid_require_auth(self, mock_env_no_token, mock_check_auth_valid):
         """No token with anonymous=False, user enters valid token via prompt."""
         with patch('baw_helpers.baw_api.find_dotenv', return_value="/fake/.env"), \
              patch('baw_helpers.baw_api.os.path.exists', return_value=False), \
@@ -300,7 +300,7 @@ class TestPromptRetryLogic:
 class TestSaveToEnvPrompting:
     """Test #42, #43: Save to .env prompting."""
     
-    def test_42_user_saves_to_env(self, mock_env_no_token, mock_test_token_valid):
+    def test_42_user_saves_to_env(self, mock_env_no_token, mock_check_auth_valid):
         """#42: User chooses to save token to .env."""
         with patch('baw_helpers.baw_api.find_dotenv', return_value="/fake/.env"), \
              patch('baw_helpers.baw_api.os.path.exists', return_value=False), \
@@ -318,7 +318,7 @@ class TestSaveToEnvPrompting:
             assert api.token == "user_token"
             mock_set_key.assert_called_once_with("/fake/.env", 'BAW_AUTH_TOKEN', "user_token")
     
-    def test_43_user_does_not_save_to_env(self, mock_env_no_token, mock_test_token_valid):
+    def test_43_user_does_not_save_to_env(self, mock_env_no_token, mock_check_auth_valid):
         """#43: User chooses NOT to save token to .env."""
         with patch('baw_helpers.baw_api.find_dotenv', return_value="/fake/.env"), \
              patch('baw_helpers.baw_api.os.path.exists', return_value=False), \
@@ -340,7 +340,7 @@ class TestSaveToEnvPrompting:
 class TestInvalidTokenNoFallback:
     """Test #4, #5, #6: Invalid explicit token doesn't fall back to env/dotenv."""
     
-    def test_4_invalid_explicit_ignores_valid_env(self, mock_env_no_token, mock_test_token_invalid):
+    def test_4_invalid_explicit_ignores_valid_env(self, mock_env_no_token, mock_check_auth_invalid):
         """#4: Invalid explicit token raises exception (doesn't fall back to valid env var)."""
         with patch('baw_helpers.baw_api.find_dotenv', return_value="/fake/.env"), \
              patch('baw_helpers.baw_api.os.path.exists', return_value=True), \
@@ -354,7 +354,7 @@ class TestInvalidTokenNoFallback:
             with pytest.raises(AuthenticationError):
                 api.update_token(token="invalid_explicit", allow_prompt=False)
     
-    def test_5_invalid_explicit_all_invalid(self, mock_env_no_token, mock_test_token_invalid):
+    def test_5_invalid_explicit_all_invalid(self, mock_env_no_token, mock_check_auth_invalid):
         """#5: Invalid explicit token raises exception (all sources invalid)."""
         with patch('baw_helpers.baw_api.find_dotenv', return_value="/fake/.env"), \
              patch('baw_helpers.baw_api.os.path.exists', return_value=True), \
@@ -368,7 +368,7 @@ class TestInvalidTokenNoFallback:
             with pytest.raises(AuthenticationError):
                 api.update_token(token="invalid_explicit", allow_prompt=False)
     
-    def test_6_invalid_explicit_no_env(self, mock_env_no_token, mock_no_dotenv, mock_test_token_invalid):
+    def test_6_invalid_explicit_no_env(self, mock_env_no_token, mock_no_dotenv, mock_check_auth_invalid):
         """#6: Invalid explicit token raises exception (no env tokens available)."""
         api = baw_api.__new__(baw_api)
         api.base_url = "https://test.example.com"

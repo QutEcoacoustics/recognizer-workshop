@@ -35,8 +35,7 @@ def build(vm):
 
     def _set_filters(filters):
         if not (vm.eng and vm.eng.db):
-            vm.notify("Initialize the engine on the Config tab first.", "error")
-            return
+            raise RuntimeError("Initialize the engine on the Config tab first.")
         vm.eng.set_baw_filters(filters)
 
     engine_warning = pn.pane.Alert(

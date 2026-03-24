@@ -22,6 +22,28 @@ print(f"[startup] panel extension loaded {time.time():.3f}")
 hv.extension('bokeh')
 print(f"[startup] holoviews extension loaded {time.time():.3f}")
 
+
+def _global_exception_handler(ex):
+    logging.error("An unhandled exception occurred", exc_info=ex)
+    try:
+        if pn.state.notifications is not None:
+            pn.state.notifications.error(
+                "An unexpected error occurred. Please try refreshing the page."
+            )
+    except Exception:
+        # Never fail while reporting an error
+        pass
+
+
+def _install_global_exception_handler():
+    if getattr(_install_global_exception_handler, "_installed", False):
+        return
+    pn.config.exception_handler = _global_exception_handler
+    _install_global_exception_handler._installed = True
+
+
+_install_global_exception_handler()
+
 def _import_page(name: str):
     start = time.time()
     module = importlib.import_module(f"recognizer_workshop.ui.panel.pages.{name}")
@@ -65,12 +87,6 @@ def build_app(vm):
     """Builds the main application layout using a Panel template."""
 
     vm.ui = PanelUI(vm)
-
-    def _session_exception_handler(ex):
-        logging.error("An unhandled exception occurred", exc_info=ex)
-        vm.notify(f"An unexpected error occurred. Please try refreshing the page. {ex}", "error")
-
-    pn.config.exception_handler = _session_exception_handler
 
     vm.setup_help_system()
 
