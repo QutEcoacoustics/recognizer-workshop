@@ -580,16 +580,24 @@ class agile_state:
         """
         Returns a dict with the status of the agile state
         - db_loaded: Whether the database is loaded
-        - embedding_model_loaded: Whether the embedding model is loaded
+        - embedding_runtime_ready: Whether the worker-based embedding runtime is ready
         - embedding_model_config: The configuration of the embedding model
+        - db_metadata: Metadata stored in the hoplite DB
         - db_summary: A summary of the database contents (self.db.summary())
         """
+
+        embedding_runtime_ready = (
+            getattr(self, "_embed_runner", None) is not None
+        )
 
         status = {
             "config": self.config,
             "db_loaded": self.db is not None,
-            "embedding_model_loaded": self._embedding_model is not None,
+            "embedding_runtime_ready": embedding_runtime_ready,
+            # Backwards-compatible key used by some UI code; now reflects worker runtime readiness.
+            "embedding_model_loaded": embedding_runtime_ready,
             "embedding_model_config": self.db_model_config,
+            "db_metadata": self.db.get_metadata(None) if self.db else None,
             "db_summary": self.db_summary() if self.db else None,
         }
 

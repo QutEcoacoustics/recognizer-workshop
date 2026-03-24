@@ -6,6 +6,8 @@ The user supplies comma-separated IDs for one or more of projects, regions, and 
 """
 import panel as pn
 
+from recognizer_workshop.app.services.baw_filters import parse_csv_ints, normalize_first_filter
+
 def build_filter_editor(getter_fn, setter_fn, vm):
     """
     A reusable component for displaying and editing a single BAW filter,
@@ -36,6 +38,7 @@ def build_filter_editor(getter_fn, setter_fn, vm):
     filter_display = pn.pane.Markdown(sizing_mode="stretch_width")
     btn_edit = pn.widgets.Button(name="Edit", icon='edit')
     container = pn.Column(sizing_mode="stretch_width")
+    edit_controls = pn.Row(filter_type_select, ids_input, btn_save)
 
     display_view = pn.Column(
         pn.pane.Markdown("#### Current Recording Filter"),
@@ -44,11 +47,33 @@ def build_filter_editor(getter_fn, setter_fn, vm):
     # The edit view is now much simpler
     edit_view = pn.Column(
         pn.pane.Markdown("#### Edit Recording Filter"),
-        pn.Row(filter_type_select, ids_input),
-        pn.Row(btn_save, btn_cancel)
+        edit_controls
     )
 
     # --- Logic ---
+    def _parse_editor_value():
+        selected_key = filter_type_select.value
+        id_list = parse_csv_ints(ids_input.value)
+        if not id_list:
+            return None
+        return {selected_key: {"in": id_list}}
+
+    def _update_save_state(*_):
+        current = normalize_first_filter(getter_fn())
+        candidate = _parse_editor_value()
+        btn_save.disabled = (candidate is None) or (candidate == current)
+
+    def _show_edit_mode():
+        has_existing = normalize_first_filter(getter_fn()) is not None
+        edit_controls.objects = (
+            [filter_type_select, ids_input, btn_save, btn_cancel]
+            if has_existing else
+            [filter_type_select, ids_input, btn_save]
+        )
+        _populate_editors()
+        _update_save_state()
+        container.objects = [edit_view]
+
     def _format_filters(filters):
         """Formats the single filter for display."""
         if not filters or not filters[0]:
@@ -70,7 +95,7 @@ def build_filter_editor(getter_fn, setter_fn, vm):
         if filters and filters[0]:
             container.objects = [display_view]
         else:
-            _populate_editors(); container.objects = [edit_view]
+            _show_edit_mode()
 
     def _populate_editors():
         """Populates the edit fields based on the current filter."""
@@ -92,30 +117,24 @@ def build_filter_editor(getter_fn, setter_fn, vm):
 
     def _save():
         """Constructs and saves the filter based on the dropdown and text input."""
-        selected_key = filter_type_select.value
-        id_value_str = ids_input.value
+        candidate = _parse_editor_value()
+        if candidate is None:
+            vm.notify("Please enter at least one numeric ID.", "warn")
+            return
 
-        if not id_value_str or not id_value_str.strip():
-            vm.notify("Please enter at least one ID.", "warn"); return
-        
-        new_filter = {}
-        try:
-            # Parse the comma-separated string into a list of integers
-            id_list = [int(s.strip()) for s in id_value_str.split(',') if s.strip()]
-            if id_list:
-                new_filter[selected_key] = {"in": id_list}
-
-        except ValueError:
-            vm.notify("Invalid input. Please ensure all IDs are numbers.", "error"); return
+        if candidate == normalize_first_filter(getter_fn()):
+            return
         
         try:
             # The filter structure is still a list containing our one dictionary
-            setter_fn([new_filter]); vm.notify("Filter saved!", "success"); _update_display()
+            setter_fn([candidate]); vm.notify("Filter saved!", "success"); _update_display()
         except Exception as e:
             vm.notify(f"Could not save filter: {e}", "error")
 
     # --- Bindings ---
-    btn_edit.on_click(lambda _:_populate_editors() or container.param.update(objects=[edit_view]))
+    filter_type_select.param.watch(_update_save_state, 'value')
+    ids_input.param.watch(_update_save_state, 'value')
+    btn_edit.on_click(lambda _: _show_edit_mode())
     btn_cancel.on_click(lambda _: _update_display())
     btn_save.on_click(lambda _: _save())
     

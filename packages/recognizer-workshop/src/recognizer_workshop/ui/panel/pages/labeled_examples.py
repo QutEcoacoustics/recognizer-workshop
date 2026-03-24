@@ -1,19 +1,18 @@
-import copy
-import json
 import threading
 
 import pandas as pd
 import panel as pn
 
 from recognizer_workshop.app.services.db_labels.add_db_labels import add_labels_to_db
+from recognizer_workshop.ui.panel.components.native.filter_editor import build_filter_editor
 
 def build(vm):
     # Create help buttons
     labeled_examples_help_btn = vm.help_system.create_help_button("help-labeled-examples-overview", "Help: Labeled Examples")
     filter_help_btn = vm.help_system.create_help_button("help-recordings-filter-labelled-examples", "Help: Recording Filters")
 
-    btn_fetch = pn.widgets.Button(name="Fetch labels from server", button_type="primary")
-    btn_add   = pn.widgets.Button(name="Add fetched labels to DB", button_type="success", disabled=True)
+    btn_fetch = pn.widgets.Button(name="Fetch labels from server", button_type="primary", sizing_mode="fixed", width=220)
+    btn_add   = pn.widgets.Button(name="Add fetched labels to DB", button_type="success", disabled=True, sizing_mode="fixed", width=220)
     log       = pn.pane.Markdown("")
     summary_table = None
     outcomes_table = None
@@ -29,76 +28,34 @@ def build(vm):
     details_container = pn.Column(details_title, details_placeholder, sizing_mode="stretch_width")
     stash     = {"result_sets": None, "outcomes": None}
     
-    project_ids_input = pn.widgets.TextInput(name="Project IDs (comma-separated)", placeholder="e.g., 123, 456")
-    region_ids_input = pn.widgets.TextInput(name="Region IDs (comma-separated)", placeholder="e.g., 789")
-    site_ids_input = pn.widgets.TextInput(name="Site IDs (comma-separated)", placeholder="e.g., 101, 102")
-    btn_save = pn.widgets.Button(name="Save Filters", button_type="primary", icon='save')
-    btn_cancel = pn.widgets.Button(name="Cancel")
-
-
-    filter_display = pn.pane.Markdown(sizing_mode="stretch_width")
-    btn_edit = pn.widgets.Button(name="Edit", icon='edit')
-
-    editor_container = pn.Column(sizing_mode="stretch_width")
-
-    display_view = pn.Column(
-        pn.pane.Markdown("#### Ecosounds Recording Settings"),
-        pn.Row(filter_display, btn_edit, align="center")
-    )
-    edit_view = pn.Column(
-        pn.pane.Markdown("#### Edit Ecosounds Recording Settings"),
-        project_ids_input,
-        region_ids_input,
-        site_ids_input,
-        pn.Row(btn_save, btn_cancel)
-    )
-
-
-    def _update_filter_display():
-        """Decides whether to show the display_view or edit_view."""
+    def _get_filters():
         if not (vm.eng and vm.eng.db):
-            editor_container.objects = [
-                pn.pane.Alert("Initialize the engine on the 'Config' tab to set up filters.", alert_type="warning")
-            ]
-            return
+            return None
+        return vm.eng.get_baw_filters()
 
-        filters = vm.eng.get_baw_filters()
-        filter_display.object = _format_filters_for_display(filters)
-        # If filters exist and are not empty, show the display view.
-        if filters and filters[0]:
-            editor_container.objects = [display_view]
-        else: # Otherwise, show the edit view to prompt the user.
-            _populate_editors_from_filters()
-            editor_container.objects = [edit_view]
+    def _set_filters(filters):
+        if not (vm.eng and vm.eng.db):
+            raise RuntimeError("Initialize the engine on the Config tab first.")
+        vm.eng.set_baw_filters(filters)
 
+    engine_warning = pn.pane.Alert(
+        "Initialize the engine on the 'Config' tab to set up filters.",
+        alert_type="warning"
+    )
+    filter_section = pn.Column(sizing_mode="stretch_width")
 
-    def _format_filters_for_display(filters: list) -> str:
-        """Human-readable formatting of the filters"""
-        if not filters or not filters[0]:
-            return "No filters set. Click 'Edit' to add one."
+    def _build_filter_editor_widget():
+        """Build a fresh filter editor each time the engine state changes."""
+        return build_filter_editor(_get_filters, _set_filters, vm)
 
-        filter_dict = filters[0]
-        description_lines = []
-        
-        # Define the order and labels for the filters
-        filter_keys = {
-            "projects.id": "Projects",
-            "regions.id": "Regions",
-            "sites.id": "Sites"
-        }
-
-        for key, label in filter_keys.items():
-            if key in filter_dict and "in" in filter_dict[key]:
-                id_list = filter_dict[key]["in"]
-                if id_list:
-                    ids_str = ', '.join(map(str, id_list))
-                    description_lines.append(f"**{label}:** `{ids_str}`")
-
-        if not description_lines:
-            return "No filters set. Click 'Edit' to add one."
-
-        # Join the lines with an "OR"
-        return " <br> **OR** <br> ".join(description_lines)
+    def _update_filter_section():
+        """Show filter editor when engine is ready, warning otherwise."""
+        if not (vm.eng and vm.eng.db):
+            filter_section.objects = [engine_warning]
+        else:
+            # Rebuild the filter editor to ensure it reflects latest DB metadata
+            filter_editor = _build_filter_editor_widget()
+            filter_section.objects = [filter_editor]
 
 
     def _format_filter_params_for_display(filter_params: dict, fallback_name: str = "Filter") -> str:
@@ -304,55 +261,6 @@ def build(vm):
             _show_outcome_details('', '', '', 'embedding_not_found')
 
 
-    def _populate_editors_from_filters():
-        """Helper to parse existing filters and fill the text inputs."""
-        filters = vm.eng.get_baw_filters()
-        project_ids_input.value, region_ids_input.value, site_ids_input.value = "", "", ""
-
-        if not filters or not isinstance(filters, list) or not filters[0]:
-            return
-            
-        filter_dict = filters[0]
-
-        def get_ids(key):
-            if key in filter_dict and "in" in filter_dict[key]:
-                return ", ".join(map(str, filter_dict[key]["in"]))
-            return ""
-
-        project_ids_input.value = get_ids("projects.id")
-        region_ids_input.value = get_ids("regions.id")
-        site_ids_input.value = get_ids("sites.id")
-
-
-    def _toggle_to_edit_view(_):
-        """Swaps the container's content to the edit_view."""
-        _populate_editors_from_filters()
-        editor_container.objects = [edit_view]
-
-
-    def _save_filters(_):
-        """Saves filters and then switches back to the display view."""
-        if not vm.eng: return vm.notify("Initialize on Config tab first.", "error")
-
-        inputs = {"projects.id": project_ids_input.value, "regions.id": region_ids_input.value, "sites.id": site_ids_input.value}
-        if not any(val.strip() for val in inputs.values()):
-            vm.notify("Please enter IDs in at least one field.", "warn"); return
-        new_filter = {}
-        try:
-            for key, value_str in inputs.items():
-                if not value_str.strip(): continue
-                id_list = [int(s.strip()) for s in value_str.split(',') if s.strip()]
-                if id_list: new_filter[key] = {"in": id_list}
-        except ValueError:
-            vm.notify("Invalid input. Please ensure all IDs are comma-separated numbers.", "error"); return
-        
-        try:
-            vm.eng.set_baw_filters([new_filter])
-            vm.notify("BAW filters saved successfully!", "success")
-            _update_filter_display() 
-        except Exception as e:
-            vm.notify(f"Could not save filters: {e}", "error")
-
 
     def _fetch(_):
         if not vm.eng: return vm.notify("Initialize on Config tab first.", "error")
@@ -450,20 +358,14 @@ def build(vm):
 
 
 
-    btn_edit.on_click(_toggle_to_edit_view)
-    btn_save.on_click(_save_filters)
-    btn_cancel.on_click(lambda _: _update_filter_display())
     btn_fetch.on_click(_fetch)
     btn_add.on_click(_add)
-    
-    # Set up click event for outcomes table
-    # outcomes_table.param.watch(_on_outcomes_table_click, 'clicks')
 
-    _update_filter_display()
+    _update_filter_section()
 
     @pn.depends(vm.obs.ensure("engine_state").param.version, watch=True)
     def _on_engine_state_change(_):
-        _update_filter_display()
+        _update_filter_section()
 
     return pn.Column(
         pn.Row("## Labelled examples", pn.Spacer(), labeled_examples_help_btn),
@@ -476,11 +378,18 @@ def build(vm):
         pn.Row(
             pn.Column(
                 pn.Row("Recording Filter Settings", pn.Spacer(), filter_help_btn),
-                editor_container
-            )
+                filter_section,
+                sizing_mode="stretch_width",
+            ),
+            pn.Column(
+                pn.pane.Markdown("### Actions"),
+                btn_fetch,
+                btn_add,
+                sizing_mode="stretch_width",
+            ),
+            sizing_mode="stretch_width",
         ),
         pn.layout.Divider(),
-        pn.Row(btn_fetch, btn_add),
         log,
         pn.layout.Divider(),
         pn.pane.Markdown("### Label Summary"),

@@ -110,10 +110,16 @@ class PanelUI(param.Parameterized):
         self.get_region_box(name).clear()
 
 
-    def view_target_labels(self, eng) -> pn.layout.Panel:
+    def view_target_labels(self) -> pn.layout.Panel:
         """Builds and returns the UI component for defining target labels."""
         labels_container = pn.Column(sizing_mode="stretch_width")
-        btn_add_label = pn.widgets.Button(name="Add Label", icon="plus", button_type="success")
+
+        btn_add_label = pn.widgets.Button(
+            name="Add Label",
+            icon="plus",
+            button_type="success",
+            sizing_mode="fixed",
+        )
         current_labels_display = pn.pane.Markdown()
 
         label_editor_section = pn.Column(
@@ -121,56 +127,102 @@ class PanelUI(param.Parameterized):
             btn_add_label,
             sizing_mode="stretch_width"
         )
+        is_rebuilding_labels = False
+        last_rendered_signature = None
 
-        def sync_and_update_display(*events):
-            # Save the config whenever a change is made
-            eng.config.save() # Assumes config_path is stored on eng.config
-            description = eng.get_target_label_description()
+        def _current_config():
+            return self.vm.eng.config if self.vm.eng else self.vm.config
+
+        def _describe_target_labels(config_obj) -> str:
+            labels = getattr(config_obj, "target_labels", []) or []
+            if not labels:
+                return ""
+
+            parts = []
+            for label in labels:
+                if getattr(label, "call_type", None):
+                    parts.append(f"{label.species} ({label.call_type})")
+                else:
+                    parts.append(label.species)
+            return ", ".join(parts)
+
+        def _labels_signature(config_obj) -> tuple[str, ...]:
+            labels = getattr(config_obj, "target_labels", []) or []
+            return tuple(str(label) for label in labels)
+
+        def sync_and_update_display(*events, save: bool = True):
+            config_obj = _current_config()
+
+            if save and getattr(config_obj, "config_path", None):
+                config_obj.save()
+
+            description = _describe_target_labels(config_obj)
             current_labels_display.object = f"**Summary:** {description}" if description else "*(No labels defined)*"
 
 
         def _remove_label(index, event):  
-            if 0 <= index < len(eng.config.target_labels):
-                eng.config.target_labels.pop(index)  
+            config_obj = _current_config()
+            if 0 <= index < len(config_obj.target_labels):
+                config_obj.target_labels.pop(index)
                 _build_labels_ui()
                 sync_and_update_display()
 
 
         def _build_labels_ui():
+            nonlocal is_rebuilding_labels, last_rendered_signature
+            is_rebuilding_labels = True
             labels_container.clear()
 
-            if not hasattr(eng, 'active_client') or eng.active_client is None:
-                return
+            config_obj = _current_config()
+            species_options = self.vm.eng.workbench_tags if self.vm.eng else []
 
+            for i, label in enumerate(config_obj.target_labels):
+                row_species_options = list(species_options)
+                if label.species and label.species not in row_species_options:
+                    row_species_options.append(label.species)
 
-            for i, label in enumerate(eng.config.target_labels):
                 species_widget = pn.widgets.AutocompleteInput(
                     name=f"Species {i+1}", 
-                    options=eng.workbench_tags, 
+                    options=row_species_options,
                     value=label.species,
                     placeholder="Type to search for a species...",
-                    case_sensitive=False
+                    case_sensitive=False,
+                    min_characters=1,
+                    sizing_mode="stretch_width",
                 )
                 call_types_widget = pn.widgets.TextInput(
                     name="Call Type", 
-                    value=label.call_type, 
-                    placeholder="(optional) e.g., song")
-                remove_btn = pn.widgets.Button(name="Remove", icon="trash", button_type="danger")
+                    value=str(label.call_type) if label.call_type else "", 
+                    placeholder="(optional) e.g., song",
+                    sizing_mode="stretch_width",
+                )
+                remove_btn = pn.widgets.Button(
+                    name="Remove",
+                    icon="trash",
+                    button_type="danger",
+                    sizing_mode="fixed",
+                )
                 remove_btn.on_click(partial(_remove_label, i))
 
                 def _update_species(event, index=i):
+                    if is_rebuilding_labels:
+                        return
                     # Replace the LabelName instance instead of mutating it
-                    old_label = eng.config.target_labels[index]
-                    eng.config.target_labels[index] = LabelName(
+                    current_config = _current_config()
+                    old_label = current_config.target_labels[index]
+                    current_config.target_labels[index] = LabelName(
                         species=event.new,
                         call_type=old_label.call_type
                     )
                     sync_and_update_display()
 
                 def _update_call_type(event, index=i):
+                    if is_rebuilding_labels:
+                        return
                     # Replace the LabelName instance instead of mutating it
-                    old_label = eng.config.target_labels[index]
-                    eng.config.target_labels[index] = LabelName(
+                    current_config = _current_config()
+                    old_label = current_config.target_labels[index]
+                    current_config.target_labels[index] = LabelName(
                         species=old_label.species,
                         call_type=event.new.strip() or None
                     )
@@ -182,8 +234,36 @@ class PanelUI(param.Parameterized):
                 labels_container.append(pn.Row(species_widget, call_types_widget, 
                                                remove_btn, sizing_mode="stretch_width"))
 
+            last_rendered_signature = _labels_signature(config_obj)
+            is_rebuilding_labels = False
+
+        def _refresh_species_options_in_place():
+            config_obj = _current_config()
+            species_options = self.vm.eng.workbench_tags if self.vm.eng else []
+            rows = getattr(labels_container, "objects", [])
+            if not isinstance(rows, list):
+                return
+
+            for row, label in zip(rows, config_obj.target_labels):
+                row_objects = getattr(row, "objects", None)
+                if not isinstance(row_objects, list) or not row_objects:
+                    continue
+
+                species_widget = row_objects[0]
+                if not isinstance(species_widget, pn.widgets.AutocompleteInput):
+                    continue
+
+                row_species_options = list(species_options)
+                if label.species and label.species not in row_species_options:
+                    row_species_options.append(label.species)
+                species_widget.options = row_species_options
+
         def _add_label(event):
-            eng.config.target_labels.append(LabelName(species="", call_type=None))
+            config_obj = _current_config()
+            config_obj.target_labels.append(LabelName(species="", call_type=None))
+            # Notify reactive observers that target labels (and config state) have changed
+            self.vm.obs.bump("target_labels")
+            self.vm.obs.bump("config_state")
             _build_labels_ui()
             sync_and_update_display()
 
@@ -192,30 +272,32 @@ class PanelUI(param.Parameterized):
 
 
         def _init():
-            has_baw_api = hasattr(eng, 'active_client') and eng.active_client is not None
-            label_editor_section.visible = has_baw_api
-            
-            if has_baw_api:
-                _build_labels_ui()
-                sync_and_update_display()
-            else:
-                current_labels_display.object = "*(Connect to BAW API to define labels)*"
-                labels_container.clear()
+            label_editor_section.visible = True
+            _build_labels_ui()
+            sync_and_update_display(save=False)
 
 
         # Initial state
         _init()
 
-        @pn.depends(self.vm.obs.ensure("engine_state").param.version, watch=True)
-        def _update_visibility(_):
-            _init()
+        @pn.depends(self.vm.obs.ensure("config_state").param.version, watch=True)
+        def _on_config_change(_):
+            config_obj = _current_config()
+            if _labels_signature(config_obj) != last_rendered_signature:
+                _build_labels_ui()
+            sync_and_update_display(save=False)
+
+        @pn.depends(self.vm.obs.ensure("target_labels").param.version, watch=True)
+        def _on_target_labels_change(_):
+            config_obj = _current_config()
+            if _labels_signature(config_obj) != last_rendered_signature:
+                _build_labels_ui()
+            else:
+                _refresh_species_options_in_place()
+            sync_and_update_display(save=False)
 
 
         return pn.Column(
-            pn.pane.Alert(
-                "Define one or more target species. For each species, you can optionally specify distinct call types.",
-                alert_type="info"
-            ),
             current_labels_display,
             label_editor_section,
             sizing_mode="stretch_width"

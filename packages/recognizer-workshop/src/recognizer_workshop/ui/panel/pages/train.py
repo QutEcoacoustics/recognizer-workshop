@@ -22,7 +22,7 @@ def build(vm):
     weak_neg_weight = pn.widgets.FloatInput(name="weak_neg_weight", value=0.05, step=0.01)
     weak_negs_batch = pn.widgets.IntInput(name="weak_negatives_batch_size", value=16, start=0)
 
-    btn_train = pn.widgets.Button(name="Train classifier", button_type="success")
+    btn_train = pn.widgets.Button(name="Train classifier", button_type="success", sizing_mode="fixed", width=150)
     
     progress_bar = pn.widgets.Progress(name='Training Progress', active=True, visible=False, sizing_mode="stretch_width")
 
@@ -33,8 +33,8 @@ def build(vm):
         sizing_mode="stretch_width"
     )
 
-    cls_name = pn.widgets.TextInput(name="Classifier name", value="my_classifier")
-    btn_save = pn.widgets.Button(name="Save classifier", button_type="primary")
+    cls_name = pn.widgets.TextInput(name="Classifier name", value="my_classifier", sizing_mode="fixed", width=320)
+    btn_save = pn.widgets.Button(name="Save classifier", button_type="primary", sizing_mode="fixed", width=140)
 
     async def _train(_):
         if not vm.eng: return vm.notify("Initialize first.", "error")
@@ -94,10 +94,19 @@ def build(vm):
 
     # training params
     hyperparameters = pn.Card(
-        pn.Row("Algorithm Parameters", pn.Spacer(), algorithm_params_help_btn),
-        pn.Row(learning_rate, num_steps, batch_size, train_ratio),
-        pn.Row("Labeled Data Parameters", pn.Spacer(), labeled_data_params_help_btn),
-        pn.Row(weak_neg_weight, weak_negs_batch),
+        pn.Row(
+            pn.Column(
+                pn.Row("Algorithm Parameters", pn.Spacer(), algorithm_params_help_btn),
+                pn.Row(learning_rate, num_steps, batch_size),
+                sizing_mode="stretch_width",
+            ),
+            pn.Column(
+                pn.Row("Labeled Data Parameters", pn.Spacer(), labeled_data_params_help_btn),
+                pn.Row(train_ratio, weak_neg_weight, weak_negs_batch),
+                sizing_mode="stretch_width",
+            ),
+            sizing_mode="stretch_width",
+        ),
         title="Hyperparameters",
         collapsible=False
     )
@@ -112,7 +121,7 @@ def build(vm):
         results_view,
         pn.layout.Divider(),
         pn.pane.Markdown("### Save Model"),
-        pn.Row(cls_name, btn_save),
+        pn.Row(cls_name, btn_save, align="start"),
         sizing_mode="stretch_both",
     )
 
