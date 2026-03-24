@@ -261,6 +261,9 @@ class PanelUI(param.Parameterized):
         def _add_label(event):
             config_obj = _current_config()
             config_obj.target_labels.append(LabelName(species="", call_type=None))
+            # Notify reactive observers that target labels (and config state) have changed
+            self.vm.obs.bump("target_labels")
+            self.vm.obs.bump("config_state")
             _build_labels_ui()
             sync_and_update_display()
 
