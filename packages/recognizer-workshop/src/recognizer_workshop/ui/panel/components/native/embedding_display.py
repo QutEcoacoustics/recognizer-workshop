@@ -372,22 +372,40 @@ class PanelEmbeddingDisplay(pn.Column):
 
     # async because loading remote audio may take time, and may need to be retried
     async def _load_and_render(self):
+        def _show_audio_error(message: str):
+            _ = message
+            self._status.object = ""
+            error_msg = pn.pane.HTML(
+                "<div style='text-align: center; padding: 60px; color: #d32f2f;'>"
+                "<div style='font-size: 16px;'>❌ Audio unavailable</div>"
+                "<div style='font-size: 13px; margin-top: 6px;'>"
+                "Could not load audio for this result."
+                "</div>"
+                "</div>",
+                height=200,
+                sizing_mode="stretch_width",
+            )
+            self._spec_container[:] = [error_msg]
+
+        def _is_http_error(exc: Exception) -> bool:
+            status = getattr(exc, "status", None) or getattr(exc, "status_code", None) or getattr(exc, "code", None)
+            if isinstance(status, int) and 400 <= status <= 599:
+                return True
+            msg = str(exc).lower()
+            return any(token in msg for token in ["http", "404", "401", "403", "500", "502", "503", "504"])
+
         try:
 
             # load full audio
-            self._audio = await asyncio.to_thread(self._audio_loader, self.uri, self.offset_s)
+            raw_audio = await asyncio.to_thread(self._audio_loader, self.uri, self.offset_s)
+            if raw_audio is None:
+                _show_audio_error("❌ Audio unavailable for this result.")
+                return
 
-            if not self._audio.size:
-                self._status.object = f"❌ Audio loaded an empty segment for URI: {self.uri}"
-                # Clear any old spectrogram that might be showing.
-                error_msg = pn.pane.HTML(
-                    "<div style='text-align: center; padding: 60px; color: #d32f2f;'>"
-                    "<div style='font-size: 16px;'>❌ Failed to load audio</div>"
-                    "</div>", 
-                    height=240, 
-                    sizing_mode="stretch_width"
-                )
-                self._spec_container[:] = [error_msg]
+            self._audio = np.asarray(raw_audio)
+
+            if self._audio.size == 0:
+                _show_audio_error("❌ Audio unavailable for this result.")
                 return
 
             # compute window spectrogram
@@ -421,7 +439,10 @@ class PanelEmbeddingDisplay(pn.Column):
 
             self._status.object = ""
         except Exception as e:
-            self._status.object = f"❌ Error loading/plotting audio: {e}"
+            if _is_http_error(e):
+                _show_audio_error("❌ Could not fetch remote audio (server/network error).")
+            else:
+                _show_audio_error("❌ Could not load or render audio for this result.")
 
     # ---------- public API (matches old semantics) ----------
 

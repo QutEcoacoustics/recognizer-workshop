@@ -33,7 +33,7 @@ def build(vm):
                                      on_save=_save)
 
 
-    def _save(_):
+    def _save(_=None):
         if not vm.eng:
             return vm.notify("Initialize first.", "error")
         labels = list(vm.ui.harvest_labels(vm.eng, results_region="refine.results"))
