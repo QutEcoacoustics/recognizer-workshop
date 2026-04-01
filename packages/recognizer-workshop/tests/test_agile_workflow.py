@@ -15,7 +15,6 @@ def test_full_workflow (db_with_path, working_folder, audio_files_folder):
 
     db, path_to_db = db_with_path
 
-
     annotator_id = "phil"
 
     config = AgileConfig(

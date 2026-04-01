@@ -43,8 +43,6 @@ _DEFAULT = object()
 def convert_source_to_original_url(source: str, domain: str) -> str:
     """
     perch runner currently puts the canonical filename in the source column. We really want the url to the original audio file
-    TODO: I don't think this is true anymore
-    TODO: move this to baw utils with the rest of those functions
     """
     return get_original_url(source, default_domain=domain)
 

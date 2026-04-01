@@ -24,10 +24,10 @@ load_dotenv = dotenv.load_dotenv
 # CELL TWO
 
 annotator_id = "phil"
-working_folder = Path('/Users/eichinsp/Documents/github/peichins/recognizer-workshop/local_scripts/test_folder')
+working_folder = Path('../test_folder')
 
 config = agile_config(
-    db_path=Path('/Users/eichinsp/Documents/github/peichins/recognizer-workshop/local_scripts/test_folder/db/85_bak'),
+    db_path=Path('../test_folder/db/my_db'),
     annotator_id=annotator_id,
     # For this tutorial we arbitrarily choose to name our search dataset
     # "search_set", however if you manage multiple search datasets you will have

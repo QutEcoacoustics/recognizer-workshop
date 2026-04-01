@@ -95,7 +95,7 @@ def download_embeddings(dataset_name,
     elif already_downloaded:
       # This can happen if they interrupt during download. 
       # (in this case they probably don't want to unzip without downloading)
-      # TODO: (phil) check if the zip is complete, e.g. comparing file size to the response headers
+      # TODO: check if the zip is complete, e.g. comparing file size to the response headers
       log.info(f"Embeddings already downloaded to {zip_path} but not unzipped.")
       download_again_button()
       unzip_again_button("Unzip existing downloaded file?")
