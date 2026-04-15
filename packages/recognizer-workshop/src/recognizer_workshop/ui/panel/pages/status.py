@@ -4,7 +4,7 @@ import pandas as pd
 import panel as pn
 
 from recognizer_workshop.app.services.db_labels.add_db_labels import DatabaseSummary
-from recognizer_workshop.app.services.version import get_git_commit_short
+from recognizer_workshop.app.services.version import get_git_commit_short, get_installed_package_version
 from recognizer_workshop.ui.panel.view_model import ViewModel
 
 def _build_status_view(vm: ViewModel):
@@ -16,7 +16,10 @@ def _build_status_view(vm: ViewModel):
     status_data = vm.eng.get_status()
 
     # Get version info
+    installed_version = get_installed_package_version()
     commit_hash = get_git_commit_short()
+    installed_version_display = installed_version if installed_version else "unknown"
+    release_tag_display = f"v{installed_version_display}" if installed_version else "unknown"
     commit_display = commit_hash if commit_hash else "unknown"
 
     # General Status Section
@@ -35,7 +38,17 @@ def _build_status_view(vm: ViewModel):
             margin=(0, 0),
         ),
         pn.Row(
-            pn.pane.HTML("<strong>Version:</strong>", width=200, margin=(0, 0)),
+            pn.pane.HTML("<strong>Release Tag:</strong>", width=200, margin=(0, 0)),
+            pn.pane.HTML(release_tag_display, margin=(0, 0)),
+            margin=(0, 0),
+        ),
+        pn.Row(
+            pn.pane.HTML("<strong>Installed Version:</strong>", width=200, margin=(0, 0)),
+            pn.pane.HTML(installed_version_display, margin=(0, 0)),
+            margin=(0, 0),
+        ),
+        pn.Row(
+            pn.pane.HTML("<strong>Git Commit:</strong>", width=200, margin=(0, 0)),
             pn.pane.HTML(commit_display, margin=(0, 0)),
             margin=(0, 0),
         ),

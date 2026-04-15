@@ -1,5 +1,5 @@
 import subprocess
-import os
+from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 
 def get_git_commit_hash():
@@ -33,4 +33,12 @@ def get_git_commit_short():
         )
         return result.stdout.strip()
     except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+
+
+def get_installed_package_version():
+    """Get the installed recognizer-workshop package version if available."""
+    try:
+        return package_version("recognizer-workshop")
+    except PackageNotFoundError:
         return None

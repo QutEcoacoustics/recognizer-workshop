@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
@@ -104,7 +104,15 @@ recognizer-workshop-serve = "recognizer_workshop.ui.panel.serve:main"
 allow-direct-references = true
 
 [tool.hatch.version]
-path = "src/recognizer_workshop/__about__.py"
+source = "vcs"
+
+[tool.hatch.version.raw-options]
+# Accept calendar tags like 2026.04.15 or v2026.04.15, with optional build increment.
+tag_regex = '^v?(?P<version>\\d{4}\\.\\d{1,2}\\.\\d{1,2}(?:\\.\\d+)?)$'
+# Keep wheel versions clean and predictable from tags.
+version_scheme = "no-guess-dev"
+local_scheme = "no-local-version"
+fallback_version = "0.0.0"
 
 [tool.hatch.envs.default]
 
@@ -132,9 +140,7 @@ check = "mypy --install-types --non-interactive {args:src/recognizer_workshop te
 source = ["src"]
 branch = true
 parallel = true
-omit = [
-  "src/recognizer_workshop/__about__.py",
-]
+omit = []
 
 [tool.coverage.report]
 exclude_lines = [
