@@ -29,6 +29,7 @@ from baw_helpers.baw_utils import extract_arid_and_domain, original_baw_audio_ur
 from baw_helpers.settings import baw_settings
 
 from recognizer_workshop.app.create_database.embedding_config_loader import load_baw_embedding_config
+from recognizer_workshop.app.services.baw_insertions import record_embeddings_added
 
     
 log = logging.getLogger(__name__)
@@ -58,7 +59,7 @@ def create_database_from_baw(
         site_ids: int | list | None = None,
         filter: dict | None = None,
         max_embeddings: int = 1_000_000,
-        max_files: int = -1
+        max_files: int = -1,
 ):
     
     filter_params = simple_filter(
@@ -86,14 +87,11 @@ def create_database_from_baw(
         parquet_source=arids,
         api_client=client,    
         max_count=max_embeddings,
-        config=config
+        config=config,
+        filter_dict=filter_params['filter'] if filter_params is not None else None,
     )
 
-    # create a baw filters metadata entry. It's a list of filter params dicts, so we can define multiple filters if needed
-    # it must be wrapped in a ConfigDict to be storable in the db
-    if filter_params is not None:
-        db.insert_metadata('baw_filters', config_dict.ConfigDict({"filters": [filter_params['filter']]}))
-        db.commit()
+
 
 
 def convert_parquet(
@@ -106,7 +104,8 @@ def convert_parquet(
     max_count: int = -1,
     max_size: int | None = None,
     source_map_fn = _DEFAULT,
-    api_client = None
+    api_client = None,
+    filter_dict: dict | None = None,
     ):
  
     # put all kwargs in a dict
@@ -117,7 +116,8 @@ def convert_parquet(
         "dataset_name": dataset_name,
         "max_count": max_count,
         "max_size": max_size,
-        "source_map_fn": source_map_fn
+        "source_map_fn": source_map_fn,
+        "filter_dict": filter_dict,
     }
     db_path = Path(db_path).expanduser()
     has_sqlite = db_path.exists() and any(db_path.glob("*.sqlite"))
@@ -569,7 +569,8 @@ def add_parquet_to_existing_db(
     dataset_name: str = 'search_set',
     max_count: int = -1,
     max_size: int | None = None,
-    source_map_fn = _DEFAULT
+    source_map_fn = _DEFAULT,
+    filter_dict: dict | None = None,
 ):
     
     if db_type == 'sqlite_usearch':
@@ -587,7 +588,8 @@ def add_parquet_to_existing_db(
         max_count=max_count,
         max_size=max_size,
         source_map_fn=source_map_fn,
-        hop_size_s=hop_size_s
+        hop_size_s=hop_size_s,
+        filter_dict=filter_dict,
     )
 
     return db
@@ -613,7 +615,8 @@ def add_parquet_to_db(
     max_count: int = -1,
     max_size: int = None,
     source_map_fn = _DEFAULT,
-    hop_size_s: float = 5.0
+    hop_size_s: float = 5.0,
+    filter_dict: dict | None = None,
 ):
     """Adds parquet files to an existing hoplite database."""
     
@@ -643,6 +646,9 @@ def add_parquet_to_db(
         
         log.info(f"Ingested file {files_processed}: added {num_inserted} embeddings (total: {total_inserted})")
         
+        if filter_dict is not None and num_inserted > 0:
+            record_embeddings_added(db, dataset_name, filter_dict, num_inserted)
+
         if max_count > 0 and db.count_embeddings() >= max_count:
             log.info(f"Reached max_count limit of {max_count}, stopping ingestion")
             break

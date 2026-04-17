@@ -28,6 +28,7 @@ from recognizer_workshop.app.services.db_labels.fetch_baw_labels import labels_f
 from recognizer_workshop.app.services.db_labels.add_db_labels import add_labels_to_db
 from recognizer_workshop.app.services.db_labels.db_labels_info import get_db_summary, get_label_counts
 from recognizer_workshop.app.services.db_labels.dataclasses import LabelName
+from recognizer_workshop.app.services.baw_insertions import get_last_filter_for_dataset, record_embeddings_added
 from recognizer_workshop.app.services.inference.inference import run_inference as inference_service_run_inference
 
 from recognizer_workshop.app.services.embed import embed_worker
@@ -613,6 +614,12 @@ class agile_state:
         This is saved as hoplite db metadata and is used to get events from the workbench for
         adding labels to embeddings
         """
+        # Check baw_insertions first (last filter used for fetched_labels, falling back to search_set)
+        last_filter = get_last_filter_for_dataset(self.db, 'fetched_labels', fallback_dataset='search_set')
+        if last_filter is not None:
+            return [last_filter]
+
+        # Legacy fallback: read from old baw_filters metadata key
         try:
             baw_filters = self.db.get_metadata('baw_filters')
         except KeyError:
@@ -692,6 +699,18 @@ class agile_state:
             )
             
             filter_params = result_set.get('filter_params', {})
+
+            added_count = sum(
+                1
+                for source_data in outcomes.values()
+                for label_data in source_data.values()
+                for type_data in label_data.values()
+                for item in type_data
+                if item.get('outcome') == 'added'
+            )
+            if added_count > 0 and filter_params:
+                record_embeddings_added(self.db, 'fetched_labels', filter_params, added_count)
+
             all_outcomes_by_filter.append({
                 'filter_desc': f"Filter {i+1}",
                 'filter_params': filter_params,
