@@ -58,7 +58,7 @@ def sample_events():
     for i, event in enumerate(events):
         event['id'] = i + 1
         event['audio_recording_id'] = 999
-        event['provenance_id'] = 10
+        event['score'] = 0.9
 
 # --- Unit Tests ---
 
@@ -479,7 +479,7 @@ def full_flow_results(mock_api):
     for i, event in enumerate(events):
         event['id'] = i + 1
         event['audio_recording_id'] = 999
-        event['provenance_id'] = 10
+        event['score'] = 0.9
 
     target_labels = [magpieSong]
     target_negatives = TargetNegatives({magpieSong: [fairyWren]})
@@ -534,7 +534,7 @@ def test_full_flow_without_target_negatives(mock_api):
     for i, event in enumerate(events):
         event['id'] = i + 1
         event['audio_recording_id'] = 999
-        event['provenance_id'] = 10
+        event['score'] = 0.9
 
     target_labels = [magpieSong]
     

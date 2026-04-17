@@ -68,9 +68,7 @@ def labels_from_event_taggings(api, filter_params, target_labels: List[LabelName
         # including for non target labels, so we can use those as negative examples if needed. 
         event['label_info'] = {}
 
-        requires_verification = event['provenance_id'] is not None
-
-        if requires_verification:
+        if event_requires_verification(event):
             vs = event.get('verification_summary')
             if vs is None:
                 log.warning(f"Event {event['id']} is marked as requiring verification but has no verification summary.")
@@ -252,6 +250,12 @@ def should_use_negative_tag_for_target(target_label, target_negatives_tag_text, 
     if target_label not in spec:
         return False
     return target_negatives_tag_text in spec[target_label]
+
+
+def event_requires_verification(event: dict) -> bool:
+    """Determines whether an event requires verification before its labels can be trusted.
+    """
+    return event['score'] is not None
 
 
 def get_events_with_verifications_and_tags(api, filter_params, target_tags=None):
