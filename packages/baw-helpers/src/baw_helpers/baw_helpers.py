@@ -2,6 +2,7 @@
 Helpers for BAW API interactions for agile modelling
 """
 import concurrent.futures
+import math
 import logging
 import random
 from . import baw_api
@@ -71,6 +72,11 @@ def sample_filter_pages(
     """
     Fetch filtered results with per-page and full-result caching.
 
+    When ``limit`` is provided and smaller than the total result count, this
+    function fetches a bounded number of evenly spaced pages rather than every
+    page. This keeps large result sets responsive while still sampling across
+    the full filtered dataset.
+
     Returns:
             (data, path) where:
                 - data is a list of items or None on failure
@@ -78,7 +84,7 @@ def sample_filter_pages(
 
     Notes:
         - Hash is computed over the full payload (filter, model, page_size, limit).
-        - The first page is fetched to determine total pages and stride.
+        - The first page is fetched to determine total pages.
         - Remaining pages are fetched concurrently when workers > 1.
         - Each page is cached under a page file; the combined result is cached too.
     """
@@ -106,12 +112,12 @@ def sample_filter_pages(
 
     all_items = []
     cur_page = 1
-    every_x_pages = 1
     total_pages = None # unknown until we get the 1st page
 
-    def load_or_fetch_page(page_num: int) -> dict | None:
+    def load_or_fetch_page(page_num: int, fetch_index: int | None = None, fetch_total: int | None = None) -> dict | None:
         current_qsp = {"page": page_num, "items": page_size}
         of_str = f" of ~{total_pages}" if total_pages else ""
+        fetch_str = f" [{fetch_index}/{fetch_total}]" if fetch_index is not None and fetch_total is not None else ""
         page_file = pages_dir / f"page_{page_num}.json"
         page_response = None
 
@@ -119,9 +125,10 @@ def sample_filter_pages(
             try:
                 page_response = json.loads(page_file.read_text(encoding="utf-8"))
                 log.info(
-                    "Loaded cached page %s%s for model '%s' with filter hash %s...",
+                    "Loaded cached page %s%s%s for model '%s' with filter hash %s...",
                     page_num,
                     of_str,
+                    fetch_str,
                     model,
                     h,
                 )
@@ -129,7 +136,7 @@ def sample_filter_pages(
                 page_response = None
 
         if page_response is None:
-            log.info("Fetching page %s%s for model '%s' with filter hash %s...", page_num, of_str, model, h)
+            log.info("Fetching page %s%s%s for model '%s' with filter hash %s...", page_num, of_str, fetch_str, model, h)
             page_response = api.baw_filter(model, payload, qsp=current_qsp)
             if page_response is None:
                 return None
@@ -146,26 +153,31 @@ def sample_filter_pages(
     if first_page_response is None:
         return None, out_file
 
-    # figure out how many pages to skip each time to
-    # get the desired number of results (limit) while still spreading out across the dataset.
+    # Figure out which pages to fetch to get a bounded sample while still
+    # spreading out across the dataset.
     total_items = first_page_response["meta"]["paging"]["total"]
     total_pages = (total_items + page_size - 1) // page_size
     log.info("Page %s fetched: %s items (total %s)", cur_page, len(first_page_response.get("data", [])), total_items)
-    if limit is not None and total_items > limit:
-        pages_needed = limit // page_size
-        every_x_pages = max(1, total_pages // pages_needed) if pages_needed > 0 else 1
 
     new_items = first_page_response.get("data", [])
     all_items.extend(new_items)
     if len(new_items) < page_size:
         total_pages = cur_page
 
-    # generate a list of page number we will be fetching
-    page_numbers = []
-    next_page = cur_page + every_x_pages
-    while total_pages and next_page <= total_pages:
-        page_numbers.append(next_page)
-        next_page += every_x_pages
+    # Generate the list of page numbers we will fetch. Page 1 is already loaded.
+    if limit is None or total_items <= limit:
+        page_numbers = list(range(cur_page + 1, total_pages + 1))
+    else:
+        target_pages = max(1, math.ceil(limit / page_size))
+        if target_pages == 1:
+            page_numbers = []
+        else:
+            sampled_pages = {
+                int(round(1 + i * (total_pages - 1) / (target_pages - 1)))
+                for i in range(target_pages)
+            }
+            sampled_pages.discard(cur_page)
+            page_numbers = sorted(sampled_pages)
 
     page_results: dict[int, dict] = {}
     if page_numbers:
@@ -173,16 +185,16 @@ def sample_filter_pages(
             workers = 1
 
         if workers == 1:
-            for page_num in page_numbers:
-                page_response = load_or_fetch_page(page_num)
+            for fetch_idx, page_num in enumerate(page_numbers, start=2):
+                page_response = load_or_fetch_page(page_num, fetch_index=fetch_idx, fetch_total=len(page_numbers) + 1)
                 if page_response is None:
                     return None, out_file
                 page_results[page_num] = page_response
         else:
             with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
                 futures = {
-                    executor.submit(load_or_fetch_page, page_num): page_num
-                    for page_num in page_numbers
+                    executor.submit(load_or_fetch_page, page_num, fetch_idx, len(page_numbers) + 1): page_num
+                    for fetch_idx, page_num in enumerate(page_numbers, start=2)
                 }
                 for future in concurrent.futures.as_completed(futures):
                     page_num = futures[future]
@@ -221,8 +233,13 @@ def get_random_audio_recordings(
     use_cache: bool = True,
 ) -> tuple[list[dict], Path]:
     """
-    Fetch all recordings for the filter (disable paging), cache the JSON,
-    then return a deterministic random subset.
+    Fetch a cached sampled pool of recordings for the filter, then return a
+    deterministic random subset.
+
+    The sampled pool is built from evenly spaced filter pages rather than the
+    entire result set when ``limit`` is smaller than the total number of
+    recordings. We intentionally fetch more than ``limit`` candidates before
+    subsetting so the final random sample is not constrained to a single page.
     """
 
     payload = wrap_filter(filter_params)

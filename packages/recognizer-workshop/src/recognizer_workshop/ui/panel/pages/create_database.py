@@ -5,7 +5,6 @@ import logging
 from pathlib import Path
 
 import panel as pn
-from panel_material_ui import Dialog
 
 from recognizer_workshop.app.create_database.create_database import create_database_from_baw
 from recognizer_workshop.ui.panel.components.native.filter_editor import build_filter_editor
@@ -28,10 +27,11 @@ def build(vm):
     page_state = {'filters': []}
     max_files = pn.widgets.IntInput(name="Max Recordings to Scan", value=1000, start=-1)
     max_embeddings = pn.widgets.IntInput(name="Max Embeddings to Ingest", value=200_000, start=-1)
+    use_cached_list = pn.widgets.Checkbox(name="Use Cached Recording List", value=True, visible=False)
+    cache_hint = pn.pane.Markdown("", visible=False)
     btn_create = pn.widgets.Button(name="Create Database", button_type="primary", icon="database")
     progress_bar = pn.widgets.Progress(name='Progress', active=True, visible=False, sizing_mode="stretch_width")
     status_display = pn.pane.Markdown("")  # Renamed from 'log' to avoid confusion
-    dialog_container = pn.Column()
     
     # Alert shown when no auth token is available
     auth_warning = pn.pane.Alert(
@@ -46,8 +46,35 @@ def build(vm):
         value=str(vm.config.db_path)
     )
 
+    def _hash_filters(filters):
+        if not filters or not filters[0]: return None
+        filter_str = json.dumps(filters[0], sort_keys=True).encode('utf-8')
+        return hashlib.sha256(filter_str).hexdigest()[:10]
+
+    def _cached_file_for_filters(filters) -> Path | None:
+        if not vm.config or not vm.config.db_path:
+            return None
+        filter_hash = _hash_filters(filters)
+        if not filter_hash:
+            return None
+        db_dir = vm.config.db_path.expanduser()
+        return db_dir / f"_source_arids_{filter_hash}.json"
+
+    def _update_cache_toggle_state():
+        cached_file = _cached_file_for_filters(page_state.get('filters'))
+        has_cache = cached_file is not None and cached_file.exists()
+        use_cached_list.visible = has_cache
+        cache_hint.visible = has_cache
+        if has_cache:
+            cache_hint.object = f"ℹ️ Cached recording list found: `{cached_file.name}`"
+        else:
+            cache_hint.object = ""
+
     def get_page_filters(): return page_state.get('filters')
-    def set_page_filters(filters): page_state['filters'] = filters
+    def set_page_filters(filters):
+        page_state['filters'] = filters
+        _update_cache_toggle_state()
+
     filter_editor = build_filter_editor(get_page_filters, set_page_filters, vm)
 
     def _update_button_state():
@@ -59,10 +86,6 @@ def build(vm):
         if not has_token:
             log.warning("Database creation disabled: No authentication token available")
 
-    def _hash_filters(filters):
-        if not filters or not filters[0]: return None
-        filter_str = json.dumps(filters[0], sort_keys=True).encode('utf-8')
-        return hashlib.sha256(filter_str).hexdigest()[:10]
     async def _run_creation_process(use_cache=False):
         db_dir = vm.config.db_path.expanduser()
         filters = get_page_filters()
@@ -72,6 +95,10 @@ def build(vm):
         progress_bar.visible = True
         progress_bar.value = 0
         status_display.object = f"🚀 Starting database creation in `{db_dir}`...\n\n"
+        if use_cache:
+            status_display.object += "📦 Using cached recording list for current filters.\n\n"
+        else:
+            status_display.object += "🌐 Fetching a fresh recording list for current filters.\n\n"
         
         try:
             status_display.object += f"📥 Downloading and processing parquet files...\n"
@@ -87,7 +114,8 @@ def build(vm):
                     client=vm.eng.active_client if vm.eng else None, 
                     filter=filters[0],
                     max_files=max_files.value, 
-                    max_embeddings=max_embeddings.value
+                    max_embeddings=max_embeddings.value,
+                    use_cache=use_cache,
                 )
             status_display.object += "\n\n🎉 **Database creation complete!**"
             vm.notify("Database created successfully!", "success")
@@ -101,7 +129,6 @@ def build(vm):
         finally:
             btn_create.disabled = False
             progress_bar.visible = False
-            dialog_container.clear()
 
     async def _create_db(_):
         db_dir = vm.config.db_path.expanduser()
@@ -110,26 +137,9 @@ def build(vm):
              #return vm.notify(f"Directory '{db_dir}' is not empty.", "error")
         filters = get_page_filters()
         if not filters or not filters[0]: return vm.notify("Please define at least one filter.", "warn")
-        filter_hash = _hash_filters(filters)
-        cached_file = db_dir / f"_source_arids_{filter_hash}.json"
-        if cached_file.exists():
-            btn_use_cache = pn.widgets.Button(name="Use Cached List", button_type="primary")
-            btn_fetch_new = pn.widgets.Button(name="Fetch New List")
-            
-            def _use_cache_and_close(_):
-                dialog.open = False
-                asyncio.create_task(_run_creation_process(use_cache=True))
-                
-            def _fetch_new_and_close(_):
-                dialog.open = False
-                asyncio.create_task(_run_creation_process(use_cache=False))
-                
-            btn_use_cache.on_click(_use_cache_and_close)
-            btn_fetch_new.on_click(_fetch_new_and_close)
-            dialog = Dialog(pn.Column(pn.pane.Markdown(f"Found a cached file list for these filters. Use it or fetch a new list?"), pn.Row(btn_use_cache, btn_fetch_new)), title="Cached File List Found")
-            dialog_container.objects = [dialog]; dialog.open = True
-        else:
-            await _run_creation_process(use_cache=False)
+        cached_file = _cached_file_for_filters(filters)
+        selected_use_cache = bool(use_cached_list.value and cached_file is not None and cached_file.exists())
+        await _run_creation_process(use_cache=selected_use_cache)
     
     @pn.depends(vm.obs.ensure("config_state").param.version, watch=True)
     def _update_db_path_display(_):
@@ -139,6 +149,7 @@ def build(vm):
         else:
             # This case shouldn't happen due to the check at the top, but it's safe to handle
             db_path_display.value = "Not set in config."
+        _update_cache_toggle_state()
 
     # Watch for config changes instead of engine changes
     @pn.depends(vm.obs.ensure("config_state").param.version, watch=True)
@@ -151,6 +162,7 @@ def build(vm):
     
     # Initialize button state
     _update_button_state()
+    _update_cache_toggle_state()
 
     return pn.Column(
         pn.Row("## Create New Database from BAW", pn.Spacer(), database_help_btn),
@@ -161,6 +173,8 @@ def build(vm):
                 pn.Row("Creation Settings", pn.Spacer(), db_settings_help_btn),
                 db_path_display,
                 pn.Row(max_files, max_embeddings, sizing_mode="stretch_width"),
+                use_cached_list,
+                cache_hint,
                 sizing_mode="stretch_width",
             ),
             pn.Column(
@@ -172,7 +186,6 @@ def build(vm):
         ),
         pn.layout.Divider(),
         pn.Row(btn_create, align="start"),
-        dialog_container,
         progress_bar,
         status_display,
         sizing_mode="stretch_width"

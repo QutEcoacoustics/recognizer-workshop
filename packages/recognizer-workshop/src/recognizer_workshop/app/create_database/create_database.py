@@ -60,6 +60,7 @@ def create_database_from_baw(
         filter: dict | None = None,
         max_embeddings: int = 1_000_000,
         max_files: int = -1,
+        use_cache: bool = True,
 ):
     
     filter_params = simple_filter(
@@ -77,7 +78,8 @@ def create_database_from_baw(
         api=client,
         filter_params=filter_params,
         save_dir=filelist_path,
-        limit=max_files
+        limit=max_files,
+        use_cache=use_cache,
     )
 
     arids = [int(ar['id']) for ar in audio_recordings]
