@@ -46,7 +46,13 @@ def build(vm):
 
     def _build_filter_editor_widget():
         """Build a fresh filter editor each time the engine state changes."""
-        return build_filter_editor(_get_filters, _set_filters, vm)
+        return build_filter_editor(
+            _get_filters,
+            _set_filters,
+            vm,
+            dataset_priority=['fetched_labels', 'search_set'],
+            fallback_to_legacy=True,
+        )
 
     def _update_filter_section():
         """Show filter editor when engine is ready, warning otherwise."""

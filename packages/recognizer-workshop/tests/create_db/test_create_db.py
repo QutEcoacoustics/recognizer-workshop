@@ -316,6 +316,44 @@ def test_add_parquet_records_insertions_once_per_dataframe(tmp_path, monkeypatch
     assert all(c["dataset_name"] == "search_set" for c in calls)
     assert all(c["filter_dict"] == filter_dict for c in calls)
     assert sorted(c["count"] for c in calls) == [3, 3]
+
+
+def test_add_parquet_stops_when_total_db_already_at_limit(tmp_path):
+    """max_count applies to total DB size and should short-circuit when already at/above limit."""
+    data_dir = tmp_path / "parquet"
+    data_dir.mkdir()
+    _write_parquets_with_arids(data_dir, arids=[111, 222], rows_per_file=3, emb_dim=2)
+
+    db_dir = tmp_path / "db"
+    db, _ = create_empty_db(
+        db_path=db_dir,
+        parquet_source=str(data_dir),
+        config=None,
+    )
+
+    add_parquet_to_db(
+        db=db,
+        parquet_source=str(data_dir),
+        dataset_name="search_set",
+        max_count=-1,
+        max_size=None,
+        source_map_fn=lambda s: s,
+        hop_size_s=5.0,
+    )
+    base_count = db.count_embeddings()
+    assert base_count == 6
+
+    add_parquet_to_db(
+        db=db,
+        parquet_source=str(data_dir),
+        dataset_name="search_set",
+        max_count=4,
+        max_size=None,
+        source_map_fn=lambda s: s,
+        hop_size_s=5.0,
+    )
+
+    assert db.count_embeddings() == base_count
     
 
 

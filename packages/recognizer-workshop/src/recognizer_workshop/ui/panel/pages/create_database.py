@@ -2,12 +2,13 @@ import asyncio
 import hashlib
 import json
 import logging
+from datetime import datetime
 from pathlib import Path
 
 import panel as pn
 
 from recognizer_workshop.app.create_database.create_database import create_database_from_baw
-from recognizer_workshop.ui.panel.components.native.filter_editor import build_filter_editor
+from recognizer_workshop.ui.panel.components.native.filter_editor import build_filter_editor, resolve_filters_for_editor
 from recognizer_workshop.ui.panel.utils import patch_tqdm
 
 log = logging.getLogger(__name__)
@@ -26,12 +27,13 @@ def build(vm):
 
     page_state = {'filters': []}
     max_files = pn.widgets.IntInput(name="Max Recordings to Scan", value=1000, start=-1)
-    max_embeddings = pn.widgets.IntInput(name="Max Embeddings to Ingest", value=200_000, start=-1)
+    max_embeddings = pn.widgets.IntInput(name="Max Total Embeddings in DB", value=200_000, start=-1)
     use_cached_list = pn.widgets.Checkbox(name="Use Cached Recording List", value=True, visible=False)
     cache_hint = pn.pane.Markdown("", visible=False)
     btn_create = pn.widgets.Button(name="Create Database", button_type="primary", icon="database")
     progress_bar = pn.widgets.Progress(name='Progress', active=True, visible=False, sizing_mode="stretch_width")
     status_display = pn.pane.Markdown("")  # Renamed from 'log' to avoid confusion
+    progress_lines: list[str] = []
     
     # Alert shown when no auth token is available
     auth_warning = pn.pane.Alert(
@@ -70,12 +72,31 @@ def build(vm):
         else:
             cache_hint.object = ""
 
-    def get_page_filters(): return page_state.get('filters')
+    def get_page_filters():
+        # Hydrate local page state from shared resolver if empty.
+        if page_state.get('filters'):
+            return page_state.get('filters')
+        resolved = resolve_filters_for_editor(
+            lambda: page_state.get('filters'),
+            vm,
+            dataset_priority=['search_set'],
+            fallback_to_legacy=True,
+        )
+        if resolved:
+            page_state['filters'] = resolved
+        return page_state.get('filters')
+
     def set_page_filters(filters):
         page_state['filters'] = filters
         _update_cache_toggle_state()
 
-    filter_editor = build_filter_editor(get_page_filters, set_page_filters, vm)
+    filter_editor = build_filter_editor(
+        get_page_filters,
+        set_page_filters,
+        vm,
+        dataset_priority=['search_set'],
+        fallback_to_legacy=True,
+    )
 
     def _update_button_state():
         """Enable/disable create button based on whether we have a valid token."""
@@ -103,6 +124,83 @@ def build(vm):
         try:
             status_display.object += f"📥 Downloading and processing parquet files...\n"
             status_display.object += f"⏳ This may take several minutes. Watch the logs below for progress.\n\n"
+
+            def _append_progress_line(msg: str):
+                ts = datetime.now().strftime("%H:%M:%S")
+                progress_lines.append(f"- `{ts}` {msg}")
+                if len(progress_lines) > 20:
+                    del progress_lines[:-20]
+                status_display.object = (
+                    status_display.object.split("\n\n### Progress\n", 1)[0]
+                    + "\n\n### Live Progress\n"
+                    + "\n".join(progress_lines)
+                )
+
+            def _progress_callback(event: dict):
+                def _apply_update():
+                    stage = event.get("stage")
+                    if stage == "selection_start":
+                        max_files_msg = event.get("max_files")
+                        cache_mode = "cache" if event.get("use_cache") else "fresh fetch"
+                        _append_progress_line(f"Selecting recordings (max_files={max_files_msg}, mode={cache_mode})")
+                    elif stage == "selection_complete":
+                        _append_progress_line(f"Selected {event.get('selected_recordings', 0)} recordings")
+                    elif stage == "ingest_start":
+                        total_candidates = event.get("total_candidates")
+                        max_count = event.get("max_count")
+                        current_embeddings = event.get("current_embeddings")
+                        if total_candidates is not None:
+                            _append_progress_line(f"Starting ingestion for {total_candidates} candidate recordings")
+                        else:
+                            _append_progress_line("Starting ingestion")
+                        if max_count and max_count > 0 and current_embeddings is not None:
+                            _append_progress_line(
+                                f"Current DB size is {current_embeddings} embeddings (limit {max_count})"
+                            )
+                    elif stage == "source_progress":
+                        candidates_seen = event.get("candidates_seen", 0)
+                        total_candidates = event.get("total_candidates", 0)
+                        skipped_existing = event.get("skipped_existing", 0)
+                        files_processed = event.get("files_processed", 0)
+                        if total_candidates:
+                            _append_progress_line(
+                                f"Checked {candidates_seen}/{total_candidates} recordings "
+                                f"(downloaded {files_processed}, skipped existing {skipped_existing})"
+                            )
+                            progress_bar.value = int(min(100, (candidates_seen / total_candidates) * 100))
+                        else:
+                            _append_progress_line(
+                                f"Checked {candidates_seen} recordings "
+                                f"(downloaded {files_processed}, skipped existing {skipped_existing})"
+                            )
+                    elif stage == "ingest_progress":
+                        files_processed = event.get("files_processed", 0)
+                        total_candidates = event.get("total_candidates")
+                        added_this_file = event.get("added_this_file", 0)
+                        total_inserted = event.get("total_inserted", 0)
+                        if total_candidates:
+                            _append_progress_line(
+                                f"Processed {files_processed}/{total_candidates} files (+{added_this_file}, total added {total_inserted})"
+                            )
+                            progress_bar.value = int(min(100, (files_processed / total_candidates) * 100))
+                        else:
+                            _append_progress_line(
+                                f"Processed {files_processed} files (+{added_this_file}, total added {total_inserted})"
+                            )
+                    elif stage == "ingest_complete":
+                        if event.get("stop_reason") == "max_count_already_reached":
+                            _append_progress_line(
+                                f"Skipped ingestion: DB already at limit ({event.get('final_embeddings', 0)} embeddings)"
+                            )
+                        else:
+                            _append_progress_line(
+                                f"Ingestion complete: {event.get('files_processed', 0)} files, {event.get('total_inserted', 0)} embeddings added"
+                            )
+
+                if pn.state.curdoc is not None:
+                    pn.state.curdoc.add_next_tick_callback(_apply_update)
+                else:
+                    _apply_update()
             
             log.info(f"Starting database creation: max_files={max_files.value}, max_embeddings={max_embeddings.value}")
             
@@ -116,6 +214,7 @@ def build(vm):
                     max_files=max_files.value, 
                     max_embeddings=max_embeddings.value,
                     use_cache=use_cache,
+                    progress_callback=_progress_callback,
                 )
             status_display.object += "\n\n🎉 **Database creation complete!**"
             vm.notify("Database created successfully!", "success")
@@ -157,6 +256,15 @@ def build(vm):
     def _update_on_config_change(_):
         """Reacts to config changes and updates button availability."""
         _update_button_state()
+
+        # Rebuild to ensure the editor reflects latest metadata when engine/db state changes.
+        filter_editor.objects = build_filter_editor(
+            get_page_filters,
+            set_page_filters,
+            vm,
+            dataset_priority=['search_set'],
+            fallback_to_legacy=True,
+        ).objects
 
     btn_create.on_click(_create_db)
     
