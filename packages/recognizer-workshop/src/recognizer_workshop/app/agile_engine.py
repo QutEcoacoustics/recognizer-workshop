@@ -61,16 +61,54 @@ class agile_state:
 
     # list of all ecosounds tags to use for selecting target labels
     workbench_tags = []
+    fetched_label_result_sets = None
+    fetched_label_outcomes = None
+    labels_fetch_state = 'idle'
+    labels_fetch_message = ''
+    labels_fetch_error = None
+    labels_commit_state = 'idle'
+    labels_commit_message = ''
+    labels_commit_error = None
 
     def __init__(self, config):
         self.config = config
         self.baw_api_clients = {}
         self.active_client = None
+        self.fetched_label_result_sets = None
+        self.fetched_label_outcomes = None
+        self.labels_fetch_state = 'idle'
+        self.labels_fetch_message = ''
+        self.labels_fetch_error = None
+        self.labels_commit_state = 'idle'
+        self.labels_commit_message = ''
+        self.labels_commit_error = None
         mp_context = multiprocessing.get_context('spawn')
         self._embed_runner = ProcessPoolExecutor(
             max_workers=1,
             mp_context=mp_context
         )
+
+    @staticmethod
+    def count_fetched_labels(result_sets) -> int:
+        """Count converted hoplite labels across fetched result sets."""
+        if not result_sets or not isinstance(result_sets, list):
+            return 0
+        total = 0
+        for result_set in result_sets:
+            labels_map = result_set.get("labels", {}) if isinstance(result_set, dict) else {}
+            if isinstance(labels_map, dict):
+                total += len(labels_map)
+        return total
+
+    @property
+    def has_fetched_labels_ready(self) -> bool:
+        """True when there are fetched labels available to add to DB."""
+        return self.count_fetched_labels(self.fetched_label_result_sets) > 0
+
+    @property
+    def fetched_labels_count(self) -> int:
+        """Number of fetched labels currently held in engine state."""
+        return self.count_fetched_labels(self.fetched_label_result_sets)
 
 
     def initialize(self):
@@ -650,26 +688,81 @@ class agile_state:
         configured in the database metadata. 
         """
 
-        baw_filters = self.get_baw_filters()
-        if not baw_filters:
-            log.warning("No baw_filters found in db metadata. Cannot update labels.")
-            return "no_baw_filters"
-        
-        all_results = []
+        self.labels_fetch_state = 'running'
+        self.labels_fetch_error = None
+        self.labels_fetch_message = 'Fetching labels from workbench...'
 
-        if self.config.target_labels is None or len(self.config.target_labels) == 0:
-            raise ValueError("No target labels set in config. Cannot fetch labels.")
+        try:
+            baw_filters = self.get_baw_filters()
+            if not baw_filters:
+                log.warning("No baw_filters found in db metadata. Cannot update labels.")
+                self.fetched_label_result_sets = []
+                self.fetched_label_outcomes = None
+                self.labels_fetch_state = 'success'
+                self.labels_fetch_message = 'No filters available to fetch labels.'
+                return []
+            
+            all_results = []
 
-        # baw_filters is a list, so repeat the process for each one
-        for filter_params in baw_filters:
-            labels, counts = labels_from_event_taggings(self.active_client, filter_params, self.config.target_labels)
-            all_results.append({
-                "filter_params": filter_params,
-                "counts": counts,
-                "labels": labels
-            })
+            if self.config.target_labels is None or len(self.config.target_labels) == 0:
+                raise ValueError("No target labels set in config. Cannot fetch labels.")
 
-        return all_results
+            # baw_filters is a list, so repeat the process for each one
+            for filter_params in baw_filters:
+                labels, counts = labels_from_event_taggings(self.active_client, filter_params, self.config.target_labels)
+                all_results.append({
+                    "filter_params": filter_params,
+                    "counts": counts,
+                    "labels": labels
+                })
+
+            self.fetched_label_result_sets = all_results
+            self.fetched_label_outcomes = None
+            self.labels_fetch_state = 'success'
+            self.labels_fetch_message = (
+                f'Fetched {self.fetched_labels_count} labels across {len(all_results)} result sets.'
+            )
+
+            return all_results
+        except Exception as e:
+            self.fetched_label_result_sets = None
+            self.fetched_label_outcomes = None
+            self.labels_fetch_state = 'error'
+            self.labels_fetch_error = str(e)
+            self.labels_fetch_message = f'Fetch failed: {e}'
+            raise
+
+
+    def commit_fetched_labels(self):
+        """Commit labels currently stored in engine fetched-label state."""
+        self.labels_commit_state = 'running'
+        self.labels_commit_error = None
+        self.labels_commit_message = 'Adding fetched labels to database...'
+
+        try:
+            if not self.has_fetched_labels_ready:
+                raise ValueError("No fetched labels are ready to commit.")
+
+            outcomes = self.commit_labels(self.fetched_label_result_sets)
+            self.fetched_label_outcomes = outcomes
+
+            added_count = sum(
+                1
+                for filter_outcomes in outcomes
+                for source_data in filter_outcomes.get('outcomes', {}).values()
+                for label_data in source_data.values()
+                for type_data in label_data.values()
+                for item in type_data
+                if item.get('outcome') == 'added'
+            )
+            self.labels_commit_state = 'success'
+            self.labels_commit_message = f'Added {added_count} labels to the database.'
+            return outcomes
+        except Exception as e:
+            self.labels_commit_state = 'error'
+            self.labels_commit_error = str(e)
+            self.labels_commit_message = f'Add failed: {e}'
+            raise
 
 
     def commit_labels(self, result_sets):

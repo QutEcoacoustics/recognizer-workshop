@@ -3,7 +3,6 @@ import threading
 import pandas as pd
 import panel as pn
 
-from recognizer_workshop.app.services.db_labels.add_db_labels import add_labels_to_db
 from recognizer_workshop.ui.panel.components.native.filter_editor import build_filter_editor
 
 def build(vm):
@@ -26,7 +25,35 @@ def build(vm):
     outcomes_container = pn.Column(outcomes_placeholder, sizing_mode="stretch_width")
     details_title = pn.pane.Markdown("")
     details_container = pn.Column(details_title, details_placeholder, sizing_mode="stretch_width")
-    stash     = {"result_sets": None, "outcomes": None}
+
+    def _has_ready_labels() -> bool:
+        return bool(vm.eng and vm.eng.has_fetched_labels_ready)
+
+    def _sync_status_from_engine():
+        if not vm.eng:
+            return
+        if vm.eng.labels_commit_state == 'error' and vm.eng.labels_commit_error:
+            log.object = f"Error: {vm.eng.labels_commit_error}"
+            return
+        if vm.eng.labels_fetch_state == 'error' and vm.eng.labels_fetch_error:
+            log.object = f"Error: {vm.eng.labels_fetch_error}"
+            return
+        if vm.eng.labels_commit_message:
+            log.object = vm.eng.labels_commit_message
+            return
+        if vm.eng.labels_fetch_message:
+            log.object = vm.eng.labels_fetch_message
+
+    def _sync_add_button_state():
+        is_busy = bool(
+            vm.eng
+            and (
+                vm.eng.labels_fetch_state == 'running'
+                or vm.eng.labels_commit_state == 'running'
+            )
+        )
+        btn_fetch.disabled = is_busy
+        btn_add.disabled = is_busy or not _has_ready_labels()
     
     def _get_filters():
         if not (vm.eng and vm.eng.db):
@@ -270,9 +297,8 @@ def build(vm):
 
     def _fetch(_):
         if not vm.eng: return vm.notify("Initialize on Config tab first.", "error")
-        btn_fetch.disabled = True
-        btn_add.disabled = True
-        log.object = "Fetching labels…"
+        log.object = "Fetching labels..."
+        _sync_add_button_state()
         doc = pn.state.curdoc
 
         def _schedule(fn):
@@ -285,47 +311,48 @@ def build(vm):
         def _do_fetch():
             try:
                 result = vm.eng.fetch_labels()
+                result_sets = result if isinstance(result, list) else []
 
                 def _apply_success():
                     _ensure_tables()
-                    stash["result_sets"] = result
 
-                    summary_df = _create_fetch_summary_table(result)
+                    summary_df = _create_fetch_summary_table(result_sets)
                     summary_table.value = summary_df if summary_df is not None else pd.DataFrame()
 
-                    total_labels = sum(len(rs['labels']) for rs in result)
-                    log.object = (
-                        f"Successfully fetched **{total_labels}** labels across {len(result)} result sets."
-                    )
-                    btn_add.disabled = False
-                    vm.notify("Fetch successful. Ready to add to DB.", "success")
+                    total_labels = vm.eng.fetched_labels_count if vm.eng else 0
+                    _sync_status_from_engine()
+                    _sync_add_button_state()
+                    if total_labels > 0:
+                        vm.notify("Fetch successful. Ready to add to DB.", "success")
+                    else:
+                        vm.notify("Fetch completed but no labels were generated for the current filters.", "warn")
 
                 _schedule(_apply_success)
             except Exception as e:
                 error_message = str(e)
 
                 def _apply_error():
-                    log.object = f"Error: {error_message}"
+                    _sync_status_from_engine()
                     _ensure_tables()
                     summary_table.value = pd.DataFrame()
+                    _sync_add_button_state()
                     vm.notify(f"Fetch failed: {error_message}", "error")
 
                 _schedule(_apply_error)
             finally:
-
-                def _enable_fetch():
-                    btn_fetch.disabled = False
-
-                _schedule(_enable_fetch)
+                _schedule(_sync_add_button_state)
 
         threading.Thread(target=_do_fetch, daemon=True).start()
 
     def _add(_):
         if not vm.eng: return vm.notify("Initialize first.", "error")
-        if not stash["result_sets"]: return vm.notify("Fetch labels first.", "warn")
+        if not _has_ready_labels():
+            return vm.notify("No fetched labels are ready to add. Fetch labels first.", "warn")
+
+        _sync_add_button_state()
 
         try:
-            outcomes_list = vm.eng.commit_labels(stash["result_sets"])
+            outcomes_list = vm.eng.commit_fetched_labels()
 
             # Show the results as a table with the outcome of adding each label
             # each item in the outcomes list corresponds to a result_set, which corresponds to an audio recording filter. 
@@ -336,7 +363,6 @@ def build(vm):
                     fallback_name=f"Filter {i+1}"
                 )                
 
-            stash["outcomes"] = outcomes_list
             outcomes_df = _create_outcomes_summary_table(outcomes_list)
             _ensure_tables()
             
@@ -356,7 +382,10 @@ def build(vm):
 
                     
             vm.notify("Labels added to DB.", "success")
+            _sync_status_from_engine()
         except Exception as e:
+            _sync_status_from_engine()
+            _sync_add_button_state()
             vm.notify(f"Insert failed: {e}", "error")
             return
         
@@ -368,10 +397,14 @@ def build(vm):
     btn_add.on_click(_add)
 
     _update_filter_section()
+    _sync_status_from_engine()
+    _sync_add_button_state()
 
     @pn.depends(vm.obs.ensure("engine_state").param.version, watch=True)
     def _on_engine_state_change(_):
         _update_filter_section()
+        _sync_status_from_engine()
+        _sync_add_button_state()
 
     return pn.Column(
         pn.Row("## Labelled examples", pn.Spacer(), labeled_examples_help_btn),
