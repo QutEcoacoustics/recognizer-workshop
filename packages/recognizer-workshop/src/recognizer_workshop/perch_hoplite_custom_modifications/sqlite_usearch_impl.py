@@ -1,4 +1,7 @@
+import logging
 import numpy as np
+import subprocess
+import sys
 from perch_hoplite.db import interface
 import threading
 
@@ -13,6 +16,50 @@ from etils import epath
 from ml_collections import config_dict
 
 from usearch import index as uindex
+
+log = logging.getLogger(__name__)
+
+
+def _validate_usearch_index_file(index_path, ndim: int) -> None:
+    """
+    Validate a usearch index file before loading it in-process.
+
+    usearch's view() calls into a C extension that memory-maps the file. A
+    corrupted file triggers a segfault which kills the entire Python process
+    and cannot be caught by try/except.
+
+    This function runs the load in a subprocess instead. If the subprocess
+    exits with a non-zero code (segfault, magic-header mismatch, etc.) we
+    raise a clean RuntimeError so callers can surface the error normally.
+    """
+    # Pass ndim and path as argv to avoid any quoting/escaping issues.
+    script = (
+        "import sys; "
+        "from usearch.index import Index; "
+        "Index(ndim=int(sys.argv[1]), path=sys.argv[2], view=True); "
+        "sys.stdout.write('ok')"
+    )
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", script, str(ndim), str(index_path)],
+            timeout=30,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(
+            f"usearch index validation timed out for {index_path}. "
+            "The file may be corrupted."
+        )
+
+    if result.returncode != 0 or "ok" not in result.stdout:
+        raise RuntimeError(
+            f"usearch index at {index_path} appears corrupted "
+            f"(subprocess exit code {result.returncode}). "
+            "Delete the usearch.index file and recreate the database to recover."
+        )
+
+    log.debug("usearch index validation passed for %s", index_path)
 
 
 # this is a modified version of the SQLiteUsearchDB from perch_hoplite
@@ -99,6 +146,7 @@ class ThreadedSQLiteUsearchDB(SQLiteUsearchDB):
         usearch_dtype = USEARCH_DTYPES[usearch_cfg.dtype]
         index_path = db_path / UINDEX_FILENAME
         if index_path.exists():
+            _validate_usearch_index_file(index_path, usearch_cfg.embedding_dim)
             ui = uindex.Index(
                 ndim=usearch_cfg.embedding_dim,
                 path=index_path,

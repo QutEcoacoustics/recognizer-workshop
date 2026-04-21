@@ -56,12 +56,12 @@ def build(vm):
         btn_add.disabled = is_busy or not _has_ready_labels()
     
     def _get_filters():
-        if not (vm.eng and vm.eng.db):
+        if not (vm.eng and vm.eng.is_db_loaded):
             return None
         return vm.eng.get_baw_filters()
 
     def _set_filters(filters):
-        if not (vm.eng and vm.eng.db):
+        if not (vm.eng and vm.eng.is_db_loaded):
             raise RuntimeError("Initialize the engine on the Config tab first.")
         vm.eng.set_baw_filters(filters)
 
@@ -83,7 +83,7 @@ def build(vm):
 
     def _update_filter_section():
         """Show filter editor when engine is ready, warning otherwise."""
-        if not (vm.eng and vm.eng.db):
+        if not (vm.eng and vm.eng.is_db_loaded):
             filter_section.objects = [engine_warning]
         else:
             # Rebuild the filter editor to ensure it reflects latest DB metadata

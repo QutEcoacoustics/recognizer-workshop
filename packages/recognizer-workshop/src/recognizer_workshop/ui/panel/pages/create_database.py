@@ -7,7 +7,10 @@ from pathlib import Path
 
 import panel as pn
 
-from recognizer_workshop.app.create_database.create_database import create_database_from_baw
+from recognizer_workshop.app.create_database.database_creation_task import (
+    DatabaseCreationTask,
+    format_progress_event,
+)
 from recognizer_workshop.ui.panel.components.native.filter_editor import build_filter_editor, resolve_filters_for_editor
 from recognizer_workshop.ui.panel.utils import patch_tqdm
 
@@ -25,12 +28,13 @@ def build(vm):
     db_settings_help_btn = vm.help_system.create_help_button("help-db-creation-settings", "Help: Database Creation Settings")
     recordings_filter_help_btn = vm.help_system.create_help_button("help-recordings-filter", "Help: Recordings Filter")
 
-    page_state = {'filters': []}
+    page_state = {'filters': [], 'task': None}
     max_files = pn.widgets.IntInput(name="Max Recordings to Scan", value=1000, start=-1)
     max_embeddings = pn.widgets.IntInput(name="Max Total Embeddings in DB", value=200_000, start=-1)
     use_cached_list = pn.widgets.Checkbox(name="Use Cached Recording List", value=True, visible=False)
     cache_hint = pn.pane.Markdown("", visible=False)
     btn_create = pn.widgets.Button(name="Create Database", button_type="primary", icon="database")
+    btn_stop = pn.widgets.Button(name="⏹ Stop", button_type="danger", visible=False)
     progress_bar = pn.widgets.Progress(name='Progress', active=True, visible=False, sizing_mode="stretch_width")
     status_pane = pn.pane.Markdown("")
     progress_pane = pn.pane.Markdown("", visible=False)
@@ -135,87 +139,44 @@ def build(vm):
                 progress_pane.object = "### Live Progress\n" + "\n".join(progress_lines)
 
             def _progress_callback(event: dict):
+                messages, pct = format_progress_event(event)
+
                 def _apply_update():
-                    stage = event.get("stage")
-                    if stage == "selection_start":
-                        max_files_msg = event.get("max_files")
-                        cache_mode = "cache" if event.get("use_cache") else "fresh fetch"
-                        _append_progress_line(f"Selecting recordings (max_files={max_files_msg}, mode={cache_mode})")
-                    elif stage == "selection_complete":
-                        _append_progress_line(f"Selected {event.get('selected_recordings', 0)} recordings")
-                    elif stage == "ingest_start":
-                        total_candidates = event.get("total_candidates")
-                        max_count = event.get("max_count")
-                        current_embeddings = event.get("current_embeddings")
-                        if total_candidates is not None:
-                            _append_progress_line(f"Starting ingestion for {total_candidates} candidate recordings")
-                        else:
-                            _append_progress_line("Starting ingestion")
-                        if max_count and max_count > 0 and current_embeddings is not None:
-                            _append_progress_line(
-                                f"Current DB size is {current_embeddings} embeddings (limit {max_count})"
-                            )
-                    elif stage == "source_progress":
-                        candidates_seen = event.get("candidates_seen", 0)
-                        total_candidates = event.get("total_candidates", 0)
-                        skipped_existing = event.get("skipped_existing", 0)
-                        files_processed = event.get("files_processed", 0)
-                        if total_candidates:
-                            _append_progress_line(
-                                f"Checked {candidates_seen}/{total_candidates} recordings "
-                                f"(downloaded {files_processed}, skipped existing {skipped_existing})"
-                            )
-                            progress_bar.value = int(min(100, (candidates_seen / total_candidates) * 100))
-                        else:
-                            _append_progress_line(
-                                f"Checked {candidates_seen} recordings "
-                                f"(downloaded {files_processed}, skipped existing {skipped_existing})"
-                            )
-                    elif stage == "ingest_progress":
-                        files_processed = event.get("files_processed", 0)
-                        total_candidates = event.get("total_candidates")
-                        added_this_file = event.get("added_this_file", 0)
-                        total_inserted = event.get("total_inserted", 0)
-                        if total_candidates:
-                            _append_progress_line(
-                                f"Processed {files_processed}/{total_candidates} files (+{added_this_file}, total added {total_inserted})"
-                            )
-                            progress_bar.value = int(min(100, (files_processed / total_candidates) * 100))
-                        else:
-                            _append_progress_line(
-                                f"Processed {files_processed} files (+{added_this_file}, total added {total_inserted})"
-                            )
-                    elif stage == "ingest_complete":
-                        if event.get("stop_reason") == "max_count_already_reached":
-                            _append_progress_line(
-                                f"Skipped ingestion: DB already at limit ({event.get('final_embeddings', 0)} embeddings)"
-                            )
-                        else:
-                            _append_progress_line(
-                                f"Ingestion complete: {event.get('files_processed', 0)} files, {event.get('total_inserted', 0)} embeddings added"
-                            )
+                    for msg in messages:
+                        _append_progress_line(msg)
+                    if pct is not None:
+                        progress_bar.value = pct
 
                 if pn.state.curdoc is not None:
                     pn.state.curdoc.add_next_tick_callback(_apply_update)
                 else:
                     _apply_update()
-            
-            log.info(f"Starting database creation: max_files={max_files.value}, max_embeddings={max_embeddings.value}")
-            
+
+            log.info("Starting database creation: max_files=%s, max_embeddings=%s", max_files.value, max_embeddings.value)
+
+            task = DatabaseCreationTask(
+                db_path=db_dir,
+                filelist_path=filelist_path,
+                client=vm.eng.active_client if vm.eng else None,
+                filter=filters[0],
+                max_files=max_files.value,
+                max_embeddings=max_embeddings.value,
+                use_cache=use_cache,
+            )
+            page_state['task'] = task
+            btn_stop.visible = True
+            btn_stop.disabled = False
+            btn_stop.name = "⏹ Stop"
+
             with patch_tqdm.patch_tqdm(progress_bar):
-                await asyncio.to_thread(
-                    create_database_from_baw, 
-                    db_path=db_dir, 
-                    filelist_path=filelist_path,
-                    client=vm.eng.active_client if vm.eng else None, 
-                    filter=filters[0],
-                    max_files=max_files.value, 
-                    max_embeddings=max_embeddings.value,
-                    use_cache=use_cache,
-                    progress_callback=_progress_callback,
-                )
-            status_pane.object += "\n\n🎉 **Database creation complete!**"
-            vm.notify("Database created successfully!", "success")
+                await asyncio.to_thread(task.run, _progress_callback)
+
+            if task.was_stopped:
+                status_pane.object += "\n\n⏹ **Database creation stopped.** Partial data has been safely committed."
+                vm.notify("Database creation stopped.", "warning")
+            else:
+                status_pane.object += "\n\n🎉 **Database creation complete!**"
+                vm.notify("Database created successfully!", "success")
             log.info("Database creation completed successfully")
         except Exception as e:
             import traceback
@@ -225,6 +186,8 @@ def build(vm):
             log.error(f"Database creation failed: {e}", exc_info=True)
         finally:
             btn_create.disabled = False
+            btn_stop.visible = False
+            page_state['task'] = None
             progress_bar.visible = False
             progress_pane.visible = False
 
@@ -266,6 +229,15 @@ def build(vm):
         ).objects
 
     btn_create.on_click(_create_db)
+
+    def _on_stop(_):
+        task = page_state.get('task')
+        if task is not None:
+            task.stop()
+            btn_stop.name = "⏹ Stopping..."
+            btn_stop.disabled = True
+
+    btn_stop.on_click(_on_stop)
     
     # Initialize button state
     _update_button_state()
@@ -292,7 +264,7 @@ def build(vm):
             sizing_mode="stretch_width",
         ),
         pn.layout.Divider(),
-        pn.Row(btn_create, align="start"),
+        pn.Row(btn_create, btn_stop, align="start"),
         progress_bar,
         status_pane,
         progress_pane,
