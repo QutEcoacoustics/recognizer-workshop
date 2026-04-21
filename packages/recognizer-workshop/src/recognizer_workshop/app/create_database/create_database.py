@@ -742,8 +742,15 @@ def add_parquet_to_db(
     )
 
     log.info("Starting to ingest parquet files into database")
-    for df in tqdm.tqdm(iterator, desc="ingest"): 
-        max_for_df = max_count - total_inserted if max_count > 0 else -1
+    for df in tqdm.tqdm(iterator, desc="ingest"):
+        if max_count > 0:
+            remaining = max_count - db.count_embeddings()
+            if remaining <= 0:
+                log.info("Reached max_count DB limit of %s before processing file, stopping", max_count)
+                break
+            max_for_df = remaining
+        else:
+            max_for_df = -1
         num_inserted = add_df_to_db(df, db, source_map_fn=source_map_fn, max_for_df=max_for_df, dataset_name=dataset_name)
         total_inserted += num_inserted
         files_processed += 1
