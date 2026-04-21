@@ -254,7 +254,7 @@ def should_use_negative_tag_for_target(target_label, target_negatives_tag_text, 
 def event_requires_verification(event: dict) -> bool:
     """Determines whether an event requires verification before its labels can be trusted.
     """
-    return event['score'] is not None
+    return event.get('score') is not None
 
 
 def get_events_with_verifications_and_tags(api, filter_params, target_tags=None):
