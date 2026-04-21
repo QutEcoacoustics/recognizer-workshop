@@ -723,6 +723,8 @@ def add_parquet_to_db(
             current_embeddings,
             max_count,
         )
+        if filter_dict is not None:
+            record_embeddings_added(db, dataset_name, filter_dict, 0)
         if progress_callback is not None:
             progress_callback({
                 "stage": "ingest_complete",
