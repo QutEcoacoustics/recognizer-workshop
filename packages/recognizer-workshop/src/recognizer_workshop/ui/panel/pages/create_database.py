@@ -32,8 +32,8 @@ def build(vm):
     cache_hint = pn.pane.Markdown("", visible=False)
     btn_create = pn.widgets.Button(name="Create Database", button_type="primary", icon="database")
     progress_bar = pn.widgets.Progress(name='Progress', active=True, visible=False, sizing_mode="stretch_width")
-    status_display = pn.pane.Markdown("")  # Renamed from 'log' to avoid confusion
-    progress_lines: list[str] = []
+    status_pane = pn.pane.Markdown("")
+    progress_pane = pn.pane.Markdown("", visible=False)
     
     # Alert shown when no auth token is available
     auth_warning = pn.pane.Alert(
@@ -115,26 +115,24 @@ def build(vm):
         btn_create.disabled = True
         progress_bar.visible = True
         progress_bar.value = 0
-        status_display.object = f"🚀 Starting database creation in `{db_dir}`...\n\n"
-        if use_cache:
-            status_display.object += "📦 Using cached recording list for current filters.\n\n"
-        else:
-            status_display.object += "🌐 Fetching a fresh recording list for current filters.\n\n"
-        
-        try:
-            status_display.object += f"📥 Downloading and processing parquet files...\n"
-            status_display.object += f"⏳ This may take several minutes. Watch the logs below for progress.\n\n"
+        progress_lines: list[str] = []
+        cache_msg = "📦 Using cached recording list." if use_cache else "🌐 Fetching a fresh recording list."
+        status_pane.object = (
+            f"🚀 Starting database creation in `{db_dir}`...\n\n"
+            f"{cache_msg}\n\n"
+            f"📥 Downloading and processing parquet files...\n"
+            f"⏳ This may take several minutes.\n"
+        )
+        progress_pane.object = ""
+        progress_pane.visible = True
 
+        try:
             def _append_progress_line(msg: str):
                 ts = datetime.now().strftime("%H:%M:%S")
                 progress_lines.append(f"- `{ts}` {msg}")
                 if len(progress_lines) > 20:
                     del progress_lines[:-20]
-                status_display.object = (
-                    status_display.object.split("\n\n### Progress\n", 1)[0]
-                    + "\n\n### Live Progress\n"
-                    + "\n".join(progress_lines)
-                )
+                progress_pane.object = "### Live Progress\n" + "\n".join(progress_lines)
 
             def _progress_callback(event: dict):
                 def _apply_update():
@@ -216,18 +214,19 @@ def build(vm):
                     use_cache=use_cache,
                     progress_callback=_progress_callback,
                 )
-            status_display.object += "\n\n🎉 **Database creation complete!**"
+            status_pane.object += "\n\n🎉 **Database creation complete!**"
             vm.notify("Database created successfully!", "success")
             log.info("Database creation completed successfully")
         except Exception as e:
             import traceback
             tb = traceback.format_exc()
-            status_display.object = f"### 💥 Error:\n```\n{e}\n\nFull traceback:\n{tb}\n```"
+            status_pane.object = f"### 💥 Error:\n```\n{e}\n\nFull traceback:\n{tb}\n```"
             vm.notify(f"DB creation failed: {e}", "error")
             log.error(f"Database creation failed: {e}", exc_info=True)
         finally:
             btn_create.disabled = False
             progress_bar.visible = False
+            progress_pane.visible = False
 
     async def _create_db(_):
         db_dir = vm.config.db_path.expanduser()
@@ -295,6 +294,7 @@ def build(vm):
         pn.layout.Divider(),
         pn.Row(btn_create, align="start"),
         progress_bar,
-        status_display,
+        status_pane,
+        progress_pane,
         sizing_mode="stretch_width"
     )
