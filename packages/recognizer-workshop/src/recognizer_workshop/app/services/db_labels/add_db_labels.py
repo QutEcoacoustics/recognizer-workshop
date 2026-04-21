@@ -89,7 +89,7 @@ def build_parquet_source_list(items):
 
 
 
-def ensure_embeddings_exist(db, config, items, api_client):
+def ensure_embeddings_exist(db, config, items, api_client, filter_dict=None):
     """
     Scans the items dict to find all required offsets for each source.
     Calls add_parquet_to_db once to fetch any missing data in parallel.
@@ -108,15 +108,16 @@ def ensure_embeddings_exist(db, config, items, api_client):
         db=db,
         parquet_source=parquet_source_list,
         api_client=api_client,
-        dataset_name=config.search_dataset_name,
+        dataset_name='fetched_labels',
         #TODO: figure out where to read this from
-        hop_size_s=5.0 
+        hop_size_s=5.0,
+        filter_dict=filter_dict,
     )
 
 
 
 
-def add_labels_to_db(db, config, items, api_client=None):
+def add_labels_to_db(db, config, items, api_client=None, filter_dict=None):
     """
     Add labels to the database.
     items is in the format:
@@ -140,19 +141,27 @@ def add_labels_to_db(db, config, items, api_client=None):
     # but with the offsets lists replaced by lists of dicts with offset and outcome
     results = copy.deepcopy(items)
 
-    ensure_embeddings_exist(db, config, items, api_client=api_client)    
+    ensure_embeddings_exist(db, config, items, api_client=api_client, filter_dict=filter_dict)
 
     for source_id, labels_data in items.items():
 
         try:
-            source_embeddings = db.get_embeddings_by_source(
-                dataset_name=config.search_dataset_name,
-                source_id=source_id
-            )
-            # Create a fast lookup map of {offset: embedding_id}
-            offset_to_embedding_id = {
-                db.get_embedding_source(eid).offsets[0]: eid for eid in source_embeddings
-            }
+            # Build offset->embedding_id from both the main search set and the
+            # fetched_labels dataset (embeddings may have been downloaded into
+            # either, depending on whether they existed before this run).
+            offset_to_embedding_id = {}
+            for dataset_name in (config.search_dataset_name, 'fetched_labels'):
+                try:
+                    source_embeddings = db.get_embeddings_by_source(
+                        dataset_name=dataset_name,
+                        source_id=source_id
+                    )
+                    for eid in source_embeddings:
+                        offset = db.get_embedding_source(eid).offsets[0]
+                        # search_dataset_name takes precedence if present in both
+                        offset_to_embedding_id.setdefault(offset, eid)
+                except Exception:
+                    pass
         except Exception as e:
             log.error(f"Could not retrieve embeddings for source {source_id}: {e}")
             offset_to_embedding_id = {} # Treat as if no embeddings were found

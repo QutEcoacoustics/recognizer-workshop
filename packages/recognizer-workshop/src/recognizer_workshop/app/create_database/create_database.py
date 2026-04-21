@@ -1,6 +1,7 @@
 import logging
 import sys
 from pathlib import Path
+from typing import Callable
 from etils import epath
 import functools
 from ml_collections import config_dict
@@ -29,6 +30,7 @@ from baw_helpers.baw_utils import extract_arid_and_domain, original_baw_audio_ur
 from baw_helpers.settings import baw_settings
 
 from recognizer_workshop.app.create_database.embedding_config_loader import load_baw_embedding_config
+from recognizer_workshop.app.services.baw_insertions import record_embeddings_added
 
     
 log = logging.getLogger(__name__)
@@ -58,8 +60,18 @@ def create_database_from_baw(
         site_ids: int | list | None = None,
         filter: dict | None = None,
         max_embeddings: int = 1_000_000,
-        max_files: int = -1
+        max_files: int = -1,
+        use_cache: bool = True,
+        progress_callback: Callable[[dict], None] | None = None,
 ):
+
+    if progress_callback is not None:
+        progress_callback({
+            "stage": "selection_start",
+            "max_files": max_files,
+            "max_embeddings": max_embeddings,
+            "use_cache": use_cache,
+        })
     
     filter_params = simple_filter(
         project_ids=project_ids,
@@ -76,8 +88,15 @@ def create_database_from_baw(
         api=client,
         filter_params=filter_params,
         save_dir=filelist_path,
-        limit=max_files
+        limit=max_files,
+        use_cache=use_cache,
     )
+
+    if progress_callback is not None:
+        progress_callback({
+            "stage": "selection_complete",
+            "selected_recordings": len(audio_recordings),
+        })
 
     arids = [int(ar['id']) for ar in audio_recordings]
 
@@ -86,14 +105,12 @@ def create_database_from_baw(
         parquet_source=arids,
         api_client=client,    
         max_count=max_embeddings,
-        config=config
+        config=config,
+        filter_dict=filter_params['filter'] if filter_params is not None else None,
+        progress_callback=progress_callback,
     )
 
-    # create a baw filters metadata entry. It's a list of filter params dicts, so we can define multiple filters if needed
-    # it must be wrapped in a ConfigDict to be storable in the db
-    if filter_params is not None:
-        db.insert_metadata('baw_filters', config_dict.ConfigDict({"filters": [filter_params['filter']]}))
-        db.commit()
+
 
 
 def convert_parquet(
@@ -106,7 +123,9 @@ def convert_parquet(
     max_count: int = -1,
     max_size: int | None = None,
     source_map_fn = _DEFAULT,
-    api_client = None
+    api_client = None,
+    filter_dict: dict | None = None,
+    progress_callback: Callable[[dict], None] | None = None,
     ):
  
     # put all kwargs in a dict
@@ -117,7 +136,9 @@ def convert_parquet(
         "dataset_name": dataset_name,
         "max_count": max_count,
         "max_size": max_size,
-        "source_map_fn": source_map_fn
+        "source_map_fn": source_map_fn,
+        "filter_dict": filter_dict,
+        "progress_callback": progress_callback,
     }
     db_path = Path(db_path).expanduser()
     has_sqlite = db_path.exists() and any(db_path.glob("*.sqlite"))
@@ -280,6 +301,7 @@ def iter_parquet_dataframes(
     max_auth_errors: int = 3,
     db = None,
     hop_size_s: float = 5.0,
+    progress_callback: Callable[[dict], None] | None = None,
 ):
     """
     Master iterator that normalizes input and dispatches to local or remote iterators.
@@ -299,7 +321,8 @@ def iter_parquet_dataframes(
             columns=columns,
             analysis_job_id=analysis_job_id,
             analysis_name=analysis_name,
-            max_auth_errors=max_auth_errors
+            max_auth_errors=max_auth_errors,
+            progress_callback=progress_callback,
         )
     else:
         existing_arids = get_existing_arids(db) if db is not None else []
@@ -308,6 +331,7 @@ def iter_parquet_dataframes(
             parquet_source,
             columns=columns,
             skip_arids_in=existing_arids,
+            progress_callback=progress_callback,
         )
 
 
@@ -321,7 +345,8 @@ def _iter_remote_parquet_dataframes(
     analysis_name: str = DEFAULT_BAW_ANALYSIS_NAME,
     max_auth_errors: int = 3,
     db = None,
-    hop_size_s: float = 5.0
+    hop_size_s: float = 5.0,
+    progress_callback: Callable[[dict], None] | None = None,
 ):
     """
     Yield pandas DataFrames from remote parquet files specified by items list
@@ -347,6 +372,24 @@ def _iter_remote_parquet_dataframes(
         raise ValueError("api_client is required when parquet_source is a list of ARIDs")
     
     log.info("Starting download of %d parquet files from API", len(items))
+    total_items = len(items)
+    candidates_seen = 0
+    skipped_existing = 0
+    files_processed = 0
+
+    def emit_source_progress(force: bool = False):
+        if progress_callback is None:
+            return
+        # Reduce UI spam while still keeping frequent feedback.
+        if not force and candidates_seen % 10 != 0:
+            return
+        progress_callback({
+            "stage": "source_progress",
+            "candidates_seen": candidates_seen,
+            "total_candidates": total_items,
+            "skipped_existing": skipped_existing,
+            "files_processed": files_processed,
+        })
     
     def fetch_one(item: dict):
         log.debug("Fetching parquet for ARID %d", item['id'])
@@ -379,6 +422,8 @@ def _iter_remote_parquet_dataframes(
             try:
                 while True:
                     cur_item = next(it)
+                    nonlocal candidates_seen, skipped_existing
+                    candidates_seen += 1
 
                     if 'offsets' in cur_item and db:
                         cur_item = remove_existing_offsets_from_item(db, cur_item) # if offsets are defined in an item, remove existing ones
@@ -389,9 +434,12 @@ def _iter_remote_parquet_dataframes(
                     # if there are no offsets left after removal, skip fetching and return None
                     if 'offsets' in cur_item and not cur_item['offsets']:
                         log.info("No offsets left to fetch for ARID %d after removing existing offsets, skipping", cur_item['id'])
+                        skipped_existing += 1
+                        emit_source_progress()
                         continue
                     
                     q.append((cur_item, executor.submit(fetch_one, cur_item)))
+                    emit_source_progress()
                     return True
 
             except StopIteration:
@@ -403,7 +451,6 @@ def _iter_remote_parquet_dataframes(
                 break
 
         pbar = tqdm.tqdm(total=len(items), desc="remote")
-        files_processed = 0
         consecutive_auth_errors = 0
         while q:
             item, fut = q.popleft()
@@ -425,6 +472,7 @@ def _iter_remote_parquet_dataframes(
                 consecutive_auth_errors = 0
                 files_processed += 1
                 log.info("Processed parquet %d/%d (ARID: %d, rows: %d)", files_processed, len(items), item['id'], len(result_df))
+                emit_source_progress()
                 yield result_df
             except AuthenticationError as e:
                 consecutive_auth_errors += 1
@@ -440,12 +488,13 @@ def _iter_remote_parquet_dataframes(
                 
             pbar.update(1)
         pbar.close()
+        emit_source_progress(force=True)
         
     log.info("Completed downloading %d parquet files", files_processed)
     return
 
 
-def _iter_local_parquet_dataframes(parquet_source, *, columns: list[str] | None = None, skip_arids_in: set| list | None = None):
+def _iter_local_parquet_dataframes(parquet_source, *, columns: list[str] | None = None, skip_arids_in: set| list | None = None, progress_callback: Callable[[dict], None] | None = None):
 
     # using local files
     # we don't support dict of offsets here because it's more complicated and we dont' need it for local files right now
@@ -454,7 +503,14 @@ def _iter_local_parquet_dataframes(parquet_source, *, columns: list[str] | None 
 
     skip_arids_in = set(skip_arids_in) if skip_arids_in is not None else set()
 
-    for frag in tqdm.tqdm(dataset.get_fragments(), desc="local-fragments"):
+    fragments = list(dataset.get_fragments())
+    total_fragments = len(fragments)
+    seen = 0
+    yielded = 0
+    skipped = 0
+
+    for frag in tqdm.tqdm(fragments, desc="local-fragments"):
+        seen += 1
         path = getattr(frag, "path", None)
         try:
             arid_from_name = extract_arid_from_filename(path)
@@ -464,10 +520,28 @@ def _iter_local_parquet_dataframes(parquet_source, *, columns: list[str] | None 
 
         if arid_from_name is not None and arid_from_name in skip_arids_in:
             log.info("Skipping existing ARID: %s (%s)", arid_from_name, path)
+            skipped += 1
+            if progress_callback is not None and (seen % 10 == 0 or seen == total_fragments):
+                progress_callback({
+                    "stage": "source_progress",
+                    "candidates_seen": seen,
+                    "total_candidates": total_fragments,
+                    "skipped_existing": skipped,
+                    "files_processed": yielded,
+                })
             continue
 
         try:
             table = frag.to_table(columns=columns)
+            yielded += 1
+            if progress_callback is not None and (seen % 10 == 0 or seen == total_fragments):
+                progress_callback({
+                    "stage": "source_progress",
+                    "candidates_seen": seen,
+                    "total_candidates": total_fragments,
+                    "skipped_existing": skipped,
+                    "files_processed": yielded,
+                })
             yield table.to_pandas()
         except Exception as e:
             logging.warning(path or "<fragment>", e)
@@ -569,7 +643,9 @@ def add_parquet_to_existing_db(
     dataset_name: str = 'search_set',
     max_count: int = -1,
     max_size: int | None = None,
-    source_map_fn = _DEFAULT
+    source_map_fn = _DEFAULT,
+    filter_dict: dict | None = None,
+    progress_callback: Callable[[dict], None] | None = None,
 ):
     
     if db_type == 'sqlite_usearch':
@@ -587,7 +663,9 @@ def add_parquet_to_existing_db(
         max_count=max_count,
         max_size=max_size,
         source_map_fn=source_map_fn,
-        hop_size_s=hop_size_s
+        hop_size_s=hop_size_s,
+        filter_dict=filter_dict,
+        progress_callback=progress_callback,
     )
 
     return db
@@ -613,7 +691,9 @@ def add_parquet_to_db(
     max_count: int = -1,
     max_size: int = None,
     source_map_fn = _DEFAULT,
-    hop_size_s: float = 5.0
+    hop_size_s: float = 5.0,
+    filter_dict: dict | None = None,
+    progress_callback: Callable[[dict], None] | None = None,
 ):
     """Adds parquet files to an existing hoplite database."""
     
@@ -626,25 +706,74 @@ def add_parquet_to_db(
 
     total_inserted = 0
     files_processed = 0
+    total_candidates = len(parquet_source) if isinstance(parquet_source, list) else None
+    current_embeddings = db.count_embeddings()
+
+    if progress_callback is not None:
+        progress_callback({
+            "stage": "ingest_start",
+            "total_candidates": total_candidates,
+            "max_count": max_count,
+            "current_embeddings": current_embeddings,
+        })
+
+    if max_count > 0 and current_embeddings >= max_count:
+        log.info(
+            "Skipping ingestion because current DB size (%s) is already at/above max_count (%s)",
+            current_embeddings,
+            max_count,
+        )
+        if filter_dict is not None:
+            record_embeddings_added(db, dataset_name, filter_dict, 0)
+        if progress_callback is not None:
+            progress_callback({
+                "stage": "ingest_complete",
+                "files_processed": 0,
+                "total_inserted": 0,
+                "final_embeddings": current_embeddings,
+                "stop_reason": "max_count_already_reached",
+            })
+        return db
 
     iterator = iter_parquet_dataframes(
         parquet_source,
         api_client=api_client,
         db=db, 
-        hop_size_s=hop_size_s
+        hop_size_s=hop_size_s,
+        progress_callback=progress_callback,
     )
 
     log.info("Starting to ingest parquet files into database")
-    for df in tqdm.tqdm(iterator, desc="ingest"): 
-        max_for_df = max_count - total_inserted if max_count > 0 else -1
+    for df in tqdm.tqdm(iterator, desc="ingest"):
+        if max_count > 0:
+            remaining = max_count - db.count_embeddings()
+            if remaining <= 0:
+                log.info("Reached max_count DB limit of %s before processing file, stopping", max_count)
+                break
+            max_for_df = remaining
+        else:
+            max_for_df = -1
         num_inserted = add_df_to_db(df, db, source_map_fn=source_map_fn, max_for_df=max_for_df, dataset_name=dataset_name)
         total_inserted += num_inserted
         files_processed += 1
         
         log.info(f"Ingested file {files_processed}: added {num_inserted} embeddings (total: {total_inserted})")
         
+        if filter_dict is not None and num_inserted > 0:
+            record_embeddings_added(db, dataset_name, filter_dict, num_inserted)
+
+        if progress_callback is not None:
+            progress_callback({
+                "stage": "ingest_progress",
+                "files_processed": files_processed,
+                "total_candidates": total_candidates,
+                "added_this_file": num_inserted,
+                "total_inserted": total_inserted,
+                "max_count": max_count,
+            })
+
         if max_count > 0 and db.count_embeddings() >= max_count:
-            log.info(f"Reached max_count limit of {max_count}, stopping ingestion")
+            log.info("Reached max_count total-DB limit of %s, stopping ingestion", max_count)
             break
         
     db.commit()
@@ -652,6 +781,14 @@ def add_parquet_to_db(
     log.info(f'Total embeddings: {num_embeddings}')
     hours_equiv = num_embeddings / 60 / 60 * hop_size_s
     log.info(f'Hours of audio equivalent: {hours_equiv:.2f}')
+
+    if progress_callback is not None:
+        progress_callback({
+            "stage": "ingest_complete",
+            "files_processed": files_processed,
+            "total_inserted": total_inserted,
+            "final_embeddings": num_embeddings,
+        })
 
     return db
 

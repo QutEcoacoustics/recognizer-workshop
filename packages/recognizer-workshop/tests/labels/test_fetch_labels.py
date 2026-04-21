@@ -58,7 +58,7 @@ def sample_events():
     for i, event in enumerate(events):
         event['id'] = i + 1
         event['audio_recording_id'] = 999
-        event['provenance_id'] = 10
+        event['score'] = 0.9
 
 # --- Unit Tests ---
 
@@ -446,31 +446,31 @@ def full_flow_results(mock_api):
         # Event 1: Verified Positive 'Magpie Song' (11-17s)
         {
             'start_time_seconds': 11.0, 'end_time_seconds': 17.0,
-            'taggings': [{'tag_id': 888}],
+            'taggings': [{'tag_id': 888, 'tag': {'id': 888, 'text': 'Magpie Song'}}],
             'verification_summary': [{'tag_id': 888, 'correct': 5, 'incorrect': 0}], 
         },
         # Event 2: Verified Negative 'Magpie Song' (18-38s)
         {
             'start_time_seconds': 18.0, 'end_time_seconds': 38.0,
-            'taggings': [{'tag_id': 888}],
+            'taggings': [{'tag_id': 888, 'tag': {'id': 888, 'text': 'Magpie Song'}}],
             'verification_summary': [{'tag_id': 888, 'correct': 0, 'incorrect': 5}],
         },
         # Event 3: Verified Positive 'Magpie Song' (26-29s)
         {
             'start_time_seconds': 26.0, 'end_time_seconds': 29.0,
-            'taggings': [{'tag_id': 888}],
+            'taggings': [{'tag_id': 888, 'tag': {'id': 888, 'text': 'Magpie Song'}}],
             'verification_summary': [{'tag_id': 888, 'correct': 5, 'incorrect': 0}], 
         },
         # Event 4: Verified Positive 'Magpie Song' (37-43s)
         {
             'start_time_seconds': 37.0, 'end_time_seconds': 43.0,
-            'taggings': [{'tag_id': 888}],
+            'taggings': [{'tag_id': 888, 'tag': {'id': 888, 'text': 'Magpie Song'}}],
             'verification_summary': [{'tag_id': 888, 'correct': 5, 'incorrect': 0}], 
         },
         # Event 5: Implied Negative 'Fairy Wren' (39-48s)
         {
             'start_time_seconds': 39.0, 'end_time_seconds': 48.0,
-            'taggings': [{'tag_id': 777}],
+            'taggings': [{'tag_id': 777, 'tag': {'id': 777, 'text': 'Fairy Wren'}}],
             'verification_summary': [{'tag_id': 777, 'correct': 5, 'incorrect': 0}],
         }
     ]
@@ -479,7 +479,7 @@ def full_flow_results(mock_api):
     for i, event in enumerate(events):
         event['id'] = i + 1
         event['audio_recording_id'] = 999
-        event['provenance_id'] = 10
+        event['score'] = 0.9
 
     target_labels = [magpieSong]
     target_negatives = TargetNegatives({magpieSong: [fairyWren]})
@@ -513,20 +513,20 @@ def test_full_flow_without_target_negatives(mock_api):
         # Ev 1: Verified Positive (11-17)
         {
             'start_time_seconds': 11.0, 'end_time_seconds': 17.0,
-            'taggings': [{'tag_id': 888}],
-            'verification_summary': [{'tag_id': 888, 'correct': 5, 'incorrect': 0}], 
+            'taggings': [{'tag_id': 888, 'tag': {'id': 888, 'text': 'Magpie Song'}}],
+            'verification_summary': [{'tag_id': 888, 'correct': 5, 'incorrect': 0}],
         },
         # Ev 2: Verified Negative (18-38)
         {
             'start_time_seconds': 18.0, 'end_time_seconds': 38.0,
-            'taggings': [{'tag_id': 888}],
+            'taggings': [{'tag_id': 888, 'tag': {'id': 888, 'text': 'Magpie Song'}}],
             'verification_summary': [{'tag_id': 888, 'correct': 0, 'incorrect': 5}],
         },
         # Ev 5: Implied Negative 'Fairy Wren' (39-48)
         # WITHOUT target_negatives mapping, this should be ignored completely.
         {
             'start_time_seconds': 39.0, 'end_time_seconds': 48.0,
-            'taggings': [{'tag_id': 777}], 
+            'taggings': [{'tag_id': 777, 'tag': {'id': 777, 'text': 'Fairy Wren'}}],
             'verification_summary': [{'tag_id': 777, 'correct': 5, 'incorrect': 0}],
         }
     ]
@@ -534,7 +534,7 @@ def test_full_flow_without_target_negatives(mock_api):
     for i, event in enumerate(events):
         event['id'] = i + 1
         event['audio_recording_id'] = 999
-        event['provenance_id'] = 10
+        event['score'] = 0.9
 
     target_labels = [magpieSong]
     
@@ -564,6 +564,101 @@ def test_full_flow_without_target_negatives(mock_api):
     assert counts[label_key]['negative'] == 3
 
 
+def test_no_verification_required_but_negative_consensus(mock_api):
+    """
+    Event does NOT require verification (score=None) but has verifications
+    with a clear negative consensus → tag should resolve to negative.
+    """
+    magpieSong = LabelName("Magpie", "song")
+
+    events = [{
+        'id': 1, 'audio_recording_id': 999,
+        'score': None,  # does NOT require verification
+        'start_time_seconds': 0.0, 'end_time_seconds': 5.0,
+        'taggings': [{'tag_id': 888, 'tag': {'id': 888, 'text': 'Magpie Song'}}],
+        'verification_summary': [{'tag_id': 888, 'correct': 0, 'incorrect': 5}],
+    }]
+
+    with patch.object(target_module, 'get_events_for_sites', return_value=events):
+        items, counts = target_module.labels_from_event_taggings(
+            mock_api, filter_params={}, target_labels=[magpieSong]
+        )
+
+    source_url = "https://api.ecosounds.org/audio_recordings/999/original"
+    label_key = str(magpieSong)
+    assert 0.0 in items[source_url][label_key]['neg'], \
+        "Tag with negative verification consensus should be negative, even if event doesn't require verification"
+    assert 0.0 not in items[source_url][label_key]['pos']
+
+
+def test_no_verification_required_tied_consensus_discards_tag(mock_api):
+    """
+    Event does NOT require verification (score=None) but has verifications
+    with a tied result (correct == incorrect, both > 0) → tag should be discarded.
+    """
+    magpieSong = LabelName("Magpie", "song")
+
+    events = [{
+        'id': 1, 'audio_recording_id': 999,
+        'score': None,  # does NOT require verification
+        'start_time_seconds': 0.0, 'end_time_seconds': 5.0,
+        'taggings': [{'tag_id': 888, 'tag': {'id': 888, 'text': 'Magpie Song'}}],
+        'verification_summary': [{'tag_id': 888, 'correct': 3, 'incorrect': 3}],
+    }]
+
+    with patch.object(target_module, 'get_events_for_sites', return_value=events):
+        items, counts = target_module.labels_from_event_taggings(
+            mock_api, filter_params={}, target_labels=[magpieSong]
+        )
+
+    source_url = "https://api.ecosounds.org/audio_recordings/999/original"
+    label_key = str(magpieSong)
+    pos_list = items.get(source_url, {}).get(label_key, {}).get('pos', [])
+    neg_list = items.get(source_url, {}).get(label_key, {}).get('neg', [])
+    assert 0.0 not in pos_list, "Tied verification should discard the tag (not pos)"
+    assert 0.0 not in neg_list, "Tied verification should discard the tag (not neg)"
+
+
+def test_no_verification_required_two_tags_resolved_independently(mock_api):
+    """
+    Event does NOT require verification (score=None) with two tags on the same event:
+    - tag 888 (Magpie Song): has verifications → negative consensus → neg
+    - tag 555 (Magpie):      no verifications  → defaults to positive (no verification required)
+    Each tag must be resolved independently.
+    """
+    magpieSong = LabelName("Magpie", "song")
+    magpie = LabelName("Magpie")
+
+    events = [{
+        'id': 1, 'audio_recording_id': 999,
+        'score': None,  # does NOT require verification
+        'start_time_seconds': 0.0, 'end_time_seconds': 5.0,
+        'taggings': [
+            {'tag_id': 888, 'tag': {'id': 888, 'text': 'Magpie Song'}},
+            {'tag_id': 555, 'tag': {'id': 555, 'text': 'Magpie'}},
+        ],
+        # Only tag 888 has verifications; tag 555 has none
+        'verification_summary': [{'tag_id': 888, 'correct': 0, 'incorrect': 5}],
+    }]
+
+    with patch.object(target_module, 'get_events_for_sites', return_value=events):
+        items, counts = target_module.labels_from_event_taggings(
+            mock_api, filter_params={}, target_labels=[magpieSong, magpie]
+        )
+
+    source_url = "https://api.ecosounds.org/audio_recordings/999/original"
+
+    # Magpie Song: verified negative → neg
+    ms_key = str(magpieSong)
+    assert 0.0 in items[source_url][ms_key]['neg'], \
+        "Magpie Song with negative verifications should resolve to negative"
+    assert 0.0 not in items[source_url][ms_key]['pos']
+
+    # Magpie: no verifications, event doesn't require them → positive
+    m_key = str(magpie)
+    assert 0.0 in items[source_url][m_key]['pos'], \
+        "Magpie with no verifications on a non-verification-required event should resolve to positive"
+    assert 0.0 not in items[source_url][m_key]['neg']
 
 
 @pytest.mark.parametrize("offset, expected_type, reason", [

@@ -20,6 +20,7 @@ from recognizer_workshop.app.create_database.create_database import (
     create_empty_db,
     _iter_local_parquet_dataframes
 )
+import recognizer_workshop.app.create_database.create_database as create_database_module
 
 
 
@@ -273,6 +274,139 @@ def test_custom_source_map_fn_is_used(tmp_path):
     all_sources = sqlite_usearch_impl_custom.get_all_sources(db)
     assert any(s.source_id and s.source_id.endswith("?tag=unittest") for s in all_sources), \
         "source_map_fn should be applied to stored source IDs"
+
+
+def test_add_parquet_records_insertions_once_per_dataframe(tmp_path, monkeypatch):
+    """Metadata updates should happen per dataframe (file), not per inserted row."""
+    data_dir = tmp_path / "parquet"
+    data_dir.mkdir()
+    _write_parquets_with_arids(data_dir, arids=[111, 222], rows_per_file=3, emb_dim=2)
+
+    db_dir = tmp_path / "db"
+    db, _ = create_empty_db(
+        db_path=db_dir,
+        parquet_source=str(data_dir),
+        config=None,
+    )
+
+    calls = []
+
+    def _fake_record_embeddings_added(db_arg, dataset_name, filter_dict, count):
+        calls.append({
+            "dataset_name": dataset_name,
+            "filter_dict": filter_dict,
+            "count": count,
+        })
+
+    monkeypatch.setattr(create_database_module, "record_embeddings_added", _fake_record_embeddings_added)
+
+    filter_dict = {"projects.id": {"in": [123]}}
+    add_parquet_to_db(
+        db=db,
+        parquet_source=str(data_dir),
+        dataset_name="search_set",
+        max_count=-1,
+        max_size=None,
+        source_map_fn=lambda s: s,
+        hop_size_s=5.0,
+        filter_dict=filter_dict,
+    )
+
+    assert len(calls) == 2
+    assert all(c["dataset_name"] == "search_set" for c in calls)
+    assert all(c["filter_dict"] == filter_dict for c in calls)
+    assert sorted(c["count"] for c in calls) == [3, 3]
+
+
+def test_add_parquet_stops_when_total_db_already_at_limit(tmp_path):
+    """max_count applies to total DB size and should short-circuit when already at/above limit."""
+    data_dir = tmp_path / "parquet"
+    data_dir.mkdir()
+    _write_parquets_with_arids(data_dir, arids=[111, 222], rows_per_file=3, emb_dim=2)
+
+    db_dir = tmp_path / "db"
+    db, _ = create_empty_db(
+        db_path=db_dir,
+        parquet_source=str(data_dir),
+        config=None,
+    )
+
+    add_parquet_to_db(
+        db=db,
+        parquet_source=str(data_dir),
+        dataset_name="search_set",
+        max_count=-1,
+        max_size=None,
+        source_map_fn=lambda s: s,
+        hop_size_s=5.0,
+    )
+    base_count = db.count_embeddings()
+    assert base_count == 6
+
+    add_parquet_to_db(
+        db=db,
+        parquet_source=str(data_dir),
+        dataset_name="search_set",
+        max_count=4,
+        max_size=None,
+        source_map_fn=lambda s: s,
+        hop_size_s=5.0,
+    )
+
+    assert db.count_embeddings() == base_count
+
+
+def test_add_parquet_does_not_overshoot_max_count_when_db_already_has_embeddings(tmp_path):
+    """
+    When the DB is pre-loaded close to max_count, the per-file
+    insertion cap must be computed from the *actual* current DB size, not from the
+    number of embeddings added in the current run (total_inserted).
+
+    """
+    data_dir = tmp_path / "parquet"
+    data_dir.mkdir()
+
+    # 3 files, 3 rows each = 9 rows total available
+    _write_parquets_with_arids(data_dir, arids=[111, 222, 333], rows_per_file=3, emb_dim=2)
+
+    db_dir = tmp_path / "db"
+    db, _ = create_empty_db(
+        db_path=db_dir,
+        parquet_source=str(data_dir),
+        config=None,
+    )
+
+    # Pre-load 2 of the 3 files (6 embeddings) with no limit
+    data_dir_partial = tmp_path / "parquet_partial"
+    data_dir_partial.mkdir()
+    _write_parquets_with_arids(data_dir_partial, arids=[111, 222], rows_per_file=3, emb_dim=2)
+
+    add_parquet_to_db(
+        db=db,
+        parquet_source=str(data_dir_partial),
+        dataset_name="search_set",
+        max_count=-1,
+        source_map_fn=lambda s: s,
+        hop_size_s=5.0,
+    )
+    assert db.count_embeddings() == 6  # 6 already in DB
+
+    # Now run with max_count=7: only 1 more slot available, but the next file has 3 rows.
+    # The fixed code should insert exactly 1 row; the old code would have inserted 3
+    # (because total_inserted started at 0, so max_for_df = 7 - 0 = 7).
+    add_parquet_to_db(
+        db=db,
+        parquet_source=str(data_dir),
+        dataset_name="search_set",
+        max_count=7,
+        source_map_fn=lambda s: s,
+        hop_size_s=5.0,
+    )
+
+    assert db.count_embeddings() == 7, (
+        "DB should stop at max_count=7 even when pre-existing embeddings are not "
+        "counted in total_inserted for the current run"
+    )
     
 
 

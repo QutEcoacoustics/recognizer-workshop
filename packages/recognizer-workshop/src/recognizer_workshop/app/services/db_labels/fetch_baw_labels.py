@@ -68,38 +68,35 @@ def labels_from_event_taggings(api, filter_params, target_labels: List[LabelName
         # including for non target labels, so we can use those as negative examples if needed. 
         event['label_info'] = {}
 
-        requires_verification = event['provenance_id'] is not None
+        # Build a per-tag lookup from the verification summary (may be absent or empty).
+        vs = event.get('verification_summary') or []
+        vs_by_tag_id = {int(item['tag_id']): item for item in vs}
 
-        if requires_verification:
-            vs = event.get('verification_summary')
-            if vs is None:
-                log.warning(f"Event {event['id']} is marked as requiring verification but has no verification summary.")
+        for tagging in event.get('taggings', []):
+            tag = tagging.get('tag')
+            if tag is None:
+                log.warning(f"Event {event['id']} has a tagging with no hydrated tag object.")
                 continue
-            for verification_summary_item in vs:
-                tag_id = int(verification_summary_item['tag_id'])
-                tag = api.tags.get_by_id(tag_id)
-                if tag is None:
-                    log.warning(f"Tag id {tag_id} not found in tag cache.")
-                    continue
-                tag_text = tag['text']
+            tag_text = tag['text']
+            tag_id = int(tagging.get('tag_id') or tag.get('id'))
 
-                if verification_summary_item['correct'] > verification_summary_item['incorrect']:
-                    consensus = 'positive'
-                elif verification_summary_item['incorrect'] > verification_summary_item['correct']:
-                    consensus = 'negative'
-                else:
-                    consensus = None
+            vs_item = vs_by_tag_id.get(tag_id)
 
-                if consensus is not None:
-                    event['label_info'][tag_text] = consensus
-        else:
-
-            for tagging in event.get('taggings', []):
-                # if there is no provenance, it should be likely that it was manually created (before provenance was added to the schema, events were almost always drawn on spectrograms)
-                # and therefore treat as verified
-                # but if there are verifications, we should check them to know for sure
-                tag_text = tagging['tag']['text']
-                event['label_info'][tag_text] = 'positive'
+            if vs_item is not None:
+                # Verifications exist for this tag – use consensus if one side wins.
+                correct = vs_item['correct']
+                incorrect = vs_item['incorrect']
+                if correct > incorrect:
+                    event['label_info'][tag_text] = 'positive'
+                elif incorrect > correct:
+                    event['label_info'][tag_text] = 'negative'
+                # tied or both-zero → no consensus, discard
+            else:
+                # No verifications for this specific tag.
+                if not event_requires_verification(event):
+                    # Event doesn't require verifications → treat tagging as positive.
+                    event['label_info'][tag_text] = 'positive'
+                # else: event requires verification but none found for this tag → discard.
 
     # mutates events
     for event in events:
@@ -252,6 +249,12 @@ def should_use_negative_tag_for_target(target_label, target_negatives_tag_text, 
     if target_label not in spec:
         return False
     return target_negatives_tag_text in spec[target_label]
+
+
+def event_requires_verification(event: dict) -> bool:
+    """Determines whether an event requires verification before its labels can be trusted.
+    """
+    return event.get('score') is not None
 
 
 def get_events_with_verifications_and_tags(api, filter_params, target_tags=None):

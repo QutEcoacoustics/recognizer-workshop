@@ -68,7 +68,129 @@ def test_ensure_embeddings_exist(mock_db, mock_config, mock_api_client):
         kwargs = mock_add_parquet.call_args.kwargs
         assert kwargs['db'] == mock_db
         assert kwargs['api_client'] == mock_api_client
-        assert kwargs['dataset_name'] == "test_dataset"
+        assert kwargs['dataset_name'] == 'fetched_labels'
+        assert kwargs['filter_dict'] is None
+
+
+def test_ensure_embeddings_exist_passes_filter_dict(mock_db, mock_config, mock_api_client):
+    """filter_dict passed to ensure_embeddings_exist must be forwarded to add_parquet_to_db."""
+    items = {"s1.wav": {"Magpie": {"pos": [10.0]}}}
+    my_filter = {'site_id': 42}
+
+    with patch.object(target_module, 'build_parquet_source_list', return_value=[{'fake': 'data'}]),\
+         patch.object(target_module, 'add_parquet_to_db') as mock_add_parquet:
+
+        target_module.ensure_embeddings_exist(mock_db, mock_config, items, mock_api_client, filter_dict=my_filter)
+
+        kwargs = mock_add_parquet.call_args.kwargs
+        assert kwargs['filter_dict'] == my_filter
+
+
+def test_add_labels_to_db_finds_embedding_in_search_set(mock_db, mock_config):
+    """
+    When the embedding is in the search_set dataset, it should be found and the label added.
+    """
+    source_url = "http://test.wav"
+    mock_config.search_dataset_name = "search_set"
+
+    def get_embeddings_side_effect(dataset_name, source_id):
+        if dataset_name == 'search_set':
+            return np.array([101])
+        return np.array([])  # not in fetched_labels
+
+    mock_db.get_embeddings_by_source.side_effect = get_embeddings_side_effect
+
+    mock_src = MagicMock()
+    mock_src.offsets = [10.0]
+    mock_db.get_embedding_source.return_value = mock_src
+    mock_db.get_labels.return_value = []
+
+    items = {source_url: {"Magpie": {"pos": [10.0]}}}
+    with patch.object(target_module, 'ensure_embeddings_exist'):
+        results = target_module.add_labels_to_db(mock_db, mock_config, items)
+
+    outcome = results[source_url]["Magpie"]["pos"][0]
+    assert outcome['outcome'] == 'added'
+    args, _ = mock_db.insert_label.call_args
+    assert args[0].embedding_id == 101
+
+
+def test_add_labels_to_db_finds_embedding_in_fetched_labels(mock_db, mock_config):
+    """
+    When the embedding is in the fetched_labels dataset (not search_set), it should still be found.
+    """
+    source_url = "http://test.wav"
+    mock_config.search_dataset_name = "search_set"
+
+    def get_embeddings_side_effect(dataset_name, source_id):
+        if dataset_name == 'fetched_labels':
+            return np.array([202])
+        return np.array([])  # not in search_set
+
+    mock_db.get_embeddings_by_source.side_effect = get_embeddings_side_effect
+
+    mock_src = MagicMock()
+    mock_src.offsets = [10.0]
+    mock_db.get_embedding_source.return_value = mock_src
+    mock_db.get_labels.return_value = []
+
+    items = {source_url: {"Magpie": {"pos": [10.0]}}}
+    with patch.object(target_module, 'ensure_embeddings_exist'):
+        results = target_module.add_labels_to_db(mock_db, mock_config, items)
+
+    outcome = results[source_url]["Magpie"]["pos"][0]
+    assert outcome['outcome'] == 'added'
+    args, _ = mock_db.insert_label.call_args
+    assert args[0].embedding_id == 202
+
+
+def test_add_labels_to_db_embedding_not_found_in_either_dataset(mock_db, mock_config):
+    """
+    When the embedding is absent from both datasets, outcome is 'embedding_not_found'.
+    """
+    source_url = "http://test.wav"
+    mock_config.search_dataset_name = "search_set"
+    mock_db.get_embeddings_by_source.return_value = np.array([])  # empty for all datasets
+
+    items = {source_url: {"Magpie": {"pos": [10.0]}}}
+    with patch.object(target_module, 'ensure_embeddings_exist'):
+        results = target_module.add_labels_to_db(mock_db, mock_config, items)
+
+    outcome = results[source_url]["Magpie"]["pos"][0]
+    assert outcome['outcome'] == 'embedding_not_found'
+    mock_db.insert_label.assert_not_called()
+
+
+def test_add_labels_to_db_search_set_takes_precedence_over_fetched_labels(mock_db, mock_config):
+    """
+    When the same offset appears in both datasets, the search_set embedding_id is used.
+    """
+    source_url = "http://test.wav"
+    mock_config.search_dataset_name = "search_set"
+
+    def get_embeddings_side_effect(dataset_name, source_id):
+        if dataset_name == 'search_set':
+            return np.array([101])  # search_set embedding
+        return np.array([202])      # fetched_labels duplicate
+
+    def get_source_side_effect(eid):
+        mock_src = MagicMock()
+        mock_src.offsets = [10.0]  # same offset in both
+        return mock_src
+
+    mock_db.get_embeddings_by_source.side_effect = get_embeddings_side_effect
+    mock_db.get_embedding_source.side_effect = get_source_side_effect
+    mock_db.get_labels.return_value = []
+
+    items = {source_url: {"Magpie": {"pos": [10.0]}}}
+    with patch.object(target_module, 'ensure_embeddings_exist'):
+        results = target_module.add_labels_to_db(mock_db, mock_config, items)
+
+    outcome = results[source_url]["Magpie"]["pos"][0]
+    assert outcome['outcome'] == 'added'
+    # search_set id (101) must win over fetched_labels id (202)
+    args, _ = mock_db.insert_label.call_args
+    assert args[0].embedding_id == 101
 
 
 def test_add_labels_to_db_logic(mock_db, mock_config):

@@ -6,9 +6,57 @@ The user supplies comma-separated IDs for one or more of projects, regions, and 
 """
 import panel as pn
 
+from recognizer_workshop.app.services.baw_insertions import get_last_filter_for_dataset
 from recognizer_workshop.app.services.baw_filters import parse_csv_ints, normalize_first_filter
 
-def build_filter_editor(getter_fn, setter_fn, vm):
+
+def resolve_filters_for_editor(
+    getter_fn,
+    vm,
+    *,
+    dataset_priority: list[str] | None = None,
+    fallback_to_legacy: bool = True,
+):
+    """Resolve filters from page state first, then optional DB metadata fallbacks.
+
+    Priority order:
+    1. getter_fn() result, if present
+    2. latest filter from baw_insertions for each dataset in dataset_priority order
+    3. legacy baw_filters metadata (if fallback_to_legacy=True)
+    """
+    current = getter_fn()
+    if current and current[0]:
+        return current
+
+    if not (vm and getattr(vm, "eng", None) and getattr(vm.eng, "db", None)):
+        return current
+
+    db = vm.eng.db
+
+    for dataset_name in (dataset_priority or []):
+        latest = get_last_filter_for_dataset(db, dataset_name)
+        if latest:
+            return [latest]
+
+    if fallback_to_legacy:
+        try:
+            legacy = db.get_metadata('baw_filters')
+            legacy_filters = legacy.get('filters', None)
+            if legacy_filters and legacy_filters[0]:
+                return legacy_filters
+        except KeyError:
+            pass
+
+    return current
+
+def build_filter_editor(
+    getter_fn,
+    setter_fn,
+    vm,
+    *,
+    dataset_priority: list[str] | None = None,
+    fallback_to_legacy: bool = True,
+):
     """
     A reusable component for displaying and editing a single BAW filter,
     where the user selects the filter type from a dropdown.
@@ -58,13 +106,21 @@ def build_filter_editor(getter_fn, setter_fn, vm):
             return None
         return {selected_key: {"in": id_list}}
 
+    def _resolved_filters():
+        return resolve_filters_for_editor(
+            getter_fn,
+            vm,
+            dataset_priority=dataset_priority,
+            fallback_to_legacy=fallback_to_legacy,
+        )
+
     def _update_save_state(*_):
-        current = normalize_first_filter(getter_fn())
+        current = normalize_first_filter(_resolved_filters())
         candidate = _parse_editor_value()
         btn_save.disabled = (candidate is None) or (candidate == current)
 
     def _show_edit_mode():
-        has_existing = normalize_first_filter(getter_fn()) is not None
+        has_existing = normalize_first_filter(_resolved_filters()) is not None
         edit_controls.objects = (
             [filter_type_select, ids_input, btn_save, btn_cancel]
             if has_existing else
@@ -90,7 +146,7 @@ def build_filter_editor(getter_fn, setter_fn, vm):
         return f"**{display_name}:** `{ids_str}`"
 
     def _update_display():
-        filters = getter_fn()
+        filters = _resolved_filters()
         filter_display.object = _format_filters(filters)
         if filters and filters[0]:
             container.objects = [display_view]
@@ -99,7 +155,7 @@ def build_filter_editor(getter_fn, setter_fn, vm):
 
     def _populate_editors():
         """Populates the edit fields based on the current filter."""
-        filters = getter_fn()
+        filters = _resolved_filters()
         if filters and filters[0]:
             filter_dict = filters[0]
             key = next(iter(filter_dict), 'projects.id') # Default to projects.id
@@ -122,7 +178,7 @@ def build_filter_editor(getter_fn, setter_fn, vm):
             vm.notify("Please enter at least one numeric ID.", "warn")
             return
 
-        if candidate == normalize_first_filter(getter_fn()):
+        if candidate == normalize_first_filter(_resolved_filters()):
             return
         
         try:

@@ -190,6 +190,7 @@ def test_sample_filter_pages_paging_and_caching(mock_api_client, tmp_path):
         filter_params=filter_params,
         save_path=save_dir,
         page_size=page_size,
+        workers=1,
         use_cache=True
     )
 
@@ -223,6 +224,7 @@ def test_sample_filter_pages_paging_and_caching(mock_api_client, tmp_path):
         filter_params=filter_params,
         save_path=save_dir,
         page_size=page_size,
+        workers=1,
         use_cache=True
     )
 
@@ -233,6 +235,31 @@ def test_sample_filter_pages_paging_and_caching(mock_api_client, tmp_path):
     
     # 2. API should NOT have been called
     mock_api_client.baw_filter.assert_not_called()
+
+
+def test_sample_filter_pages_small_limit_does_not_fetch_every_page(mock_api_client, tmp_path):
+    save_dir = tmp_path / "cache_small_limit"
+    filter_params = {"filter": {"id": {"gt": 0}}}
+
+    mock_api_client.baw_filter.return_value = {
+        "data": [{"id": i} for i in range(500)],
+        "meta": {"paging": {"total": 430_000}},
+    }
+
+    data, cache_path = sample_filter_pages(
+        api=mock_api_client,
+        model="audio_recordings",
+        filter_params=filter_params,
+        save_path=save_dir,
+        page_size=500,
+        limit=50,
+        use_cache=False,
+    )
+
+    assert len(data) == 500
+    assert cache_path.exists()
+    assert mock_api_client.baw_filter.call_count == 1
+    assert mock_api_client.baw_filter.call_args_list[0].kwargs["qsp"]["page"] == 1
 
 
 @pytest.mark.integration

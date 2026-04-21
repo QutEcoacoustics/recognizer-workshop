@@ -152,3 +152,20 @@ def mock_api_client():
     """
     client = MagicMock()
     return client
+
+
+def pytest_runtest_logreport(report):
+    """Pytest hook: print skip reasons to stdout so IDE runners show them.
+
+    This helps VS Code and other runners surface why a test was skipped
+    (e.g., missing/invalid tokens or unreachable service).
+    """
+    if report.when == "call" and getattr(report, "skipped", False):
+        # Prefer the longreprtext if available (readable full message)
+        reason = getattr(report, "longreprtext", None)
+        if reason is None:
+            reason = getattr(report, "longrepr", "(no reason provided)")
+        # Print a concise single-line message for IDE output
+        for line in str(reason).splitlines():
+            # Print each line so it's visible in test runner output
+            print(f"SKIPPED {report.nodeid}: {line}")
