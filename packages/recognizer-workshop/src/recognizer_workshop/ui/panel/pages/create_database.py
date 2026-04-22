@@ -151,7 +151,6 @@ def build(vm):
                     pn.state.curdoc.add_next_tick_callback(_apply_update)
                 else:
                     _apply_update()
-
             log.info("Starting database creation: max_files=%s, max_embeddings=%s", max_files.value, max_embeddings.value)
 
             task = DatabaseCreationTask(
