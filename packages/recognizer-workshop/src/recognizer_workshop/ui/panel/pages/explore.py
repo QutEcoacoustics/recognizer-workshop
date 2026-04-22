@@ -55,8 +55,8 @@ def build(vm):
 
     def _update_status():
         """Checks for the cache files and updates the UI accordingly."""
-        if not vm.eng:
-            status_pane.object = "⚠️ Engine not initialized. Please start it on the 'Config' tab."
+        if not vm.eng or not vm.eng.is_db_loaded:
+            status_pane.object = "⚠️ Database not loaded. Please initialize the engine on the 'Config' tab."
             btn_generate.disabled = True
             plot_pane.clear()
             return

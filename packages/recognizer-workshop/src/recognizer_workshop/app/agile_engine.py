@@ -101,6 +101,11 @@ class agile_state:
         return total
 
     @property
+    def is_db_loaded(self) -> bool:
+        """True when the database has been successfully initialised via init_db()."""
+        return self.db is not None
+
+    @property
     def has_fetched_labels_ready(self) -> bool:
         """True when there are fetched labels available to add to DB."""
         return self.count_fetched_labels(self.fetched_label_result_sets) > 0
@@ -126,7 +131,12 @@ class agile_state:
         if not any(Path(self.config.db_path).glob("*.sqlite")) and not any(Path(self.config.db_path).glob("*.usearch")):
             raise ValueError(f'No valid DB files found in {self.config.db_path}. Please check the path.')
         
-        self.db = sqlite_usearch_impl_mod.ThreadedSQLiteUsearchDB.create(self.config.db_path)
+        try:
+            self.db = sqlite_usearch_impl_mod.ThreadedSQLiteUsearchDB.create(self.config.db_path)
+        except Exception as e:
+            log.exception(f"Failed to initialize DB at {self.config.db_path}")
+            raise RuntimeError(f"DB initialization failed: {e}") from e
+
         self.db_model_config = self.db.get_metadata('model_config')
         
         self.model_class = model_configs.get_model_class(self.db_model_config.model_key)

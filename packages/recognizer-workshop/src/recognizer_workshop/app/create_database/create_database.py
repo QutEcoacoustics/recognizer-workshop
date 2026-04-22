@@ -1,5 +1,6 @@
 import logging
 import sys
+import threading
 from pathlib import Path
 from typing import Callable
 from etils import epath
@@ -63,6 +64,7 @@ def create_database_from_baw(
         max_files: int = -1,
         use_cache: bool = True,
         progress_callback: Callable[[dict], None] | None = None,
+        stop_event: threading.Event | None = None,
 ):
 
     if progress_callback is not None:
@@ -108,6 +110,7 @@ def create_database_from_baw(
         config=config,
         filter_dict=filter_params['filter'] if filter_params is not None else None,
         progress_callback=progress_callback,
+        stop_event=stop_event,
     )
 
 
@@ -126,6 +129,7 @@ def convert_parquet(
     api_client = None,
     filter_dict: dict | None = None,
     progress_callback: Callable[[dict], None] | None = None,
+    stop_event: threading.Event | None = None,
     ):
  
     # put all kwargs in a dict
@@ -139,6 +143,7 @@ def convert_parquet(
         "source_map_fn": source_map_fn,
         "filter_dict": filter_dict,
         "progress_callback": progress_callback,
+        "stop_event": stop_event,
     }
     db_path = Path(db_path).expanduser()
     has_sqlite = db_path.exists() and any(db_path.glob("*.sqlite"))
@@ -646,6 +651,7 @@ def add_parquet_to_existing_db(
     source_map_fn = _DEFAULT,
     filter_dict: dict | None = None,
     progress_callback: Callable[[dict], None] | None = None,
+    stop_event: threading.Event | None = None,
 ):
     
     if db_type == 'sqlite_usearch':
@@ -666,6 +672,7 @@ def add_parquet_to_existing_db(
         hop_size_s=hop_size_s,
         filter_dict=filter_dict,
         progress_callback=progress_callback,
+        stop_event=stop_event,
     )
 
     return db
@@ -694,6 +701,7 @@ def add_parquet_to_db(
     hop_size_s: float = 5.0,
     filter_dict: dict | None = None,
     progress_callback: Callable[[dict], None] | None = None,
+    stop_event: threading.Event | None = None,
 ):
     """Adds parquet files to an existing hoplite database."""
     
@@ -745,6 +753,9 @@ def add_parquet_to_db(
 
     log.info("Starting to ingest parquet files into database")
     for df in tqdm.tqdm(iterator, desc="ingest"):
+        if stop_event is not None and stop_event.is_set():
+            log.info("Stop requested, halting ingestion after %d files", files_processed)
+            break
         if max_count > 0:
             remaining = max_count - db.count_embeddings()
             if remaining <= 0:
@@ -788,6 +799,7 @@ def add_parquet_to_db(
             "files_processed": files_processed,
             "total_inserted": total_inserted,
             "final_embeddings": num_embeddings,
+            "stop_reason": "user_stopped" if (stop_event is not None and stop_event.is_set()) else "completed",
         })
 
     return db

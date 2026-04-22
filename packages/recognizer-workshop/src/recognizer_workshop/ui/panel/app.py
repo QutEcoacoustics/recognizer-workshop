@@ -162,7 +162,18 @@ def build_app(vm):
         sizing_mode="stretch_width",
         min_height=500,
         scroll=True,
+        dynamic=True,
     )
+
+    # Tab indices that require a loaded database (0-indexed):
+    # 2=Labelled examples, 3=Search, 4=Explore, 5=Train, 6=Refine, 7=Inference
+    _DB_REQUIRED_TABS = [2, 3, 4, 5, 6, 7]
+
+    @pn.depends(vm.obs.ensure("engine_state").param.version, watch=True)
+    def _update_disabled_tabs(_=None):
+        tabs.disabled_tabs = [] if (vm.eng and vm.eng.is_db_loaded) else _DB_REQUIRED_TABS
+
+    _update_disabled_tabs()  # Apply initial state
 
 
 

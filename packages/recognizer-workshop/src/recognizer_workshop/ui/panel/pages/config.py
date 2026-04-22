@@ -570,7 +570,9 @@ def build(vm):
 
     def _make_engine(_):
 
-        # anything observing engine_state will check for updates
+        # Null out the engine so observers see a clean "no engine" state
+        # while re-initialization is in progress.
+        vm.eng = None
         vm.obs.bump("engine_state")
 
         try:
@@ -597,14 +599,18 @@ def build(vm):
             sync_config_to_ui()
 
             # initialise the database
+            db_error: Exception | None = None
             try:
                 db_success = vm.eng.init_db()
             except Exception as e:
                 db_success = False
+                db_error = e
                 log.exception("Database initialization error: %s", e)
 
             if db_success:
                 vm.notify("Database initialized", "success")
+            elif db_error is not None:
+                vm.notify(f"Database initialization failed: {db_error}", "error")
             else:
                 vm.notify("Database initialization failed", "error")
 
