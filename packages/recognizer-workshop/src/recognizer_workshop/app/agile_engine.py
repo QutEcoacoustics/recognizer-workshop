@@ -134,8 +134,8 @@ class agile_state:
         try:
             self.db = sqlite_usearch_impl_mod.ThreadedSQLiteUsearchDB.create(self.config.db_path)
         except Exception as e:
-            log.error(f"Failed to initialize DB at {self.config.db_path}: {e}")
-            raise RuntimeError(f"DB initialization failed: {e}")
+            log.exception(f"Failed to initialize DB at {self.config.db_path}")
+            raise RuntimeError(f"DB initialization failed: {e}") from e
 
         self.db_model_config = self.db.get_metadata('model_config')
         
