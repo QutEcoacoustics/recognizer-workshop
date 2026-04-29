@@ -51,14 +51,16 @@ def run_health_check(db) -> HealthCheckResult:
     # Count labels that reference missing embeddings
     orphaned_labels = 0
     if missing:
-        missing_set = set(missing)
         cursor = db._get_cursor()
-        placeholders = ','.join('?' * len(missing))
-        cursor.execute(
-            f"SELECT COUNT(*) FROM hoplite_labels WHERE embedding_id IN ({placeholders})",
-            missing,
-        )
-        orphaned_labels = cursor.fetchone()[0]
+        max_sqlite_variables = 900
+        for start in range(0, len(missing), max_sqlite_variables):
+            batch = missing[start:start + max_sqlite_variables]
+            placeholders = ",".join("?" * len(batch))
+            cursor.execute(
+                f"SELECT COUNT(*) FROM hoplite_labels WHERE embedding_id IN ({placeholders})",
+                batch,
+            )
+            orphaned_labels += cursor.fetchone()[0]
 
     return HealthCheckResult(
         total_sqlite_embeddings=total_sqlite,
