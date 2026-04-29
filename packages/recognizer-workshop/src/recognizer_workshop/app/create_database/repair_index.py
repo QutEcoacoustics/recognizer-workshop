@@ -68,8 +68,9 @@ def _get_arids_from_sources(source_urls):
     items = []
     for url in source_urls:
         domain, arid = extract_domain_and_arid(url)
-        if arid is not None and arid not in seen:
-            seen.add(arid)
+        key = (domain, arid)
+        if arid is not None and key not in seen:
+            seen.add(key)
             items.append({'id': arid, 'domain': domain, 'source_url': url})
     return items
 
