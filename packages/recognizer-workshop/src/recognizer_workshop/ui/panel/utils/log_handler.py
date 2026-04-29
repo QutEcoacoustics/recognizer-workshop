@@ -2,7 +2,6 @@ import logging
 from collections import deque
 from datetime import datetime
 import panel as pn
-import threading
 
 
 class PanelLogHandler(logging.Handler):
