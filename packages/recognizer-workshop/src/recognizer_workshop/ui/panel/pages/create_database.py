@@ -242,6 +242,58 @@ def build(vm):
     _update_button_state()
     _update_cache_toggle_state()
 
+    # --- Health Check ---
+    btn_health_check = pn.widgets.Button(name="Check DB Health", button_type="warning", icon="stethoscope")
+    health_check_result = pn.pane.Markdown("", sizing_mode="stretch_width")
+
+    # --- Repair Index ---
+    btn_repair = pn.widgets.Button(name="Repair Index", button_type="danger", icon="tool", visible=False)
+    repair_status = pn.pane.Markdown("", sizing_mode="stretch_width")
+
+    async def _run_health_check(_):
+        if not vm.eng or not vm.eng.db:
+            health_check_result.object = "⚠️ No database loaded. Please initialize the engine on the Config tab first."
+            return
+        btn_health_check.disabled = True
+        btn_health_check.name = "Checking..."
+        btn_repair.visible = False
+        repair_status.object = ""
+        try:
+            result = await asyncio.get_event_loop().run_in_executor(None, vm.eng.db_health_check)
+            health_check_result.object = f"```\n{result}\n```"
+            if not result.is_healthy:
+                btn_repair.visible = True
+        except Exception as e:
+            health_check_result.object = f"❌ Health check failed: {e}"
+        finally:
+            btn_health_check.disabled = False
+            btn_health_check.name = "Check DB Health"
+
+    btn_health_check.on_click(_run_health_check)
+
+    async def _run_repair(_):
+        btn_repair.disabled = True
+        btn_repair.name = "Repairing..."
+        repair_status.object = "⏳ Downloading parquet files and rebuilding index..."
+        try:
+            stats = await asyncio.get_event_loop().run_in_executor(None, vm.eng.repair_db_index)
+            lines = [
+                "**Repair complete:**",
+                f"- Sources processed: {stats['sources']}",
+                f"- Embeddings added: {stats['embeddings_added']}",
+                f"- Embeddings skipped (already present): {stats['embeddings_skipped']}",
+                f"- Errors: {stats['errors']}",
+            ]
+            repair_status.object = "\n".join(lines)
+            await _run_health_check(None)
+        except Exception as e:
+            repair_status.object = f"❌ Repair failed: {e}"
+        finally:
+            btn_repair.disabled = False
+            btn_repair.name = "Repair Index"
+
+    btn_repair.on_click(_run_repair)
+
     return pn.Column(
         pn.Row("## Create New Database from BAW", pn.Spacer(), database_help_btn),
         pn.pane.Alert("This tool will build a new database in the directory specified in your current project configuration.", alert_type="info"),
@@ -267,5 +319,11 @@ def build(vm):
         progress_bar,
         status_pane,
         progress_pane,
+        pn.layout.Divider(),
+        pn.Row("## Database Health Check"),
+        pn.Row(btn_health_check, align="start"),
+        health_check_result,
+        pn.Row(btn_repair, align="start"),
+        repair_status,
         sizing_mode="stretch_width"
     )

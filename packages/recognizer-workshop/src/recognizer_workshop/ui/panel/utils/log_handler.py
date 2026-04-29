@@ -2,6 +2,7 @@ import logging
 from collections import deque
 from datetime import datetime
 import panel as pn
+import threading
 
 
 class PanelLogHandler(logging.Handler):
@@ -76,11 +77,21 @@ class PanelLogHandler(logging.Handler):
             self.handleError(record)
 
     def _update_pane(self):
-        """Update the pane with current buffer contents."""
-        # Join with newlines and wrap in code block for monospace font
-        #content = "```\n" + "\n".join(self.log_buffer) + "\n```"
+        """Update the pane with current buffer contents, thread-safe."""
         content = ''.join(self.log_buffer)
-        self.pane.object = content
+
+        def _apply():
+            self.pane.object = content
+
+        try:
+            doc = pn.state.curdoc
+            if doc and doc.session_context:
+                doc.add_next_tick_callback(_apply)
+            else:
+                _apply()
+        except Exception:
+            # Fallback: direct update (e.g. during startup before doc exists)
+            _apply()
 
     def clear(self):
         """Clear all logs."""
