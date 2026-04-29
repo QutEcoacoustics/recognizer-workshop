@@ -28,6 +28,8 @@ from recognizer_workshop.app.services.db_labels.fetch_baw_labels import labels_f
 from recognizer_workshop.app.services.db_labels.add_db_labels import add_labels_to_db
 from recognizer_workshop.app.services.db_labels.db_labels_info import get_db_summary, get_label_counts
 from recognizer_workshop.app.services.db_labels.dataclasses import LabelName
+from recognizer_workshop.app.create_database.db_health_check import run_health_check
+from recognizer_workshop.app.create_database.repair_index import repair_index
 from recognizer_workshop.app.services.baw_insertions import get_last_filter_for_dataset
 from recognizer_workshop.app.services.inference.inference import run_inference as inference_service_run_inference
 
@@ -655,7 +657,37 @@ class agile_state:
     def db_summary(self):
         """Debugging/sanity checking to see what's in the database"""
         return get_db_summary(self.db)
-    
+
+    def db_health_check(self):
+        """Check consistency between SQLite embeddings and usearch index."""
+        if not self.db:
+            raise ValueError("Database not initialized.")
+        try:
+            result = run_health_check(self.db)
+            log.info("Health check result: %s", result)
+            return result
+        except Exception:
+            log.exception("Health check failed")
+            raise
+
+    def repair_db_index(self, progress_callback=None, stop_event=None):
+        """Rebuild the usearch index by re-downloading parquet files."""
+        if not self.db:
+            raise ValueError("Database not initialized.")
+        if not self.baw_api_clients:
+            raise ValueError("No BAW API clients available. Configure authentication first.")
+        try:
+            stats = repair_index(
+                self.db,
+                self.baw_api_clients,
+                progress_callback=progress_callback,
+                stop_event=stop_event,
+            )
+            log.info("Index repair complete: %s", stats)
+            return stats
+        except Exception:
+            log.exception("Index repair failed")
+            raise
 
     def get_baw_filters(self):
         """returns a list of audio_recording filter critera used to create the database
