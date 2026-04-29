@@ -20,6 +20,8 @@ from recognizer_workshop.app.create_database.repair_index import (
     _get_arids_from_sources,
 )
 
+PROD_URL = os.getenv("PROD_API_BASE_URL", "https://api.ecosounds.org")
+
 
 # ---------------------------------------------------------------------------
 # Unit tests (no API needed)
@@ -100,7 +102,7 @@ def test_repair_index_roundtrip(prod_api_client, test_db_path):
     def capture_progress(event):
         progress_events.append(event)
 
-    stats = repair_index(db, prod_api_client, progress_callback=capture_progress)
+    stats = repair_index(db, {PROD_URL: prod_api_client}, progress_callback=capture_progress)
 
     assert stats["embeddings_added"] == 500
     assert stats["errors"] == 0
@@ -131,7 +133,7 @@ def test_repair_index_idempotent(prod_api_client, test_db_path):
     db = sqlite_usearch_impl.SQLiteUsearchDB.create(test_db_path)
     assert db.ui.size == 500
 
-    stats = repair_index(db, prod_api_client)
+    stats = repair_index(db, {PROD_URL: prod_api_client})
 
     # All 500 should be skipped since they already exist in the index
     assert stats["embeddings_skipped"] == 500

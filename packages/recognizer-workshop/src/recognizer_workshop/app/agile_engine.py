@@ -674,12 +674,12 @@ class agile_state:
         """Rebuild the usearch index by re-downloading parquet files."""
         if not self.db:
             raise ValueError("Database not initialized.")
-        if not self.active_client:
-            raise ValueError("No BAW API client available. Configure authentication first.")
+        if not self.baw_api_clients:
+            raise ValueError("No BAW API clients available. Configure authentication first.")
         try:
             stats = repair_index(
                 self.db,
-                self.active_client,
+                self.baw_api_clients,
                 progress_callback=progress_callback,
                 stop_event=stop_event,
             )

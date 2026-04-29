@@ -77,7 +77,7 @@ def _get_arids_from_sources(source_urls):
 
 def repair_index(
     db,
-    api_client,
+    api_clients: dict,
     *,
     prefetch: int = 1,
     analysis_job_id: int = BAW_ANALYSIS_JOB_ID,
@@ -94,7 +94,7 @@ def repair_index(
 
     Args:
         db: A ThreadedSQLiteUsearchDB instance (already opened; index may be empty).
-        api_client: A baw_api client for downloading parquet files.
+        api_clients: A dict mapping domain URLs to baw_api client instances.
         prefetch: Number of parquet downloads to queue ahead.
         analysis_job_id: BAW analysis job ID for parquet lookup.
         analysis_name: BAW analysis name for parquet lookup.
@@ -104,8 +104,8 @@ def repair_index(
     Returns:
         dict with repair statistics.
     """
-    if api_client is None:
-        raise ValueError("api_client is required to download parquet files for index repair.")
+    if not api_clients:
+        raise ValueError("At least one api_client is required to download parquet files for index repair.")
 
     # 1. Build the lookup: (source_url, offset) -> embedding_id
     log.info("Building source/offset -> embedding_id mapping from SQLite...")
@@ -117,6 +117,14 @@ def repair_index(
     # 2. Get unique ARIDs to download
     items = _get_arids_from_sources(source_offset_map.keys())
     log.info("Need to download %d parquet files", len(items))
+
+    # Check which domains we need and warn about missing clients
+    required_domains = {item['domain'] for item in items}
+    available_domains = set(api_clients.keys())
+    missing_domains = required_domains - available_domains
+    if missing_domains:
+        log.warning("No API client for domain(s): %s — sources from these domains will be skipped", missing_domains)
+        items = [item for item in items if item['domain'] in available_domains]
 
     if not items:
         return {
@@ -132,10 +140,11 @@ def repair_index(
         db.ui.load()
         db._ui_loaded = True
 
-    # Build a source_map_fn to convert parquet source column values to DB source URLs
-    source_map_fn = functools.partial(
-        convert_source_to_original_url, domain=api_client.base_url
-    )
+    # Build per-domain source_map_fns to convert parquet source column values to DB source URLs
+    source_map_fns = {
+        domain: functools.partial(convert_source_to_original_url, domain=domain)
+        for domain in available_domains
+    }
 
     embeddings_added = 0
     embeddings_skipped = 0
@@ -158,7 +167,8 @@ def repair_index(
         })
 
     def fetch_one(item):
-        buf = api_client.analysis_result_file(
+        client = api_clients[item['domain']]
+        buf = client.analysis_result_file(
             arid=item['id'],
             analysis_job_id=analysis_job_id,
             analysis_name=analysis_name,
@@ -205,7 +215,8 @@ def repair_index(
 
                 for _, row in df.iterrows():
                     # Convert parquet source value to the URL format stored in SQLite
-                    row_source = source_map_fn(row['source'])
+                    # using the domain-specific source_map_fn
+                    row_source = source_map_fns[item['domain']](row['source'])
                     row_offset = float(row['offset'])
 
                     offset_map = source_offset_map.get(row_source)

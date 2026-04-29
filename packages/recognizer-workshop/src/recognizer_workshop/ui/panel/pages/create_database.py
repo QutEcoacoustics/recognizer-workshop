@@ -259,7 +259,7 @@ def build(vm):
         btn_repair.visible = False
         repair_status.object = ""
         try:
-            result = await asyncio.get_event_loop().run_in_executor(None, vm.eng.db_health_check)
+            result = await asyncio.get_running_loop().run_in_executor(None, vm.eng.db_health_check)
             health_check_result.object = f"```\n{result}\n```"
             if not result.is_healthy:
                 btn_repair.visible = True
@@ -276,7 +276,7 @@ def build(vm):
         btn_repair.name = "Repairing..."
         repair_status.object = "⏳ Downloading parquet files and rebuilding index..."
         try:
-            stats = await asyncio.get_event_loop().run_in_executor(None, vm.eng.repair_db_index)
+            stats = await asyncio.get_running_loop().run_in_executor(None, vm.eng.repair_db_index)
             lines = [
                 "**Repair complete:**",
                 f"- Sources processed: {stats['sources']}",
