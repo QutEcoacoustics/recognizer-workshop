@@ -7,7 +7,6 @@ that every embedding vector matches the original.
 """
 
 import os
-import shutil
 from pathlib import Path
 
 import numpy as np
