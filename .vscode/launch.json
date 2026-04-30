@@ -5,6 +5,7 @@
   "version": "0.2.0",
   "configurations": [
 
+
     {
         // use the serve module in the recognizer_workshop package
         // to run the panel app 
@@ -18,7 +19,8 @@
         "env": {
             "CUDA_VISIBLE_DEVICES": "-1",
             "TF_METAL_DEVICE_NS": "0",
-            "TF_ENABLE_ONEDNN_OPTS": "0"
+            "TF_ENABLE_ONEDNN_OPTS": "0",
+            "RW_APP_SETTINGS": "local_scripts/app_settings.json"
         }
     }
     {
