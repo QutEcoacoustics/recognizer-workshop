@@ -37,5 +37,15 @@ class AppSettings:
             raise AttributeError(f"AppSettings has no setting named '{name}'")
         return self._settings.get(name)
 
+    @property
+    def enabled_domains(self) -> Dict[str, Any]:
+        """Return the subset of baw_settings.domains filtered by enabled_workbenches."""
+        enabled = self._settings.get("enabled_workbenches", [])
+        return {
+            name: info
+            for name, info in baw_settings.domains.items()
+            if name in enabled
+        }
+
 # Singleton instance
 app_settings = AppSettings()

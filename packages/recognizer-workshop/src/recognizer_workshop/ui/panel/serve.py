@@ -12,6 +12,7 @@ print(f"[startup] app module imported {time.time():.3f}")
 import logging, sys, os, asyncio
 from pathlib import Path
 from baw_helpers.settings import baw_settings
+from recognizer_workshop.app.app_settings import app_settings
 
 def _setup_logging():
     logdir = Path.home() / ".recognizer-workshop" / "logs"

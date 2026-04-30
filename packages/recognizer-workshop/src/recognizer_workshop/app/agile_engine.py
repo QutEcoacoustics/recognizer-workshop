@@ -23,6 +23,7 @@ from recognizer_workshop.perch_hoplite_custom_modifications import sqlite_usearc
 from baw_helpers.baw_api import baw_api
 
 from recognizer_workshop.app.agile_config import AgileConfig
+from recognizer_workshop.app.app_settings import app_settings  # noqa: F401 — triggers baw_settings override
 from recognizer_workshop.app.services.events.upload_detections import upload_detections
 from recognizer_workshop.app.services.db_labels.fetch_baw_labels import labels_from_event_taggings
 from recognizer_workshop.app.services.db_labels.add_db_labels import add_labels_to_db

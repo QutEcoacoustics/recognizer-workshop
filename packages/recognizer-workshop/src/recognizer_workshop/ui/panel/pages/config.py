@@ -10,6 +10,7 @@ from recognizer_workshop.app.agile_engine import agile_state
 from recognizer_workshop.app.services.app_data import get_recent_files
 from recognizer_workshop.ui.panel.utils.delayed_init import run_after_render
 from baw_helpers.settings import baw_settings
+from recognizer_workshop.app.app_settings import app_settings
 
 log = logging.getLogger(__name__)
 
@@ -172,7 +173,7 @@ def build(vm):
 
         return
 
-    for workbench_name, workbench_info in baw_settings.domains.items():
+    for workbench_name, workbench_info in app_settings.enabled_domains.items():
         api_domain = str(workbench_info["api"])
         website_domain = str(workbench_info["website"])
         website_with_scheme = website_domain if website_domain.startswith(("http://", "https://")) else f"https://{website_domain}"
@@ -256,7 +257,7 @@ def build(vm):
         if not vm.config.baw_config:
             vm.config.baw_config = {
                 str(workbench_info["api"]): ""
-                for workbench_info in baw_settings.domains.values()
+                for workbench_info in app_settings.enabled_domains.values()
             }
 
     def toggle_advanced_visibility(*_):
