@@ -275,8 +275,39 @@ def build(vm):
         btn_repair.disabled = True
         btn_repair.name = "Repairing..."
         repair_status.object = "⏳ Downloading parquet files and rebuilding index..."
+
+        def _progress_callback(event):
+            stage = event.get("stage", "")
+            if stage in ("starting", "complete"):
+                return
+            files_done = event.get("files_processed", 0)
+            total_files = event.get("total_files", 0)
+            added = event.get("embeddings_added", 0)
+            expected = event.get("embeddings_expected", 0)
+            skipped = event.get("embeddings_skipped", 0)
+            errs = event.get("errors", 0)
+            text = (
+                f"⏳ **Repairing index...**\n\n"
+                f"- Files processed: {files_done} / {total_files}\n"
+                f"- Embeddings added: {added} / {expected}\n"
+                f"- Skipped (already present): {skipped}\n"
+                f"- Errors: {errs}"
+            )
+            def _apply():
+                repair_status.object = text
+            try:
+                doc = pn.state.curdoc
+                if doc and doc.session_context:
+                    doc.add_next_tick_callback(_apply)
+                else:
+                    _apply()
+            except Exception:
+                _apply()
+
         try:
-            stats = await asyncio.get_running_loop().run_in_executor(None, vm.eng.repair_db_index)
+            stats = await asyncio.get_running_loop().run_in_executor(
+                None, lambda: vm.eng.repair_db_index(progress_callback=_progress_callback)
+            )
             lines = [
                 "**Repair complete:**",
                 f"- Sources processed: {stats['sources']}",
