@@ -1,4 +1,7 @@
-# SPDX-FileCopyrightText: 2025-present peichins <peichins@users.noreply.github.com>
-#
-# SPDX-License-Identifier: MIT
-__version__ = "2.0.0"
+import importlib.metadata
+
+try:
+	__version__ = importlib.metadata.version("recognizer-workshop")
+except importlib.metadata.PackageNotFoundError:
+	# Fallback if not installed as a package
+	__version__ = "unknown"

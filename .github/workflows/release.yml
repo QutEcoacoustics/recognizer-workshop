@@ -1,0 +1,62 @@
+name: Manual Release
+
+# Trigger this manually from the GitHub Actions UI
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (no commit/tag/release)'
+        required: false
+        default: 'false'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      # Fetches the repository code. 
+      # fetch-depth: 0 is required so git can download all past tags and commit history.
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Finds generates a new version if there have bene changes since the last tag. 
+      - name: Compute new version (and check for changes)
+        id: version
+        run: |
+          version=$(bash scripts/get_version.sh)
+          if [ -z "$version" ]; then
+            echo "No changes since last release (ignoring version.txt). Exiting."
+            echo "changed=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          echo "new_version=$version" >> $GITHUB_OUTPUT
+          echo "changed=true" >> $GITHUB_OUTPUT
+
+      - name: Update version.txt
+        if: steps.version.outputs.changed == 'true'
+        run: |
+          echo "${{ steps.version.outputs.new_version }}" > version.txt
+
+      - name: Commit version.txt
+        if: steps.version.outputs.changed == 'true' && github.event.inputs.dry_run != 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add version.txt
+          git commit -m "Release ${{ steps.version.outputs.new_version }}"
+          git push origin HEAD:main
+
+      - name: Tag and create GitHub release
+        if: steps.version.outputs.changed == 'true' && github.event.inputs.dry_run != 'true'
+        run: |
+          git tag -a "v${{ steps.version.outputs.new_version }}" -m "Release v${{ steps.version.outputs.new_version }}"
+          git push origin "v${{ steps.version.outputs.new_version }}"
+
+      - name: Create GitHub release
+        if: steps.version.outputs.changed == 'true' && github.event.inputs.dry_run != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.new_version }}
+          name: v${{ steps.version.outputs.new_version }}
+          generate_release_notes: true
