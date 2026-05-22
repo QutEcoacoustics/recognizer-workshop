@@ -3,11 +3,6 @@ name: Manual Release
 # Trigger this manually from the GitHub Actions UI
 on:
   workflow_dispatch:
-    inputs:
-      dry_run:
-        description: 'Dry run (no commit/tag/release)'
-        required: false
-        default: 'false'
 
 permissions:
   contents: write
@@ -30,43 +25,42 @@ jobs:
           version=$(bash scripts/get_version.sh)
           if [ -z "$version" ]; then
             echo "No changes since last release (ignoring package version.txt files). Exiting."
-            {
-              echo "changed=false"
-            } >> "$GITHUB_OUTPUT"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          {
-            echo "new_version<<EOF"
-            echo "$version"
-            echo "EOF"
-            echo "changed=true"
-          } >> "$GITHUB_OUTPUT"
+          echo "new_version=$version" >> "$GITHUB_OUTPUT"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
 
       - name: Update package version files
-        if: steps.version.outputs.changed == 'true'
+        if: steps.version.outputs.changed == 'true' && github.ref_name == 'main'
         run: |
           echo "${{ steps.version.outputs.new_version }}" > packages/recognizer-workshop/version.txt
           echo "${{ steps.version.outputs.new_version }}" > packages/baw-helpers/version.txt
 
       - name: Commit package version files
-        if: steps.version.outputs.changed == 'true' && github.event.inputs.dry_run != 'true'
+        if: steps.version.outputs.changed == 'true' && github.ref_name == 'main'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add packages/recognizer-workshop/version.txt packages/baw-helpers/version.txt
           git commit -m "Release ${{ steps.version.outputs.new_version }}"
-          git push origin HEAD:main
+          git push origin "HEAD:${GITHUB_REF_NAME}"
 
-      - name: Tag and create GitHub release
-        if: steps.version.outputs.changed == 'true' && github.event.inputs.dry_run != 'true'
+      - name: Tag and push release tag
+        if: steps.version.outputs.changed == 'true' && github.ref_name == 'main'
         run: |
           git tag -a "v${{ steps.version.outputs.new_version }}" -m "Release v${{ steps.version.outputs.new_version }}"
           git push origin "v${{ steps.version.outputs.new_version }}"
 
       - name: Create GitHub release
-        if: steps.version.outputs.changed == 'true' && github.event.inputs.dry_run != 'true'
+        if: steps.version.outputs.changed == 'true' && github.ref_name == 'main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.new_version }}
           name: v${{ steps.version.outputs.new_version }}
           generate_release_notes: true
+
+      - name: Warn when run outside main
+        if: steps.version.outputs.changed == 'true' && github.ref_name != 'main'
+        run: |
+          echo "Release write steps are skipped because this workflow run is on ref '${GITHUB_REF_NAME}', not 'main'."
