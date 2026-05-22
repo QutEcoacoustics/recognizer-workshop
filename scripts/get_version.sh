@@ -10,8 +10,8 @@
 # Exit immediately if a command exits with a non-zero status
 set -e
 
-# Find the last tag
-last_tag=$(git tag --list --sort=-creatordate | grep -E '^v?[0-9]{4}\.[0-9]{1,2}\.[0-9]{1,2}(\.[0-9]+)?$' | head -n1 || true)
+# Find the last tag in strict CalVer format: yyyy.mm.dd or yyyy.mm.dd.n
+last_tag=$(git tag --list --sort=-creatordate | grep -E '^v?[0-9]{4}\.[0-9]{2}\.[0-9]{2}(\.[0-9]+)?$' | head -n1 || true)
 
 # Determine the base commit to check against
 if [ -z "$last_tag" ]; then
@@ -22,8 +22,8 @@ else
     base=$last_tag
 fi
 
-# Check for changes, ignoring version.txt
-changed=$(git diff --name-only "$base" HEAD | grep -v '^version.txt$' || true)
+# Check for changes, ignoring package-local version files
+changed=$(git diff --name-only "$base" HEAD | grep -Ev '^packages/(recognizer-workshop|baw-helpers)/version\.txt$' || true)
 
 if [ -z "$changed" ]; then
     echo "No changes found since last release. Exiting." >&2
@@ -32,8 +32,8 @@ if [ -z "$changed" ]; then
     exit 0
 fi
 
-# Compute the new version
-today=$(date -u +%Y.%-m.%-d)
+# Compute the new version in strict CalVer date format (UTC)
+today=$(date -u +%Y.%m.%d)
 
 if [[ "$last_tag" =~ ^v?($today)(\.([0-9]+))?$ ]]; then
     suffix=${BASH_REMATCH[3]:-0}

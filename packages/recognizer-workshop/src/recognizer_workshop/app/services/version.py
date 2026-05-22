@@ -30,12 +30,12 @@ def get_version_status_string(include_git_hash: bool = False) -> str:
     """Return a UI-ready version status string.
 
     Format:
-    - "version: <value> (<short_hash>)" when both are available and include_git_hash is True
-    - "version: <value>" when git hash is unavailable or include_git_hash is False
+    - "<value> (<short_hash>)" when both are available and include_git_hash is True
+    - "<value>" when git hash is unavailable or include_git_hash is False
     """
     installed_version = get_installed_package_version() or "unknown"
     commit_hash = get_git_commit_short()
 
     if include_git_hash and commit_hash:
-        return f"version: {installed_version} ({commit_hash})"
-    return f"version: {installed_version}"
+        return f"{installed_version} ({commit_hash})"
+    return installed_version

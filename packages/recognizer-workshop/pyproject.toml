@@ -107,7 +107,7 @@ allow-direct-references = true
 
 
 [tool.hatch.version]
-path = "../../version.txt"
+path = "version.txt"
 
 [tool.hatch.envs.default]
 

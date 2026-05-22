@@ -9,6 +9,9 @@ on:
         required: false
         default: 'false'
 
+permissions:
+  contents: write
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -26,24 +29,31 @@ jobs:
         run: |
           version=$(bash scripts/get_version.sh)
           if [ -z "$version" ]; then
-            echo "No changes since last release (ignoring version.txt). Exiting."
-            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "No changes since last release (ignoring package version.txt files). Exiting."
+            {
+              echo "changed=false"
+            } >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          echo "new_version=$version" >> $GITHUB_OUTPUT
-          echo "changed=true" >> $GITHUB_OUTPUT
+          {
+            echo "new_version<<EOF"
+            echo "$version"
+            echo "EOF"
+            echo "changed=true"
+          } >> "$GITHUB_OUTPUT"
 
-      - name: Update version.txt
+      - name: Update package version files
         if: steps.version.outputs.changed == 'true'
         run: |
-          echo "${{ steps.version.outputs.new_version }}" > version.txt
+          echo "${{ steps.version.outputs.new_version }}" > packages/recognizer-workshop/version.txt
+          echo "${{ steps.version.outputs.new_version }}" > packages/baw-helpers/version.txt
 
-      - name: Commit version.txt
+      - name: Commit package version files
         if: steps.version.outputs.changed == 'true' && github.event.inputs.dry_run != 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add version.txt
+          git add packages/recognizer-workshop/version.txt packages/baw-helpers/version.txt
           git commit -m "Release ${{ steps.version.outputs.new_version }}"
           git push origin HEAD:main
 
