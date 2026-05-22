@@ -3,5 +3,12 @@
   "python.testing.unittestEnabled": false,
   "python.testing.autoTestDiscoverOnSaveEnabled": false,
   "python.testing.pytestArgs": ["-vv", "."],
-  "python.testing.debugLaunchConfig": "Pytest Debug"
+  "python.testing.debugLaunchConfig": "Pytest Debug",
+  "python-envs.pythonProjects": [
+    {
+      "path": ".",
+      "envManager": "ms-python.python:conda",
+      "packageManager": "ms-python.python:conda"
+    }
+  ]
 }

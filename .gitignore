@@ -28,3 +28,6 @@ build/
 
 *.sqlite-shm
 *.sqlite-wal
+
+# a bug keeps creating these files in the root of the project
+db/*

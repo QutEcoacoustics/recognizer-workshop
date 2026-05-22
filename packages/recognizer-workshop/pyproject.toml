@@ -1,6 +1,8 @@
+
 [build-system]
-requires = ["hatchling", "hatch-vcs"]
+requires = ["hatchling"]
 build-backend = "hatchling.build"
+
 
 [project]
 name = "recognizer-workshop"
@@ -8,7 +10,7 @@ dynamic = ["version"]
 description = 'Tools for developing recognizers with perch-hoplite and Ecosounds'
 readme = "../../README.md"
 requires-python = ">=3.11"
-license = { file = "../../LICENSE" } 
+license = { file = "../../LICENSE" }
 keywords = []
 authors = [
   { name = "peichins", email = "peichins@users.noreply.github.com" },
@@ -103,16 +105,9 @@ recognizer-workshop-serve = "recognizer_workshop.ui.panel.serve:main"
 [tool.hatch.metadata]
 allow-direct-references = true
 
-[tool.hatch.version]
-source = "vcs"
 
-[tool.hatch.version.raw-options]
-# Accept calendar tags like 2026.04.15 or v2026.04.15, with optional build increment.
-tag_regex = '^v?(?P<version>\\d{4}\\.\\d{1,2}\\.\\d{1,2}(?:\\.\\d+)?)$'
-# Keep wheel versions clean and predictable from tags.
-version_scheme = "no-guess-dev"
-local_scheme = "no-local-version"
-fallback_version = "0.0.0"
+[tool.hatch.version]
+path = "version.txt"
 
 [tool.hatch.envs.default]
 
