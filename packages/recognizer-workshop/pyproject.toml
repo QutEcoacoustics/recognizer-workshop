@@ -107,7 +107,9 @@ allow-direct-references = true
 
 
 [tool.hatch.version]
+source = "regex"
 path = "version.txt"
+pattern = "^(?P<version>.+)$"
 
 [tool.hatch.envs.default]
 
@@ -149,6 +151,9 @@ exclude_lines = [
 [tool.pytest.ini_options]
 testpaths = [
     "tests",
+]
+markers = [
+  "integration: tests that hit real services or need tokens",
 ]
 
 

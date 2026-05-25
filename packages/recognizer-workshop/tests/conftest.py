@@ -15,17 +15,46 @@ import pyarrow.parquet as pq
 
 from perch_hoplite.db import sqlite_usearch_impl
 
-# We rely on your baw_api to read .env (BAW_AUTH_TOKEN) itself via update_token().
-# No need to load dotenv here unless you want to; keeping it minimal.
-
 PROD_URL = os.getenv("PROD_API_BASE_URL", "https://api.ecosounds.org")
 STAGING_URL = os.getenv("STAGING_API_BASE_URL", "https://api.staging.ecosounds.org")
 
+
+def _handle_token_issue(message: str):
+    """
+    We can specify whether to skip or fail tests when tokens are missing/invalid via PYTEST_TOKEN_POLICY env var.
+    - If PYTEST_TOKEN_POLICY=fail, the test suite will fail immediately with an error message.
+    - If PYTEST_TOKEN_POLICY=skip (default), the test suite will skip with a message indicating the token issue.
+    
+    The primary use case for this is so we can streamline CI tests for PRs so that they skip integration tests. 
+    For releases, which happen less often, we want to fail if tokens are missing/invalid to catch issues. 
+    
+    """
+    token_policy = os.getenv("PYTEST_TOKEN_POLICY", "fail").strip().lower()
+    if token_policy not in {"skip", "fail"}:
+        token_policy = "skip"
+    if token_policy == "fail":
+        pytest.fail(message)
+    pytest.skip(message)
+
+
+def pytest_collection_modifyitems(config, items):
+    """
+    Dynamically add 'integration' marker to tests that require real API tokens, 
+    so they can be easily skipped in CI or run separately.
+    """
+    _ = config
+    for item in items:
+        fixturenames = getattr(item, "fixturenames", [])
+        if "prod_api_client" in fixturenames or "staging_api_client" in fixturenames:
+            item.add_marker(pytest.mark.integration)
+
 @pytest.fixture(scope="session")
 def prod_api_client():
-    """Integration client against production BAW. Skips if token invalid/unreachable.
-    We pass token=None and allow_prompt=False so your client will read BAW_AUTH_TOKEN from .env.
-    """
+    """Integration client against production BAW. Skips if token invalid/unreachable."""
+    token = os.getenv("ECOSOUNDS_API_TOKEN")
+    if not token:
+        _handle_token_issue("ECOSOUNDS_API_TOKEN missing/invalid or service unavailable")
+
     try:
         from baw_helpers.baw_api import baw_api
     except Exception:
@@ -34,17 +63,47 @@ def prod_api_client():
         baw_api = baw_mod.baw_api
 
     client = baw_api(
-        token=None,                 # read BAW_AUTH_TOKEN from .env
+        token=token,
         base_url=PROD_URL,
         allow_prompt=False,     
     )
 
     # Quick health check; skip suite if not valid or service down
     if not client.test_token(default=False):
-        pytest.skip("BAW_AUTH_TOKEN missing/invalid or service unavailable")
+        _handle_token_issue("ECOSOUNDS_API_TOKEN missing/invalid or service unavailable")
 
     return client
 
+
+
+@pytest.fixture(scope="session")
+def staging_api_client():
+    """
+    Integration client against STAGING BAW. 
+    Requires STAGING_API_TOKEN env var to be set, otherwise skips.
+    """
+    token = os.getenv("STAGING_API_TOKEN")
+    if not token:
+        _handle_token_issue("STAGING_API_TOKEN not found in env")
+
+    try:
+        from baw_helpers.baw_api import baw_api
+    except Exception:
+        from baw_helpers import baw_api as baw_mod
+        baw_api = baw_mod.baw_api
+
+    # Initialize client against Staging
+    client = baw_api(
+        token=token,
+        base_url=STAGING_URL,
+        allow_prompt=False,
+    )
+
+    # Health check
+    if not client.test_token(default=False):
+        _handle_token_issue("STAGING_API_TOKEN is invalid or Staging service is unavailable")
+
+    return client
 
 @pytest.fixture
 def mock_embedding_model():
@@ -135,32 +194,3 @@ def create_fake_parquet_bytes():
         return buf
     return _create
 
-
-@pytest.fixture(scope="session")
-def staging_api_client():
-    """
-    Integration client against STAGING BAW. 
-    Requires 'STAGING_API_TOKEN' env var to be set, otherwise skips.
-    """
-    token = os.getenv("STAGING_API_TOKEN")
-    if not token:
-        pytest.skip("Skipping staging integration test: STAGING_API_TOKEN not found in env.")
-
-    try:
-        from baw_helpers.baw_api import baw_api
-    except Exception:
-        from baw_helpers import baw_api as baw_mod
-        baw_api = baw_mod.baw_api
-
-    # Initialize client against Staging
-    client = baw_api(
-        token=token,
-        base_url=STAGING_URL,
-        allow_prompt=False,
-    )
-
-    # Health check
-    if not client.test_token(default=False):
-        pytest.skip("STAGING_API_TOKEN is invalid or Staging service is unavailable")
-
-    return client

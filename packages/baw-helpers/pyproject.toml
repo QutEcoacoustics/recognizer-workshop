@@ -19,7 +19,9 @@ dependencies = [
 ]
 
 [tool.hatch.version]
+source = "regex"
 path = "version.txt"
+pattern = "^(?P<version>.+)$"
 
 [tool.setuptools.packages.find]
 where = ["src"]
