@@ -43,10 +43,7 @@ log "Installing perch-hoplite==${PERCH_HOPLITE_VERSION}"
 python -m pip install --force-reinstall "perch-hoplite==${PERCH_HOPLITE_VERSION}"
 
 log "Installing core test/runtime dependencies"
-python -m pip install --upgrade "${NUMPY_SPEC}" scipy pytest "${PANDAS_SPEC}" "pyarrow==${PYARROW_VERSION}" pyarrow
-
-log "Re-pinning pyarrow==${PYARROW_VERSION}"
-python -m pip install --force-reinstall "pyarrow==${PYARROW_VERSION}"
+python -m pip install --upgrade "${NUMPY_SPEC}" scipy pytest "${PANDAS_SPEC}" "pyarrow==${PYARROW_VERSION}"
 
 log "Installing workspace packages in editable mode"
 python -m pip install --no-cache-dir -e "${ROOT_DIR}/packages/baw-helpers"

@@ -35,7 +35,10 @@ def _handle_token_issue(message: str):
     """
     token_policy = os.getenv("PYTEST_TOKEN_POLICY", "fail").strip().lower()
     if token_policy not in {"skip", "fail"}:
-        token_policy = "skip"
+        pytest.fail(
+            "Invalid PYTEST_TOKEN_POLICY value "
+            f"{token_policy!r}. Expected one of: 'skip', 'fail'."
+        )
     if token_policy == "fail":
         pytest.fail(message)
     pytest.skip(message)

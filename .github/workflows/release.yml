@@ -6,8 +6,9 @@ on:
     inputs:
       dry_run:
         description: "Run preflight only (no commit/tag/release)"
+        type: boolean
         required: false
-        default: "false"
+        default: false
 
 permissions:
   contents: write
@@ -72,7 +73,7 @@ jobs:
           PYTEST_TOKEN_POLICY=fail python -m pytest -q packages/recognizer-workshop/tests packages/baw-helpers/tests
 
       - name: Commit package version files
-        if: steps.version.outputs.changed == 'true' && github.ref_name == 'main' && github.event.inputs.dry_run != 'true'
+        if: steps.version.outputs.changed == 'true' && github.ref_name == 'main' && !inputs.dry_run
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -81,13 +82,13 @@ jobs:
           git push origin "HEAD:${GITHUB_REF_NAME}"
 
       - name: Tag and push release tag
-        if: steps.version.outputs.changed == 'true' && github.ref_name == 'main' && github.event.inputs.dry_run != 'true'
+        if: steps.version.outputs.changed == 'true' && github.ref_name == 'main' && !inputs.dry_run
         run: |
           git tag -a "v${{ steps.version.outputs.new_version }}" -m "Release v${{ steps.version.outputs.new_version }}"
           git push origin "v${{ steps.version.outputs.new_version }}"
 
       - name: Create GitHub release
-        if: steps.version.outputs.changed == 'true' && github.ref_name == 'main' && github.event.inputs.dry_run != 'true'
+        if: steps.version.outputs.changed == 'true' && github.ref_name == 'main' && !inputs.dry_run
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.new_version }}
@@ -95,7 +96,7 @@ jobs:
           generate_release_notes: true
 
       - name: Dry-run summary
-        if: steps.version.outputs.changed == 'true' && github.ref_name == 'main' && github.event.inputs.dry_run == 'true'
+        if: steps.version.outputs.changed == 'true' && github.ref_name == 'main' && inputs.dry_run
         run: |
           echo "Dry-run mode: preflight completed; commit/tag/release steps were intentionally skipped."
 
