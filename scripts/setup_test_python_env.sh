@@ -23,6 +23,8 @@ set -euo pipefail
 PERCH_HOPLITE_VERSION="${PERCH_HOPLITE_VERSION:-0.1.3}"
 PYARROW_VERSION="${PYARROW_VERSION:-22.0.0}"
 TF_SPEC="${TF_SPEC:-tensorflow>=2.20,<3}"
+NUMPY_SPEC="${NUMPY_SPEC:-numpy>=2.0,<2.1}"
+PANDAS_SPEC="${PANDAS_SPEC:-pandas>=2.1.1,<3}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -41,7 +43,7 @@ log "Installing perch-hoplite==${PERCH_HOPLITE_VERSION}"
 python -m pip install --force-reinstall "perch-hoplite==${PERCH_HOPLITE_VERSION}"
 
 log "Installing core test/runtime dependencies"
-python -m pip install --upgrade numpy scipy pytest pandas "pyarrow==${PYARROW_VERSION}" pyarrow
+python -m pip install --upgrade "${NUMPY_SPEC}" scipy pytest "${PANDAS_SPEC}" "pyarrow==${PYARROW_VERSION}" pyarrow
 
 log "Re-pinning pyarrow==${PYARROW_VERSION}"
 python -m pip install --force-reinstall "pyarrow==${PYARROW_VERSION}"
@@ -49,6 +51,9 @@ python -m pip install --force-reinstall "pyarrow==${PYARROW_VERSION}"
 log "Installing workspace packages in editable mode"
 python -m pip install --no-cache-dir -e "${ROOT_DIR}/packages/baw-helpers"
 python -m pip install --no-cache-dir -e "${ROOT_DIR}/packages/recognizer-workshop"
+
+log "Re-applying compatibility pins after editable installs"
+python -m pip install --force-reinstall "${NUMPY_SPEC}" "${PANDAS_SPEC}" "pyarrow==${PYARROW_VERSION}"
 
 log "Running pip check"
 python -m pip check
