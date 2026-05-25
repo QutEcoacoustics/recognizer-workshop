@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up test environment
+        run: |
+          bash scripts/setup_test_python_env.sh
+
+      - name: Run tests
+        run: |
+          PYTEST_TOKEN_POLICY=skip python -m pytest -q packages/recognizer-workshop/tests packages/baw-helpers/tests

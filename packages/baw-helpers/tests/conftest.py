@@ -5,8 +5,7 @@ from unittest.mock import patch
 from dotenv import load_dotenv, find_dotenv
 from unittest.mock import MagicMock
 
-# Load .env once for the whole test run (so STAGING_API_TOKEN is available)
-# If you already load it elsewhere, you can remove this.
+# Load .env once for the whole test run so token vars are available in local dev.
 load_dotenv(find_dotenv(usecwd=True), override=False)
 
 STAGING_URL = os.getenv("STAGING_API_BASE_URL", "https://api.staging.ecosounds.org")
@@ -64,11 +63,10 @@ def staging_token():
 
 @pytest.fixture(scope="session")
 def prod_token():
-    """Provide the prod token or skip the whole suite."""
-    # We explicitly check for BAW_AUTH_TOKEN here so we can skip gracefully
-    token = os.getenv("BAW_AUTH_TOKEN")
+    """Provide the prod token from ECOSOUNDS_API_TOKEN."""
+    token = os.getenv("ECOSOUNDS_API_TOKEN")
     if not token:
-        pytest.skip("requires BAW_AUTH_TOKEN in environment or .env")
+        pytest.skip("requires ECOSOUNDS_API_TOKEN in environment or .env")
     return token
 
 

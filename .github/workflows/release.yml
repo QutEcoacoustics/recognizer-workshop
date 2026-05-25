@@ -3,22 +3,33 @@ name: Manual Release
 # Trigger this manually from the GitHub Actions UI
 on:
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Run preflight only (no commit/tag/release)"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: write
+
+env:
+  # Use consistent test-facing token names.
+  ECOSOUNDS_API_TOKEN: ${{ secrets.ECOSOUNDS_API_TOKEN }}
+  STAGING_API_TOKEN: ${{ secrets.STAGING_API_TOKEN }}
 
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      # Fetches the repository code. 
+      # Fetches the repository code.
       # fetch-depth: 0 is required so git can download all past tags and commit history.
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # Finds generates a new version if there have bene changes since the last tag. 
+      # Generates a new version if there have been changes since the last tag.
       - name: Compute new version (and check for changes)
         id: version
         run: |
@@ -32,13 +43,37 @@ jobs:
           echo "changed=true" >> "$GITHUB_OUTPUT"
 
       - name: Update package version files
-        if: steps.version.outputs.changed == 'true' && github.ref_name == 'main'
+        if: steps.version.outputs.changed == 'true'
         run: |
           echo "${{ steps.version.outputs.new_version }}" > packages/recognizer-workshop/version.txt
           echo "${{ steps.version.outputs.new_version }}" > packages/baw-helpers/version.txt
 
+      - name: Validate API tokens (fail fast)
+        if: steps.version.outputs.changed == 'true'
+        run: |
+          bash scripts/test_env_tokens.sh
+
+      - name: Set up Python
+        if: steps.version.outputs.changed == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Preflight test environment setup
+        if: steps.version.outputs.changed == 'true'
+        run: |
+          python -m venv .release-preflight-venv
+          source .release-preflight-venv/bin/activate
+          bash scripts/setup_test_python_env.sh
+
+      - name: Preflight full tests
+        if: steps.version.outputs.changed == 'true'
+        run: |
+          source .release-preflight-venv/bin/activate
+          PYTEST_TOKEN_POLICY=fail python -m pytest -q packages/recognizer-workshop/tests packages/baw-helpers/tests
+
       - name: Commit package version files
-        if: steps.version.outputs.changed == 'true' && github.ref_name == 'main'
+        if: steps.version.outputs.changed == 'true' && github.ref_name == 'main' && !inputs.dry_run
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -47,18 +82,23 @@ jobs:
           git push origin "HEAD:${GITHUB_REF_NAME}"
 
       - name: Tag and push release tag
-        if: steps.version.outputs.changed == 'true' && github.ref_name == 'main'
+        if: steps.version.outputs.changed == 'true' && github.ref_name == 'main' && !inputs.dry_run
         run: |
           git tag -a "v${{ steps.version.outputs.new_version }}" -m "Release v${{ steps.version.outputs.new_version }}"
           git push origin "v${{ steps.version.outputs.new_version }}"
 
       - name: Create GitHub release
-        if: steps.version.outputs.changed == 'true' && github.ref_name == 'main'
+        if: steps.version.outputs.changed == 'true' && github.ref_name == 'main' && !inputs.dry_run
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.new_version }}
           name: v${{ steps.version.outputs.new_version }}
           generate_release_notes: true
+
+      - name: Dry-run summary
+        if: steps.version.outputs.changed == 'true' && github.ref_name == 'main' && inputs.dry_run
+        run: |
+          echo "Dry-run mode: preflight completed; commit/tag/release steps were intentionally skipped."
 
       - name: Warn when run outside main
         if: steps.version.outputs.changed == 'true' && github.ref_name != 'main'
