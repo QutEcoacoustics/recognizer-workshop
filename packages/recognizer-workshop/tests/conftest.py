@@ -6,6 +6,7 @@ import pytest
 import numpy as np
 import shutil
 from scipy.io.wavfile import write as write_wav
+from dotenv import load_dotenv, find_dotenv
 
 from unittest.mock import MagicMock
 
@@ -15,6 +16,9 @@ import pyarrow.parquet as pq
 
 from perch_hoplite.db import sqlite_usearch_impl
 
+# Load .env once for the test session so token-based integration fixtures work in local dev.
+load_dotenv(find_dotenv(usecwd=True), override=False)
+
 PROD_URL = os.getenv("PROD_API_BASE_URL", "https://api.ecosounds.org")
 STAGING_URL = os.getenv("STAGING_API_BASE_URL", "https://api.staging.ecosounds.org")
 
@@ -22,8 +26,8 @@ STAGING_URL = os.getenv("STAGING_API_BASE_URL", "https://api.staging.ecosounds.o
 def _handle_token_issue(message: str):
     """
     We can specify whether to skip or fail tests when tokens are missing/invalid via PYTEST_TOKEN_POLICY env var.
-    - If PYTEST_TOKEN_POLICY=fail, the test suite will fail immediately with an error message.
-    - If PYTEST_TOKEN_POLICY=skip (default), the test suite will skip with a message indicating the token issue.
+    - If PYTEST_TOKEN_POLICY=fail(default), the test suite will fail immediately with an error message.
+    - If PYTEST_TOKEN_POLICY=skip, the test suite will skip with a message indicating the token issue.
     
     The primary use case for this is so we can streamline CI tests for PRs so that they skip integration tests. 
     For releases, which happen less often, we want to fail if tokens are missing/invalid to catch issues. 
