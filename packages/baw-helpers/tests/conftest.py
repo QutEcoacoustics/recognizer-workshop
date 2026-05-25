@@ -64,11 +64,10 @@ def staging_token():
 
 @pytest.fixture(scope="session")
 def prod_token():
-    """Provide the prod token or skip the whole suite."""
-    # We explicitly check for BAW_AUTH_TOKEN here so we can skip gracefully
-    token = os.getenv("BAW_AUTH_TOKEN")
+    """Provide the prod token from ECOSOUNDS_API_TOKEN and map it to BAW_AUTH_TOKEN."""
+    token = os.getenv("ECOSOUNDS_API_TOKEN")
     if not token:
-        pytest.skip("requires BAW_AUTH_TOKEN in environment or .env")
+        pytest.skip("requires ECOSOUNDS_API_TOKEN in environment or .env")
     return token
 
 

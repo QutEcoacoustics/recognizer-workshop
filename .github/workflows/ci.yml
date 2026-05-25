@@ -20,16 +20,10 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install packages
+      - name: Set up test environment
         run: |
-          python -m venv .ci-venv
-          source .ci-venv/bin/activate
-          python -m pip install --upgrade pip
-          python -m pip install --no-cache-dir -e packages/baw-helpers
-          python -m pip install --no-cache-dir -e packages/recognizer-workshop
-          python -m pip install --upgrade pytest scipy
+          bash scripts/setup_test_python_env.sh
 
       - name: Run tests
         run: |
-          source .ci-venv/bin/activate
-          PYTEST_TOKEN_POLICY=skip pytest -q packages/recognizer-workshop/tests packages/baw-helpers/tests
+          PYTEST_TOKEN_POLICY=skip python -m pytest -q packages/recognizer-workshop/tests packages/baw-helpers/tests

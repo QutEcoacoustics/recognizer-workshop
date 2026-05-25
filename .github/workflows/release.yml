@@ -58,21 +58,18 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Preflight editable installs
+      - name: Preflight test environment setup
         if: steps.version.outputs.changed == 'true'
         run: |
           python -m venv .release-preflight-venv
           source .release-preflight-venv/bin/activate
-          python -m pip install --upgrade pip
-          python -m pip install --no-cache-dir -e packages/baw-helpers
-          python -m pip install --no-cache-dir -e packages/recognizer-workshop
+          bash scripts/setup_test_python_env.sh
 
       - name: Preflight full tests
         if: steps.version.outputs.changed == 'true'
         run: |
           source .release-preflight-venv/bin/activate
-          python -m pip install --upgrade pytest scipy
-          PYTEST_TOKEN_POLICY=fail pytest -q packages/recognizer-workshop/tests packages/baw-helpers/tests
+          PYTEST_TOKEN_POLICY=fail python -m pytest -q packages/recognizer-workshop/tests packages/baw-helpers/tests
 
       - name: Commit package version files
         if: steps.version.outputs.changed == 'true' && github.ref_name == 'main' && github.event.inputs.dry_run != 'true'
