@@ -16,19 +16,15 @@ def _fresh_baw_settings():
 
 
 @pytest.fixture()
-def _make_settings():
+def _make_settings(tmp_path):
     """Factory to create AppSettings with a given config file."""
     from recognizer_workshop.app.app_settings import AppSettings
 
     def _factory(config: dict | None = None, env_path: str | None = None):
         if config is not None and env_path is None:
-            import tempfile
-            f = tempfile.NamedTemporaryFile(
-                mode="w", suffix=".json", delete=False
-            )
-            json.dump(config, f)
-            f.close()
-            env_path = f.name
+            settings_file = tmp_path / "app_settings.json"
+            settings_file.write_text(json.dumps(config))
+            env_path = str(settings_file)
 
         env = {**os.environ}
         if env_path:
