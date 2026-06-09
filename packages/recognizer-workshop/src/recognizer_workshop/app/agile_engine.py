@@ -10,8 +10,6 @@ import logging
 from urllib.parse import urlparse
 
 from perch_hoplite.agile import audio_loader
-from perch_hoplite.agile import classifier
-from perch_hoplite.agile import classifier_data
 from perch_hoplite.agile import source_info
 from recognizer_workshop.perch_hoplite_custom_modifications import brutalism
 from perch_hoplite.db import score_functions
@@ -30,6 +28,7 @@ from recognizer_workshop.app.services.db_labels.fetch_baw_labels import labels_f
 from recognizer_workshop.app.services.db_labels.add_db_labels import add_labels_to_db
 from recognizer_workshop.app.services.db_labels.db_labels_info import get_db_summary, get_label_counts
 from recognizer_workshop.app.services.db_labels.dataclasses import LabelName
+from recognizer_workshop.app.services import training as training_service
 from recognizer_workshop.app.create_database.db_health_check import run_health_check
 from recognizer_workshop.app.create_database.repair_index import repair_index
 from recognizer_workshop.app.services.baw_insertions import get_last_filter_for_dataset
@@ -559,38 +558,25 @@ class agile_state:
                         train_ratio = 0.9,
                         batch_size = 128,
                         weak_negatives_batch_size = 128):
-        
         target_labels = self.get_target_labels()
 
-        data_manager = classifier_data.AgileDataManager(
-            target_labels=target_labels,
-            db=self.db,
-            train_ratio=train_ratio,
-            min_eval_examples=1,
-            batch_size=batch_size,
-            weak_negatives_batch_size=weak_negatives_batch_size,
-            rng=np.random.default_rng(seed=5))
-        log.info('Training for target labels : ')
-        log.info(data_manager.get_target_labels())
-        linear_classifier, eval_scores = classifier.train_linear_classifier(
-            data_manager=data_manager,
+        params = training_service.TrainClassifierParams(
             learning_rate=learning_rate,
             weak_neg_weight=weak_neg_weight,
-            num_train_steps=num_steps,
+            num_steps=num_steps,
+            train_ratio=train_ratio,
+            batch_size=batch_size,
+            weak_negatives_batch_size=weak_negatives_batch_size,
         )
-        log.info('\n' + '-' * 80)
-        top1 = eval_scores['top1_acc']
-        log.info(f'top-1      {top1:.3f}')
-        rocauc = eval_scores['roc_auc']
-        log.info(f'roc_auc    {rocauc:.3f}')
-        cmap = eval_scores['cmap']
-        log.info(f'cmap       {cmap:.3f}')
-        # self.classifier_params = params
-        # self.classifier_eval_scores = eval_scores
+        log.info('Training for target labels: %s', target_labels)
+        result = training_service.train_classifier(
+            db=self.db,
+            target_labels=target_labels,
+            params=params,
+        )
 
-        self.classifier = linear_classifier
-
-        return eval_scores
+        self.classifier = result.classifier_model
+        return result.eval_scores
 
 
 

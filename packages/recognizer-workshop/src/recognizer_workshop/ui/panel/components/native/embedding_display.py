@@ -258,6 +258,7 @@ class PanelEmbeddingDisplay(pn.Column):
         # tri-state per label: 0=skip, 1=pos, -1=neg
         self._label_states: Dict[str, int] = {lbl: 0 for lbl in self.labels}
         self._buttons: Dict[str, pn.widgets.Button] = {}
+        self._load_started = False
 
         # --- UI elements ---
         self._status = pn.pane.Markdown("", sizing_mode="stretch_width")
@@ -341,8 +342,18 @@ class PanelEmbeddingDisplay(pn.Column):
         )
         self[:] = [card]
 
-        # lazy load
-        pn.state.onload(self._load_and_render) if not pn.state.curdoc else pn.state.curdoc.add_next_tick_callback(self._load_and_render)
+        # lazy load: spawn an async task from the next tick so UI interactions
+        # are not blocked while multiple result cards are still loading.
+        if pn.state.curdoc:
+            pn.state.curdoc.add_next_tick_callback(self._start_load_task)
+        else:
+            pn.state.onload(self._start_load_task)
+
+    def _start_load_task(self):
+        if self._load_started:
+            return
+        self._load_started = True
+        asyncio.create_task(self._load_and_render())
 
 
 

@@ -253,6 +253,40 @@
                 <li><strong>Weak Negative Weight:</strong> Your database contains a lot of audio, most of which is probably not your target species. By taking some random clips from your unlabeled audio and treating them as negative examples, we can train on a wider variety of negative examples than what has been explicitly labeled as negative. However, because we don't know for sure that this process didn't choose a positive example by chance, we give each one less importance in the training.</li>
                 <li><strong>Weak Negatives Batch Size:</strong> How many of these randomly chosen examples to include for each batch (on top of the number in the strongly labeled batch).</li>
             </ul>
+
+            <h5>Training Metrics</h5>
+            <p>Metrics measuring performance on the testing split. Here is what each value means:</p>
+            <h6>Aggregate metrics:</h6>
+            <p>Threshold-independent metrics, measuring whether positive examples tend to have higher scores than negative examples:</p>
+            <ul>
+                <li><strong>Top-1 Accuracy (top1_acc):</strong> For each evaluation clip, checks whether the model's highest-scoring label is correct. A value of 0.80 means the top guess was correct for about 80% of evaluation clips.</li>
+                <li><strong>ROC AUC (roc_auc):</strong> Measures how well the model ranks true examples above false examples across all score thresholds. 0.5 is roughly random ranking, and 1.0 is perfect ranking.</li>
+                <li><strong>CMAP (cmap):</strong> Class mean average precision. Summarizes how well true positives are ranked near the top for each class, then averages across classes. Higher is better, especially when positives are rare.</li>
+
+            </ul>
+            <p>Threshold-dependent metrics, measuring whether positives tend to have positive scores and negatives tend to have negative scores:</p>
+            <ul>
+                <li><strong>Micro Precision:</strong> Precision computed by pooling all class decisions together: $TP / (TP + FP)$.</li>
+                <li><strong>Macro Precision:</strong> Precision computed per class and then averaged equally across classes.</li>
+                <li><strong>Micro Recall:</strong> Recall computed by pooling all class decisions together: $TP / (TP + FN)$.</li>
+                <li><strong>Macro Recall:</strong> Recall computed per class and then averaged equally across classes.</li>
+                <li><strong>Micro F1:</strong> F1 score from pooled counts across classes: $2TP / (2TP + FP + FN)$.</li>
+                <li><strong>Macro F1:</strong> F1 score computed per class and then averaged equally across classes.</li>
+            </ul>
+
+            <h6>Per class metrics:</h6>
+            <ul>
+                <li><strong>ROC AUC (Per Class) (roc_auc_individual):</strong> A separate ROC AUC value for each target class.</li>
+                <li><strong>CMAP (Per Class) (cmap_individual):</strong> A separate average precision value for each target class.</li>
+                <li><strong>TP (True Positives):</strong> Items where the class is present and the model predicted present.</li>
+                <li><strong>FP (False Positives):</strong> Items where the class is absent but the model predicted present.</li>
+                <li><strong>FN (False Negatives):</strong> Items where the class is present but the model predicted absent.</li>
+                <li><strong>TN (True Negatives):</strong> Items where the class is absent and the model predicted absent.</li>
+                <li><strong>Support:</strong> Number of true positive examples for that class in the evaluation set.</li>
+                <li><strong>Precision:</strong> For that class only, $TP / (TP + FP)$.</li>
+                <li><strong>Recall:</strong> For that class only, $TP / (TP + FN)$.</li>
+                <li><strong>F1:</strong> For that class only, harmonic mean of precision and recall: $2TP / (2TP + FP + FN)$.</li>
+            </ul>
         </div>
         
 
