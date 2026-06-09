@@ -485,11 +485,14 @@ class TestAgileConfig:
         assert config_ref2.models_folder == Path("models")
 
 
-    def test_save_as_resolves_relative_paths_in_memory(self, tmp_path: Path):
+    def test_save_as_resolves_relative_paths_in_memory(self, tmp_path: Path, monkeypatch):
         """After save_as, in-memory paths must be absolute (anchored to config dir)."""
         project_dir = tmp_path / "project"
         project_dir.mkdir()
         config_path = project_dir / "agile_config.json"
+
+        # Keep any auto-created relative folders isolated under tmp_path.
+        monkeypatch.chdir(project_dir)
 
         config = AgileConfig(db_path=Path("db"), models_folder=Path("models"))
         config.save_as(config_path)

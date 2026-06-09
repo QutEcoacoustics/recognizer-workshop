@@ -180,8 +180,7 @@ def build_filter_editor(
         candidate = _parse_editor_value()
         if candidate is None:
             vm.notify("Please enter at least one numeric ID.", "warn")
-            return
-        # 
+            return 
         if candidate == normalize_first_filter(_resolved_filters()):
             _update_display()
             return

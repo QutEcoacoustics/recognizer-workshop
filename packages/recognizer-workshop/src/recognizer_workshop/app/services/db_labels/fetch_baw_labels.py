@@ -114,7 +114,7 @@ def labels_from_event_taggings(api, filter_params, target_labels: List[LabelName
                     event['label_info'][tag_text] = 'positive'
                     summary_info['event_tag_counts']['retained_verification_not_required'] += 1
                 else:
-                    #event requires verification but none found for this tag → discard.
+                    # Event requires verification but none found for this tag → discard.
                     summary_info['event_tag_counts']['discarded_no_verification'] += 1
 
     # mutates events
