@@ -1,4 +1,5 @@
 import json
+import functools
 from pathlib import Path
 import numpy as np
 import random
@@ -9,8 +10,6 @@ import logging
 from urllib.parse import urlparse
 
 from perch_hoplite.agile import audio_loader
-from perch_hoplite.agile import classifier
-from perch_hoplite.agile import classifier_data
 from perch_hoplite.agile import source_info
 from recognizer_workshop.perch_hoplite_custom_modifications import brutalism
 from perch_hoplite.db import score_functions
@@ -29,6 +28,7 @@ from recognizer_workshop.app.services.db_labels.fetch_baw_labels import labels_f
 from recognizer_workshop.app.services.db_labels.add_db_labels import add_labels_to_db
 from recognizer_workshop.app.services.db_labels.db_labels_info import get_db_summary, get_label_counts
 from recognizer_workshop.app.services.db_labels.dataclasses import LabelName
+from recognizer_workshop.app.services import training as training_service
 from recognizer_workshop.app.create_database.db_health_check import run_health_check
 from recognizer_workshop.app.create_database.repair_index import repair_index
 from recognizer_workshop.app.services.baw_insertions import get_last_filter_for_dataset
@@ -558,38 +558,25 @@ class agile_state:
                         train_ratio = 0.9,
                         batch_size = 128,
                         weak_negatives_batch_size = 128):
-        
         target_labels = self.get_target_labels()
 
-        data_manager = classifier_data.AgileDataManager(
-            target_labels=target_labels,
-            db=self.db,
-            train_ratio=train_ratio,
-            min_eval_examples=1,
-            batch_size=batch_size,
-            weak_negatives_batch_size=weak_negatives_batch_size,
-            rng=np.random.default_rng(seed=5))
-        log.info('Training for target labels : ')
-        log.info(data_manager.get_target_labels())
-        linear_classifier, eval_scores = classifier.train_linear_classifier(
-            data_manager=data_manager,
+        params = training_service.TrainClassifierParams(
             learning_rate=learning_rate,
             weak_neg_weight=weak_neg_weight,
-            num_train_steps=num_steps,
+            num_steps=num_steps,
+            train_ratio=train_ratio,
+            batch_size=batch_size,
+            weak_negatives_batch_size=weak_negatives_batch_size,
         )
-        log.info('\n' + '-' * 80)
-        top1 = eval_scores['top1_acc']
-        log.info(f'top-1      {top1:.3f}')
-        rocauc = eval_scores['roc_auc']
-        log.info(f'roc_auc    {rocauc:.3f}')
-        cmap = eval_scores['cmap']
-        log.info(f'cmap       {cmap:.3f}')
-        # self.classifier_params = params
-        # self.classifier_eval_scores = eval_scores
+        log.info('Training for target labels: %s', target_labels)
+        result = training_service.train_classifier(
+            db=self.db,
+            target_labels=target_labels,
+            params=params,
+        )
 
-        self.classifier = linear_classifier
-
-        return eval_scores
+        self.classifier = result.classifier_model
+        return result.eval_scores
 
 
 
@@ -776,7 +763,7 @@ class agile_state:
             raise
 
 
-    def commit_fetched_labels(self):
+    def commit_fetched_labels(self, progress_callback=None):
         """Commit labels currently stored in engine fetched-label state."""
         self.labels_commit_state = 'running'
         self.labels_commit_error = None
@@ -786,7 +773,7 @@ class agile_state:
             if not self.has_fetched_labels_ready:
                 raise ValueError("No fetched labels are ready to commit.")
 
-            outcomes = self.commit_labels(self.fetched_label_result_sets)
+            outcomes = self.commit_labels(self.fetched_label_result_sets, progress_callback=progress_callback)
             self.fetched_label_outcomes = outcomes
 
             added_count = sum(
@@ -808,7 +795,7 @@ class agile_state:
             raise
 
 
-    def commit_labels(self, result_sets):
+    def commit_labels(self, result_sets, progress_callback=None):
         """
         Commits the provided result_sets to the DB.
         The Engine injects the DB and API client automatically.
@@ -825,16 +812,55 @@ class agile_state:
 
         all_outcomes_by_filter = []
 
+        total_filters = len(result_sets)
+
+        def _emit_filter_progress(event, *, filter_index, filter_params):
+            if not progress_callback:
+                return
+            progress_callback({
+                **event,
+                'filter_index': filter_index,
+                'total_filters': total_filters,
+                'filter_params': filter_params,
+            })
+
         for i, result_set in enumerate(result_sets):
             # The Engine does the heavy lifting of wiring up the dependencies
             filter_params = result_set.get('filter_params', {})
+            cur_filter_index = i + 1
+
+            if progress_callback:
+                progress_callback({
+                    'stage': 'filter_start',
+                    'filter_index': cur_filter_index,
+                    'total_filters': total_filters,
+                    'filter_params': filter_params,
+                    'message': f'Adding labels for filter {cur_filter_index}/{total_filters}...'
+                })
+
+            _progress_for_filter = functools.partial(
+                _emit_filter_progress,
+                filter_index=cur_filter_index,
+                filter_params=filter_params,
+            )
+
             outcomes = add_labels_to_db(
                 db=self.db, 
                 config=self.config, 
                 items=result_set["labels"], 
                 api_client=self.active_client,
                 filter_dict=filter_params or None,
+                progress_callback=_progress_for_filter,
             )
+
+            if progress_callback:
+                progress_callback({
+                    'stage': 'filter_complete',
+                    'filter_index': cur_filter_index,
+                    'total_filters': total_filters,
+                    'filter_params': filter_params,
+                    'message': f'Finished filter {cur_filter_index}/{total_filters}.'
+                })
 
             all_outcomes_by_filter.append({
                 'filter_desc': f"Filter {i+1}",

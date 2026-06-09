@@ -293,6 +293,34 @@ def build(vm):
             # Show details for embedding_not_found
             _show_outcome_details('', '', '', 'embedding_not_found')
 
+    def _format_add_progress_event(event: dict) -> str | None:
+        """Format add-label progress events into concise user-facing status text."""
+        stage = event.get('stage')
+        if event.get('message'):
+            return str(event['message'])
+
+        if stage == 'source_progress':
+            seen = event.get('candidates_seen', 0)
+            total = event.get('total_candidates', 0)
+            downloaded = event.get('files_processed', 0)
+            skipped = event.get('skipped_existing', 0)
+            return f"Checking recordings {seen}/{total} (downloaded {downloaded}, skipped {skipped})"
+
+        if stage == 'ingest_progress':
+            processed = event.get('files_processed', 0)
+            total = event.get('total_candidates')
+            added_this = event.get('added_this_file', 0)
+            total_added = event.get('total_inserted', 0)
+            if total:
+                return f"Ingesting parquet {processed}/{total} (+{added_this}, total added {total_added})"
+            return f"Ingesting parquet ({processed} files, total added {total_added})"
+
+        if stage == 'ingest_start':
+            total = event.get('total_candidates')
+            return f"Starting parquet ingest for {total} recordings..." if total else "Starting parquet ingest..."
+
+        return None
+
 
 
     def _fetch(_):
@@ -349,45 +377,76 @@ def build(vm):
         if not _has_ready_labels():
             return vm.notify("No fetched labels are ready to add. Fetch labels first.", "warn")
 
+        log.object = "Adding fetched labels to DB..."
         _sync_add_button_state()
+        doc = pn.state.curdoc
 
-        try:
-            outcomes_list = vm.eng.commit_fetched_labels()
-
-            # Show the results as a table with the outcome of adding each label
-            # each item in the outcomes list corresponds to a result_set, which corresponds to an audio recording filter. 
-            # we display the filter in a human-readable way
-            for i, item in enumerate(outcomes_list):
-                item['filter_desc'] = _format_filter_params_for_display(
-                    item['filter_params'], 
-                    fallback_name=f"Filter {i+1}"
-                )                
-
-            outcomes_df = _create_outcomes_summary_table(outcomes_list)
-            _ensure_tables()
-            
-            if outcomes_df is not None:
-                outcomes_table.value = outcomes_df
-                details_df = _create_outcomes_details_table(outcomes_list)
-                if details_df is not None:
-                    details_table.value = details_df
-                    details_title.object = f"### All Outcome Details ({len(details_df)} records)"
-                else:
-                    details_table.value = pd.DataFrame(columns=['Filter', 'Species', 'Type', 'Source', 'Offset', 'Outcome'])
-                    details_title.object = "### No outcome details available"
+        def _schedule(fn):
+            if doc:
+                doc.add_next_tick_callback(fn)
             else:
-                outcomes_table.value = pd.DataFrame()  # Use empty DataFrame instead of None
-                details_table.value = pd.DataFrame(columns=['Filter', 'Species', 'Type', 'Source', 'Offset', 'Outcome'])
-                details_title.object = ""
+                fn()
 
-                    
-            vm.notify("Labels added to DB.", "success")
-            _sync_status_from_engine()
-        except Exception as e:
-            _sync_status_from_engine()
-            _sync_add_button_state()
-            vm.notify(f"Insert failed: {e}", "error")
-            return
+        def _do_add():
+            try:
+                def _progress_callback(event: dict):
+                    msg = _format_add_progress_event(event)
+                    if not msg:
+                        return
+
+                    def _apply_progress():
+                        log.object = msg
+                        _sync_add_button_state()
+
+                    _schedule(_apply_progress)
+
+                outcomes_list = vm.eng.commit_fetched_labels(progress_callback=_progress_callback)
+
+                def _apply_success():
+                    # Show the results as a table with the outcome of adding each label
+                    # each item in the outcomes list corresponds to a result_set, which corresponds to an audio recording filter.
+                    # we display the filter in a human-readable way
+                    for i, item in enumerate(outcomes_list):
+                        item['filter_desc'] = _format_filter_params_for_display(
+                            item['filter_params'],
+                            fallback_name=f"Filter {i+1}"
+                        )
+
+                    outcomes_df = _create_outcomes_summary_table(outcomes_list)
+                    _ensure_tables()
+
+                    if outcomes_df is not None:
+                        outcomes_table.value = outcomes_df
+                        details_df = _create_outcomes_details_table(outcomes_list)
+                        if details_df is not None:
+                            details_table.value = details_df
+                            details_title.object = f"### All Outcome Details ({len(details_df)} records)"
+                        else:
+                            details_table.value = pd.DataFrame(columns=['Filter', 'Species', 'Type', 'Source', 'Offset', 'Outcome'])
+                            details_title.object = "### No outcome details available"
+                    else:
+                        outcomes_table.value = pd.DataFrame()  # Use empty DataFrame instead of None
+                        details_table.value = pd.DataFrame(columns=['Filter', 'Species', 'Type', 'Source', 'Offset', 'Outcome'])
+                        details_title.object = ""
+
+                    vm.notify("Labels added to DB.", "success")
+                    _sync_status_from_engine()
+                    _sync_add_button_state()
+
+                _schedule(_apply_success)
+            except Exception as e:
+                error_message = str(e)
+
+                def _apply_error():
+                    _sync_status_from_engine()
+                    _sync_add_button_state()
+                    vm.notify(f"Insert failed: {error_message}", "error")
+
+                _schedule(_apply_error)
+            finally:
+                _schedule(_sync_add_button_state)
+
+        threading.Thread(target=_do_add, daemon=True).start()
         
 
 

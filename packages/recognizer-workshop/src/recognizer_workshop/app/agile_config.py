@@ -99,8 +99,19 @@ class AgileConfig:
     def save_as(self, path):
         self.config_path = Path(path).resolve()
         self._to_json(self.config_path)
+        self._resolve_paths()
         add_to_recent_files(self.config_path)
         log.info(f"Configuration saved to new location: {self.config_path}")
+
+    def _resolve_paths(self) -> None:
+        """Resolve any relative path fields to absolute, anchored to the config file location."""
+        if not self.config_path:
+            return
+        base_dir = self.config_path.parent
+        for field_name in self._PATH_FIELDS:
+            value = getattr(self, field_name)
+            if value is not None and not value.is_absolute():
+                setattr(self, field_name, (base_dir / value).resolve())
 
     def __str__(self) -> str:
         """Readable string representation of the config."""
@@ -128,6 +139,7 @@ class AgileConfig:
 
         instance = cls.from_json(load_path)
         instance.config_path = load_path
+        instance._resolve_paths()
         add_to_recent_files(load_path)
         return instance
 
@@ -251,7 +263,13 @@ class AgileConfig:
       
         for field_name in self._PATH_FIELDS:
             if field_name in data_to_save and data_to_save[field_name] is not None:
-                absolute_path = Path(data_to_save[field_name])
+                path_value = Path(data_to_save[field_name])
+                if path_value.is_absolute():
+                    absolute_path = path_value
+                else:
+                    # Treat relative in-memory paths as relative to the config file location.
+                    absolute_path = (config_path.parent / path_value).resolve()
+
                 if base_dir is None: 
                     # Save as absolute path
                     saved_path = absolute_path.as_posix()

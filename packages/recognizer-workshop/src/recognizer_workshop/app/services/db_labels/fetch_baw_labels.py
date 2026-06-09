@@ -45,20 +45,32 @@ def labels_from_event_taggings(api, filter_params, target_labels: List[LabelName
     Returns:
         dict of source -> label -> {pos: [offsets], neg: [offsets]}, and counts of positive and negative labels
     """
+    # keep some stats for logging and debugging
+    summary_info = {}
 
     # convert our target label objects to baw tags:
     tags = [l.get_baw_tags()[0] for l in target_labels]
+    summary_info['tags'] = tags
 
     # flatten negative tags for each target into a single list
     if target_negatives is None:
         target_negatives = TargetNegatives()
 
     extra_tags = [tag.get_baw_tags()[0] for neg_list in target_negatives.values() if isinstance(neg_list, list) for tag in neg_list]
+    summary_info['extra_tags'] = extra_tags
   
     all_tags = list(set(tags + extra_tags))
+    summary_info['all_tags'] = all_tags
     
     # get target events
     events = get_events_with_verifications_and_tags(api, filter_params, all_tags)
+    summary_info['event_count'] = len(events)
+    summary_info['event_tag_counts'] = {
+        'retained_consensus': 0,
+        'retained_verification_not_required': 0,
+        'discarded_no_verification': 0,
+        'discarded_no_consensus_verification': 0,
+    }
 
     # for each event, determine the positive and negative labels based on
     # verifications, taggings and provenance.
@@ -88,15 +100,22 @@ def labels_from_event_taggings(api, filter_params, target_labels: List[LabelName
                 incorrect = vs_item['incorrect']
                 if correct > incorrect:
                     event['label_info'][tag_text] = 'positive'
+                    summary_info['event_tag_counts']['retained_consensus'] += 1
                 elif incorrect > correct:
                     event['label_info'][tag_text] = 'negative'
-                # tied or both-zero → no consensus, discard
+                    summary_info['event_tag_counts']['retained_consensus'] += 1
+                else:
+                    # tied or both-zero → no consensus, discard
+                    summary_info['event_tag_counts']['discarded_no_consensus_verification'] += 1
             else:
                 # No verifications for this specific tag.
                 if not event_requires_verification(event):
                     # Event doesn't require verifications → treat tagging as positive.
                     event['label_info'][tag_text] = 'positive'
-                # else: event requires verification but none found for this tag → discard.
+                    summary_info['event_tag_counts']['retained_verification_not_required'] += 1
+                else:
+                    # Event requires verification but none found for this tag → discard.
+                    summary_info['event_tag_counts']['discarded_no_verification'] += 1
 
     # mutates events
     for event in events:
@@ -141,6 +160,8 @@ def labels_from_event_taggings(api, filter_params, target_labels: List[LabelName
                     # so we now have a label type (e.g. TYPE_VERIFIED_POS) for this target label on this event/segment
                     # with its local start and end within the segment
                     items[source][seg_start][label_str].append(entry)
+
+    log.info("Label fetch summary: %s", summary_info)
 
     return resolve_conflicts_and_format(items)
                     

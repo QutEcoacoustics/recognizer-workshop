@@ -413,11 +413,12 @@ class TestAgileConfig:
         print("=== Step 2: After save_as ===")
         print(f"db={config.db_path}, labeled={config.labeled_examples_folder}, models={config.models_folder}, preds={config.predictions_folder}")
         
-        # Verify paths are still there after save
-        assert config.db_path == Path("db")
-        assert config.labeled_examples_folder == Path("labeled_examples")
-        assert config.models_folder == Path("models")
-        assert config.predictions_folder == Path("predictions")
+        # After save_as, paths are resolved to absolute (anchored to config dir).
+        config_dir = config_file.parent
+        assert config.db_path == config_dir / "db"
+        assert config.labeled_examples_folder == config_dir / "labeled_examples"
+        assert config.models_folder == config_dir / "models"
+        assert config.predictions_folder == config_dir / "predictions"
         
         # Step 3: Load the config (like loading recent file in UI)
         loaded_config = AgileConfig.load(config_file)
@@ -482,3 +483,49 @@ class TestAgileConfig:
         # Also verify through the references
         assert config_ref1.labeled_examples_folder == Path("labeled_examples")
         assert config_ref2.models_folder == Path("models")
+
+
+    def test_save_as_resolves_relative_paths_in_memory(self, tmp_path: Path, monkeypatch):
+        """After save_as, in-memory paths must be absolute (anchored to config dir)."""
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+        config_path = project_dir / "agile_config.json"
+
+        # Keep any auto-created relative folders isolated under tmp_path.
+        monkeypatch.chdir(project_dir)
+
+        config = AgileConfig(db_path=Path("db"), models_folder=Path("models"))
+        config.save_as(config_path)
+
+        assert config.db_path == project_dir / "db"
+        assert config.models_folder == project_dir / "models"
+        assert config.db_path.is_absolute()
+        assert config.models_folder.is_absolute()
+
+
+    def test_save_relative_paths_anchored_to_config_dir_not_cwd(self, tmp_path: Path, monkeypatch):
+        """Ensure relative path serialization is based on config location, not process CWD."""
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+        config_path = project_dir / "agile_config.json"
+
+        other_cwd = tmp_path / "elsewhere"
+        other_cwd.mkdir()
+        monkeypatch.chdir(other_cwd)
+
+        config = AgileConfig(
+            db_path=Path("db"),
+            labeled_examples_folder=Path("labeled_examples"),
+            models_folder=Path("models"),
+            predictions_folder=Path("predictions"),
+        )
+
+        config.save_as(config_path)
+
+        with open(config_path, 'r') as f:
+            data = json.load(f)
+
+        assert data['db_path'] == 'db'
+        assert data['labeled_examples_folder'] == 'labeled_examples'
+        assert data['models_folder'] == 'models'
+        assert data['predictions_folder'] == 'predictions'

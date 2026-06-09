@@ -1,10 +1,8 @@
 import asyncio
-from contextlib import contextmanager
 
 import numpy as np
 import pandas as pd
 import panel as pn
-import tqdm
 
 from recognizer_workshop.ui.panel.utils.patch_tqdm import patch_tqdm
 
@@ -15,18 +13,16 @@ def build(vm):
     algorithm_params_help_btn = vm.help_system.create_help_button("help-training-algorithm-params", "Help: Algorithm Parameters")
     labeled_data_params_help_btn = vm.help_system.create_help_button("help-labeled-data-params", "Help: Labeled Data Parameters")
 
-    learning_rate = pn.widgets.FloatInput(name="learning_rate", value=1e-3, step=1e-4)
-    num_steps     = pn.widgets.IntInput(name="num_steps", value=101, start=1)
-    batch_size    = pn.widgets.IntInput(name="batch_size", value=32, start=1)
-    train_ratio   = pn.widgets.FloatInput(name="train_ratio", value=0.9, start=0.1, end=0.99, step=0.01)
-    weak_neg_weight = pn.widgets.FloatInput(name="weak_neg_weight", value=0.05, step=0.01)
-    weak_negs_batch = pn.widgets.IntInput(name="weak_negatives_batch_size", value=16, start=0)
+    learning_rate = pn.widgets.FloatInput(name="Learning Rate", value=1e-3, step=1e-4)
+    num_steps     = pn.widgets.IntInput(name="Num Steps", value=101, start=1)
+    batch_size    = pn.widgets.IntInput(name="Batch Size", value=32, start=1)
+    train_ratio   = pn.widgets.FloatInput(name="Train Ratio", value=0.9, start=0.1, end=0.99, step=0.01)
+    weak_neg_weight = pn.widgets.FloatInput(name="Weak Negative Weight", value=0.05, step=0.01)
+    weak_negs_batch = pn.widgets.IntInput(name="Weak Negatives Batch Size", value=16, start=0)
 
     btn_train = pn.widgets.Button(name="Train classifier", button_type="success", sizing_mode="fixed", width=150)
     
     progress_bar = pn.widgets.Progress(name='Training Progress', active=True, visible=False, sizing_mode="stretch_width")
-
-    log = pn.pane.Markdown("")
 
     results_view = pn.Column(
         pn.pane.Markdown("Training results will be shown here."),
@@ -62,10 +58,8 @@ def build(vm):
             with patch_tqdm(progress_bar):
                 scores = await asyncio.to_thread(run_training)
 
-            scores_df = format_scores_df(scores)
-
-            # Display the DataFrame in our results view
-            results_view.objects = [pn.widgets.DataFrame(scores_df, sizing_mode="stretch_width")]
+            metrics_df = format_metrics_matrix_df(scores)
+            results_view.objects = [render_html_table(metrics_df, show_header=True)]
             vm.notify("Training complete.", "success")
             
         except Exception as e:
@@ -117,7 +111,6 @@ def build(vm):
         pn.Row(btn_train),
         progress_bar,
         pn.layout.Divider(),
-        pn.pane.Markdown("### Results"),
         results_view,
         pn.layout.Divider(),
         pn.pane.Markdown("### Save Model"),
@@ -126,43 +119,110 @@ def build(vm):
     )
 
 
+def format_metrics_matrix_df(scores: dict) -> pd.DataFrame:
+    """Create a single metrics table with class columns and optional aggregate column."""
+    per_class = scores.get('per_class_confusion')
+    if not isinstance(per_class, list):
+        per_class = []
+
+    class_labels = [str(item.get('class_label', item.get('class_index', i))) for i, item in enumerate(per_class)]
+    class_count = len(class_labels)
+    include_aggregate = class_count > 1
+
+    if class_count == 0:
+        rows = []
+        for key in ['top1_acc', 'roc_auc', 'cmap', 'micro_precision', 'macro_precision', 'micro_recall', 'macro_recall', 'micro_f1', 'macro_f1']:
+            if key in scores:
+                rows.append({'Metric': prettify_metric_name(key), 'Value': _format_metric_value(scores.get(key))})
+        return pd.DataFrame(rows, columns=['Metric', 'Value'])
+
+    def _series_from_key(key: str, default: float | int = 0):
+        return [item.get(key, default) for item in per_class]
+
+    def _array_metric(key: str):
+        value = scores.get(key)
+        if value is None:
+            return [None] * class_count
+        if isinstance(value, np.ndarray):
+            value = value.tolist()
+        if not isinstance(value, list):
+            return [None] * class_count
+        if len(value) < class_count:
+            value = value + [None] * (class_count - len(value))
+        return value[:class_count]
+
+    table_rows = []
+
+    def add_row(metric_name: str, per_class_values: list, aggregate_value=None):
+        row = {'Metric': metric_name}
+        for cls, val in zip(class_labels, per_class_values):
+            row[cls] = _format_metric_value(val)
+        if include_aggregate:
+            row['Aggregate'] = _format_metric_value(aggregate_value)
+        table_rows.append(row)
+
+    add_row('ROC AUC', _array_metric('roc_auc_individual'), scores.get('roc_auc'))
+    add_row('CMAP', _array_metric('cmap_individual'), scores.get('cmap'))
+    add_row('TP', _series_from_key('tp'), sum(_series_from_key('tp')))
+    add_row('FP', _series_from_key('fp'), sum(_series_from_key('fp')))
+    add_row('FN', _series_from_key('fn'), sum(_series_from_key('fn')))
+    add_row('TN', _series_from_key('tn'), sum(_series_from_key('tn')))
+    add_row('Support', _series_from_key('support'), sum(_series_from_key('support')))
+    add_row('Precision', _series_from_key('precision', float('nan')), scores.get('micro_precision'))
+    add_row('Recall', _series_from_key('recall', float('nan')), scores.get('micro_recall'))
+    add_row('F1', _series_from_key('f1', float('nan')), scores.get('micro_f1'))
+
+    if include_aggregate:
+        add_row('Macro Precision', [''] * class_count, scores.get('macro_precision'))
+        add_row('Macro Recall', [''] * class_count, scores.get('macro_recall'))
+        add_row('Macro F1', [''] * class_count, scores.get('macro_f1'))
+        if 'top1_acc' in scores:
+            add_row('Top-1 Accuracy', [''] * class_count, scores.get('top1_acc'))
+
+    column_order = ['Metric', *class_labels]
+    if include_aggregate:
+        column_order.append('Aggregate')
+
+    return pd.DataFrame(table_rows, columns=column_order)
 
 
-
-def format_scores_df(scores: dict) -> pd.DataFrame:
-    """
-    Filters, formats, and prepares the training scores dictionary for display.
-    """
-
-    metrics_to_show = [
-        'top1_acc',
-        'roc_auc',
-        'cmap',
-        'roc_auc_individual',
-        'cmap_individual'
-    ]
-
-    filtered_scores = {key: scores[key] for key in metrics_to_show if key in scores}
-
-    # Some metrics are overall, and some per class. 
-    # We don't need the per class ones if there is only 1 class. 
-    if len(filtered_scores.get('cmap_individual', [])) <= 1:
-        filtered_scores.pop('roc_auc_individual', None)
-        filtered_scores.pop('cmap_individual', None)
-
-    df = pd.DataFrame.from_dict(filtered_scores, orient='index', columns=['Score'])
-    df.index.name = 'Metric'
+def prettify_metric_name(metric_key: str) -> str:
+    return metric_key.replace('_', ' ').title()
 
 
-    def format_value(value):
-        if isinstance(value, (int, float, np.number)):
-            return f'{value:.3f}'
-        elif isinstance(value, (list, np.ndarray)):
-            return ', '.join([f'{v:.3f}' for v in value])
-        return str(value)
+def _format_metric_value(value):
+    if value is None:
+        return ''
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (int, np.integer)):
+        return str(int(value))
+    if isinstance(value, (float, np.floating)):
+        if np.isnan(value):
+            return ''
+        return f'{float(value):.3f}'
+    return str(value)
 
-    df['Score'] = df['Score'].apply(format_value)
-    return df
+
+def render_html_table(df: pd.DataFrame, show_header: bool = True):
+    """Render a non-interactive HTML table for stable Panel UX."""
+    html_table = df.to_html(
+        index=False,
+        header=show_header,
+        classes='rw-table',
+        border=0,
+        escape=True,
+    )
+    html = (
+        "<style>"
+        ".rw-table {width: 100%; border-collapse: collapse; font-size: 0.95rem;}"
+        ".rw-table th, .rw-table td {border: 1px solid #d9d9d9; padding: 6px 8px; text-align: left;}"
+        ".rw-table th {background: #f6f6f6; font-weight: 600;}"
+        ".rw-table tbody tr:nth-child(even) {background: #fcfcfc;}"
+        "</style>"
+        f"{html_table}"
+    )
+    return pn.pane.HTML(html, sizing_mode='stretch_width')
 
 
 
