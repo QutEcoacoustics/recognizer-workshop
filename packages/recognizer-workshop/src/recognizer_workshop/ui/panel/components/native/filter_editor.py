@@ -114,6 +114,10 @@ def build_filter_editor(
             fallback_to_legacy=fallback_to_legacy,
         )
 
+    def _set_container_view(view):
+        # Slice assignment tends to be more reliably reactive in Panel callbacks.
+        container[:] = [view]
+
     def _update_save_state(*_):
         current = normalize_first_filter(_resolved_filters())
         candidate = _parse_editor_value()
@@ -128,7 +132,7 @@ def build_filter_editor(
         )
         _populate_editors()
         _update_save_state()
-        container.objects = [edit_view]
+        _set_container_view(edit_view)
 
     def _format_filters(filters):
         """Formats the single filter for display."""
@@ -149,7 +153,7 @@ def build_filter_editor(
         filters = _resolved_filters()
         filter_display.object = _format_filters(filters)
         if filters and filters[0]:
-            container.objects = [display_view]
+            _set_container_view(display_view)
         else:
             _show_edit_mode()
 
@@ -177,8 +181,9 @@ def build_filter_editor(
         if candidate is None:
             vm.notify("Please enter at least one numeric ID.", "warn")
             return
-
+        # 
         if candidate == normalize_first_filter(_resolved_filters()):
+            _update_display()
             return
         
         try:

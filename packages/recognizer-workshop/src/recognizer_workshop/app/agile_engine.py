@@ -1,4 +1,5 @@
 import json
+import functools
 from pathlib import Path
 import numpy as np
 import random
@@ -776,7 +777,7 @@ class agile_state:
             raise
 
 
-    def commit_fetched_labels(self):
+    def commit_fetched_labels(self, progress_callback=None):
         """Commit labels currently stored in engine fetched-label state."""
         self.labels_commit_state = 'running'
         self.labels_commit_error = None
@@ -786,7 +787,7 @@ class agile_state:
             if not self.has_fetched_labels_ready:
                 raise ValueError("No fetched labels are ready to commit.")
 
-            outcomes = self.commit_labels(self.fetched_label_result_sets)
+            outcomes = self.commit_labels(self.fetched_label_result_sets, progress_callback=progress_callback)
             self.fetched_label_outcomes = outcomes
 
             added_count = sum(
@@ -808,7 +809,7 @@ class agile_state:
             raise
 
 
-    def commit_labels(self, result_sets):
+    def commit_labels(self, result_sets, progress_callback=None):
         """
         Commits the provided result_sets to the DB.
         The Engine injects the DB and API client automatically.
@@ -825,16 +826,55 @@ class agile_state:
 
         all_outcomes_by_filter = []
 
+        total_filters = len(result_sets)
+
+        def _emit_filter_progress(event, *, filter_index, filter_params):
+            if not progress_callback:
+                return
+            progress_callback({
+                **event,
+                'filter_index': filter_index,
+                'total_filters': total_filters,
+                'filter_params': filter_params,
+            })
+
         for i, result_set in enumerate(result_sets):
             # The Engine does the heavy lifting of wiring up the dependencies
             filter_params = result_set.get('filter_params', {})
+            cur_filter_index = i + 1
+
+            if progress_callback:
+                progress_callback({
+                    'stage': 'filter_start',
+                    'filter_index': cur_filter_index,
+                    'total_filters': total_filters,
+                    'filter_params': filter_params,
+                    'message': f'Adding labels for filter {cur_filter_index}/{total_filters}...'
+                })
+
+            _progress_for_filter = functools.partial(
+                _emit_filter_progress,
+                filter_index=cur_filter_index,
+                filter_params=filter_params,
+            )
+
             outcomes = add_labels_to_db(
                 db=self.db, 
                 config=self.config, 
                 items=result_set["labels"], 
                 api_client=self.active_client,
                 filter_dict=filter_params or None,
+                progress_callback=_progress_for_filter,
             )
+
+            if progress_callback:
+                progress_callback({
+                    'stage': 'filter_complete',
+                    'filter_index': cur_filter_index,
+                    'total_filters': total_filters,
+                    'filter_params': filter_params,
+                    'message': f'Finished filter {cur_filter_index}/{total_filters}.'
+                })
 
             all_outcomes_by_filter.append({
                 'filter_desc': f"Filter {i+1}",

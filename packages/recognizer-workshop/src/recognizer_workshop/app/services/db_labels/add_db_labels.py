@@ -3,7 +3,7 @@ from pathlib import Path
 import logging
 import numpy as np
 import dataclasses
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Callable
 import re
 from collections import Counter
 from recognizer_workshop.app.agile_modeling_helpers import list_audio_files
@@ -89,7 +89,7 @@ def build_parquet_source_list(items):
 
 
 
-def ensure_embeddings_exist(db, config, items, api_client, filter_dict=None):
+def ensure_embeddings_exist(db, config, items, api_client, filter_dict=None, progress_callback: Callable[[dict], None] | None = None):
     """
     Scans the items dict to find all required offsets for each source.
     Calls add_parquet_to_db once to fetch any missing data in parallel.
@@ -112,12 +112,13 @@ def ensure_embeddings_exist(db, config, items, api_client, filter_dict=None):
         #TODO: figure out where to read this from
         hop_size_s=5.0,
         filter_dict=filter_dict,
+        progress_callback=progress_callback,
     )
 
 
 
 
-def add_labels_to_db(db, config, items, api_client=None, filter_dict=None):
+def add_labels_to_db(db, config, items, api_client=None, filter_dict=None, progress_callback: Callable[[dict], None] | None = None):
     """
     Add labels to the database.
     items is in the format:
@@ -141,9 +142,33 @@ def add_labels_to_db(db, config, items, api_client=None, filter_dict=None):
     # but with the offsets lists replaced by lists of dicts with offset and outcome
     results = copy.deepcopy(items)
 
-    ensure_embeddings_exist(db, config, items, api_client=api_client, filter_dict=filter_dict)
+    total_sources = len(items)
+    if progress_callback:
+        progress_callback({
+            'stage': 'start',
+            'total_sources': total_sources,
+            'message': f'Preparing to add labels for {total_sources} sources...'
+        })
 
-    for source_id, labels_data in items.items():
+    ensure_embeddings_exist(
+        db,
+        config,
+        items,
+        api_client=api_client,
+        filter_dict=filter_dict,
+        progress_callback=progress_callback,
+    )
+
+    for source_index, (source_id, labels_data) in enumerate(items.items(), start=1):
+
+        if progress_callback:
+            progress_callback({
+                'stage': 'source_start',
+                'source_id': source_id,
+                'source_index': source_index,
+                'total_sources': total_sources,
+                'message': f'Processing source {source_index}/{total_sources}...'
+            })
 
         try:
             # Build offset->embedding_id from both the main search set and the
@@ -208,9 +233,26 @@ def add_labels_to_db(db, config, items, api_client=None, filter_dict=None):
                 
 
                 results[source_id][label_str][label_type_str] = outcome_list
+
+        if progress_callback:
+            progress_callback({
+                'stage': 'source_complete',
+                'source_id': source_id,
+                'source_index': source_index,
+                'total_sources': total_sources,
+                'message': f'Processed source {source_index}/{total_sources}.'
+            })
     
 
     db.commit()
+
+    if progress_callback:
+        progress_callback({
+            'stage': 'complete',
+            'total_sources': total_sources,
+            'message': f'Finished adding labels for {total_sources} sources.'
+        })
+
     return results
 
 
