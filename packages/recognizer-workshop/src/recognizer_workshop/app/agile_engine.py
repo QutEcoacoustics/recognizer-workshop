@@ -874,8 +874,20 @@ class agile_state:
     def save_classifier(self, path=None):
         if path is None:
             path = Path(self.config.models_folder) / 'classifier.json'
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        self.classifier.save(path)
+        output_path = Path(path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # I prefer it to save pretty. Perch hoplite saves compact. 
+        # This hack just opens it, prettifies it, and saves it again.
+        self.classifier.save(output_path)
+        try:
+            with output_path.open('r', encoding='utf-8') as f:
+                classifier_json = json.load(f)
+            with output_path.open('w', encoding='utf-8') as f:
+                json.dump(classifier_json, f, indent=2)
+                f.write('\n')
+        except (OSError, ValueError) as exc:
+            log.warning('Could not prettify classifier JSON at %s: %s', output_path, exc)
       
 
     def run_inference(self, output_filepath=None, threshold=0.0, labels=None, dataset=None, subset=1, exclude_labeled=False):
