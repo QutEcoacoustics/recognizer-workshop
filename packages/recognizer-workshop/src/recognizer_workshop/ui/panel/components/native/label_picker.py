@@ -28,8 +28,11 @@ def build_active_label_picker(vm) -> pn.Row:
             select.disabled = True
             return
 
-        pool = eng.config.target_labels or []   # List[LabelName]
-        log.debug(f"Rebuilding active label picker with {len(pool)} target labels...")
+        pool = [
+            ln for ln in (eng.config.target_labels or [])
+            if getattr(ln, "species", "") and str(getattr(ln, "species", "")).strip()
+        ]
+        log.debug("Rebuilding active label picker with %d target labels...", len(pool))
         # Options map friendly text -> LabelName
         opts = {str(ln): ln for ln in pool}
         select.options = opts

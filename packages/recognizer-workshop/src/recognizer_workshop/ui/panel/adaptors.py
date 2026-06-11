@@ -159,11 +159,18 @@ class PanelUI(param.Parameterized):
             description = _describe_target_labels(config_obj)
             current_labels_display.object = f"**Summary:** {description}" if description else "*(No labels defined)*"
 
+        def _notify_target_labels_changed() -> None:
+            # Keep active-label widgets in sync with config edits.
+            self.vm.reseat_active_label()
+            self.vm.obs.bump("target_labels")
+            self.vm.obs.bump("config_state")
+
 
         def _remove_label(index, event):  
             config_obj = _current_config()
             if 0 <= index < len(config_obj.target_labels):
                 config_obj.target_labels.pop(index)
+                _notify_target_labels_changed()
                 _build_labels_ui()
                 sync_and_update_display()
 
@@ -211,9 +218,10 @@ class PanelUI(param.Parameterized):
                     current_config = _current_config()
                     old_label = current_config.target_labels[index]
                     current_config.target_labels[index] = LabelName(
-                        species=event.new,
+                        species=(event.new or "").strip(),
                         call_type=old_label.call_type
                     )
+                    _notify_target_labels_changed()
                     sync_and_update_display()
 
                 def _update_call_type(event, index=i):
@@ -226,6 +234,7 @@ class PanelUI(param.Parameterized):
                         species=old_label.species,
                         call_type=event.new.strip() or None
                     )
+                    _notify_target_labels_changed()
                     sync_and_update_display()
 
                 species_widget.param.watch(_update_species, 'value')
@@ -261,9 +270,7 @@ class PanelUI(param.Parameterized):
         def _add_label(event):
             config_obj = _current_config()
             config_obj.target_labels.append(LabelName(species="", call_type=None))
-            # Notify reactive observers that target labels (and config state) have changed
-            self.vm.obs.bump("target_labels")
-            self.vm.obs.bump("config_state")
+            _notify_target_labels_changed()
             _build_labels_ui()
             sync_and_update_display()
 

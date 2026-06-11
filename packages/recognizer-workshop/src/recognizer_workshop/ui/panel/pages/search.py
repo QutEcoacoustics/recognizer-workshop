@@ -31,7 +31,7 @@ def build(vm):
 
     # inputs for how many results to fetch, target score
     num_results = pn.widgets.IntInput(name="Num results", value=10, start=1)
-    target_score = pn.widgets.TextInput(name="Target score (float or 'None')", value="None")
+    #target_score = pn.widgets.TextInput(name="Target score (float or 'None')", value="None")
     active_label_picker = build_active_label_picker(vm)
 
     # button to embed and search for the selected window
@@ -102,7 +102,10 @@ def build(vm):
     async def _search(_):
         if not vm.eng:
             return vm.notify("Initialize first.", "error")
-        ts = parse_target_score(target_score.value)
+        # ts = parse_target_score(target_score.value)
+        # for search, it's not very intuitive what a target score might mean. 
+        # so we just use None (best match) 
+        ts = None
         await vm.ui.search_with_selected_window(
             vm.eng,
             num_results=int(num_results.value),
@@ -133,7 +136,7 @@ def build(vm):
         pn.Row("## Search (single example)", pn.Spacer(), search_help_btn),
         input_tabs, # tab for choosing between xeno canto and file upload
         selector_box,
-        pn.Row(active_label_picker, num_results, target_score, btn_search, sizing_mode="stretch_width"),
+        pn.Row(active_label_picker, num_results, btn_search, sizing_mode="stretch_width"),
         results_box,
         sizing_mode="stretch_both",
     )

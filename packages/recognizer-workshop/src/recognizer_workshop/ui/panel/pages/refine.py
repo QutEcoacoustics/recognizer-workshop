@@ -1,8 +1,5 @@
-from pathlib import Path
-
 import panel as pn
 
-from recognizer_workshop.ui.panel.utils.utils import parse_target_score
 from recognizer_workshop.ui.panel.components.native.label_picker import build_active_label_picker
 
 
@@ -15,7 +12,13 @@ def build(vm):
 
     # inputs for how many results to fetch, target score
     num_results = pn.widgets.IntInput(name="Num results", value=10, start=1, width=140)
-    target_score = pn.widgets.TextInput(name="Target score (float or 'None')", value="None", width=180)
+    search_strategy = pn.widgets.Select(
+        name="Search strategy",
+        options=["Best match", "Margin sampling", "Target score"],
+        value="Best match",
+        width=180,
+    )
+    target_score = pn.widgets.TextInput(name="Target score", value="max", width=180, disabled=True)
     active_label_picker = build_active_label_picker(vm)
 
     btn_search = pn.widgets.Button(name="Search with classifier", button_type="primary")
@@ -23,10 +26,39 @@ def build(vm):
 
     vm.ui.render(pn.pane.Markdown("_No results yet._"), "refine.results")
 
+    def _on_strategy_change(event):
+        strategy = event.new
+        if strategy == "Best match":
+            target_score.value = "max"
+            target_score.disabled = True
+        elif strategy == "Margin sampling":
+            target_score.value = "0"
+            target_score.disabled = True
+        else:
+            target_score.value = ""
+            target_score.disabled = False
+
+    search_strategy.param.watch(_on_strategy_change, "value")
+
     def _search(_):
         if not vm.eng:
             return vm.notify("Initialize first.", "error")
-        ts = parse_target_score(target_score.value)
+        strategy = search_strategy.value
+        if strategy == "Best match":
+            ts = None
+        elif strategy == "Margin sampling":
+            ts = 0
+        else:
+            raw_score = target_score.value.strip()
+            normalized = raw_score.lower()
+            if not normalized or normalized == "max":
+                ts = None
+            else:
+                try:
+                    ts = float(raw_score)
+                except (TypeError, ValueError):
+                    target_score.value = "0"
+                    ts = 0.0
         vm.ui.search_with_classifier(vm.eng, 
                                      num_results=int(num_results.value), 
                                      target_score=ts,
@@ -52,7 +84,7 @@ def build(vm):
 
     return pn.Column(
         pn.Row("## Refine Model", pn.Spacer(), refine_help_btn),
-        pn.Row(active_label_picker, num_results, target_score, btn_search, sizing_mode="stretch_width"),
+        pn.Row(active_label_picker, num_results, search_strategy, target_score, btn_search, sizing_mode="stretch_width"),
         results_box,
         sizing_mode="stretch_both",
     )
