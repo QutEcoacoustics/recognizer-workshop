@@ -266,13 +266,27 @@ def build(vm):
 
 
     def _has_custom_paths():
-        """Check if any custom paths are set in the config."""
-        return bool(
-            str(vm.config.db_path) != str(default_paths['db_path']) or
-            str(vm.config.labeled_examples_folder) != str(default_paths['labeled_examples_folder']) or
-            str(vm.config.models_folder) != str(default_paths['models_folder']) or
-            str(vm.config.predictions_folder) != str(default_paths['predictions_folder'])
-        )
+        """Check if any paths deviate from the defaults relative to the config file location.
+
+        After load/save-as, config paths are resolved to absolute. We compare each one
+        against what it would be if the user had simply accepted the defaults — i.e.
+        (config_parent / default_name).resolve(). If the user never customised a path
+        the comparison is equal and we don't open the advanced section uninvited.
+        """
+        base_dir = vm.config.config_path.parent if vm.config.config_path else None
+        for field, default in default_paths.items():
+            actual = getattr(vm.config, field)
+            if actual is None:
+                continue
+            if base_dir is not None:
+                expected = (base_dir / default).resolve()
+                if actual.resolve() != expected:
+                    return True
+            else:
+                # Unsaved config — paths are still relative defaults, compare directly
+                if actual != default:
+                    return True
+        return False
 
     def sync_config_to_ui():
         """Updates all UI widgets from the current vm.config object."""

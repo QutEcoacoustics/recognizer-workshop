@@ -7,10 +7,16 @@ from pathlib import Path
 
 import panel as pn
 
+try:
+    from panel_material_ui import Dialog
+except ImportError:
+    Dialog = None
+
 from recognizer_workshop.app.create_database.database_creation_task import (
     DatabaseCreationTask,
     format_progress_event,
 )
+from recognizer_workshop.app.create_database.db_health_check import database_exists_at
 from recognizer_workshop.ui.panel.components.native.filter_editor import build_filter_editor, resolve_filters_for_editor
 from recognizer_workshop.ui.panel.utils import patch_tqdm
 
@@ -102,12 +108,20 @@ def build(vm):
         fallback_to_legacy=True,
     )
 
+    def _db_exists() -> bool:
+        """Return True if a database already exists at the configured path."""
+        if not vm.config or not vm.config.db_path:
+            return False
+        return database_exists_at(vm.config.db_path)
+
     def _update_button_state():
-        """Enable/disable create button based on whether we have a valid token."""
+        """Enable/disable create button and update its label based on DB existence and token."""
         has_token = vm.eng and vm.eng.active_client and vm.eng.active_client.token
         btn_create.disabled = not has_token
         auth_warning.visible = not has_token
-        
+
+        btn_create.name = "Add Embeddings to Database" if _db_exists() else "Create Database"
+
         if not has_token:
             log.warning("Database creation disabled: No authentication token available")
 
@@ -184,11 +198,11 @@ def build(vm):
             vm.notify(f"DB creation failed: {e}", "error")
             log.error(f"Database creation failed: {e}", exc_info=True)
         finally:
-            btn_create.disabled = False
             btn_stop.visible = False
             page_state['task'] = None
             progress_bar.visible = False
             progress_pane.visible = False
+            _update_button_state()  # re-check: DB may now exist
 
     async def _create_db(_):
         db_dir = vm.config.db_path.expanduser()
@@ -210,6 +224,7 @@ def build(vm):
             # This case shouldn't happen due to the check at the top, but it's safe to handle
             db_path_display.value = "Not set in config."
         _update_cache_toggle_state()
+        _update_button_state()
 
     # Watch for config changes instead of engine changes
     @pn.depends(vm.obs.ensure("config_state").param.version, watch=True)
@@ -243,12 +258,38 @@ def build(vm):
     _update_cache_toggle_state()
 
     # --- Health Check ---
+    dialogs_container = pn.Column()
+
     btn_health_check = pn.widgets.Button(name="Check DB Health", button_type="warning", icon="stethoscope")
     health_check_result = pn.pane.Markdown("", sizing_mode="stretch_width")
+
+    # --- Index size display ---
+    index_size_display = pn.pane.Markdown("", sizing_mode="stretch_width")
+
+    def _refresh_index_size():
+        if not vm.eng or not vm.eng.db:
+            index_size_display.object = ""
+            return
+        try:
+            info = vm.eng.get_database_status().index
+            if info is None:
+                index_size_display.object = "_(Could not read index size)_"
+            else:
+                index_size_display.object = f"**Usearch index size:** {info.format_size()}"
+        except Exception as e:
+            index_size_display.object = f"_(Could not read index size: {e})_"
 
     # --- Repair Index ---
     btn_repair = pn.widgets.Button(name="Repair Index", button_type="danger", icon="tool", visible=False)
     repair_status = pn.pane.Markdown("", sizing_mode="stretch_width")
+
+    # --- Delete Index ---
+    btn_delete_index = pn.widgets.Button(
+        name="Delete Usearch Index",
+        button_type="danger",
+        icon="trash",
+    )
+    delete_index_status = pn.pane.Markdown("", sizing_mode="stretch_width")
 
     async def _run_health_check(_):
         if not vm.eng or not vm.eng.db:
@@ -259,10 +300,18 @@ def build(vm):
         btn_repair.visible = False
         repair_status.object = ""
         try:
-            result = await asyncio.get_running_loop().run_in_executor(None, vm.eng.db_health_check)
-            health_check_result.object = f"```\n{result}\n```"
-            if not result.is_healthy:
-                btn_repair.visible = True
+            status = await asyncio.get_running_loop().run_in_executor(
+                None, lambda: vm.eng.get_database_status(include_health=True)
+            )
+            result = status.health
+            if result is None:
+                msg = status.errors.get("health", "unknown error")
+                health_check_result.object = f"❌ Health check failed: {msg}"
+            else:
+                health_check_result.object = f"```\n{result}\n```"
+                if not result.is_healthy:
+                    btn_repair.visible = True
+            _refresh_index_size()
         except Exception as e:
             health_check_result.object = f"❌ Health check failed: {e}"
         finally:
@@ -270,6 +319,73 @@ def build(vm):
             btn_health_check.name = "Check DB Health"
 
     btn_health_check.on_click(_run_health_check)
+
+    def _on_delete_index(_):
+        """Show a confirmation dialog before deleting the usearch index."""
+        if not vm.eng or not vm.eng.db:
+            vm.notify("No database loaded.", "error")
+            return
+        if Dialog is None:
+            vm.notify("panel-material-ui not installed; cannot show confirmation dialog.", "error")
+            return
+
+        try:
+            info = vm.eng.get_database_status().index
+        except Exception as e:
+            vm.notify(f"Could not read index info: {e}", "error")
+            return
+
+        if info is None or not info.exists:
+            vm.notify("Usearch index file does not exist.", "warn")
+            return
+
+        btn_cancel = pn.widgets.Button(name="Cancel", button_type="default")
+        btn_confirm = pn.widgets.Button(name="Yes, delete it", button_type="danger")
+
+        dialog_content = pn.Column(
+            pn.pane.Markdown(
+                f"### Delete usearch index?\n\n"
+                f"This will permanently delete the usearch index file "
+                f"(`{info.path.name}`, **{info.format_size()}**) from disk.\n\n"
+                f"The SQLite tables are untouched. You can rebuild the index "
+                f"afterwards using **Repair Index**."
+            ),
+            pn.Row(btn_cancel, btn_confirm),
+        )
+
+        dialog = Dialog(dialog_content, title="Confirm index deletion")
+        dialogs_container[:] = [dialog]
+        dialog.open = True
+
+        def _cancel(_):
+            dialog.open = False
+            dialogs_container.clear()
+
+        async def _confirm(_):
+            dialog.open = False
+            dialogs_container.clear()
+            btn_delete_index.disabled = True
+            delete_index_status.object = "⏳ Deleting index..."
+            try:
+                deleted_info = await asyncio.get_running_loop().run_in_executor(
+                    None, vm.eng.delete_usearch_index
+                )
+                delete_index_status.object = (
+                    f"🗑 Index deleted ({deleted_info.format_size()} freed). "
+                    f"Use **Repair Index** to rebuild it."
+                )
+                _refresh_index_size()
+                vm.notify("Usearch index deleted.", "success")
+            except Exception as e:
+                delete_index_status.object = f"❌ Delete failed: {e}"
+                vm.notify(f"Delete failed: {e}", "error")
+            finally:
+                btn_delete_index.disabled = False
+
+        btn_cancel.on_click(_cancel)
+        btn_confirm.on_click(_confirm)
+
+    btn_delete_index.on_click(_on_delete_index)
 
     async def _run_repair(_):
         btn_repair.disabled = True
@@ -316,6 +432,7 @@ def build(vm):
                 f"- Errors: {stats['errors']}",
             ]
             repair_status.object = "\n".join(lines)
+            _refresh_index_size()
             await _run_health_check(None)
         except Exception as e:
             repair_status.object = f"❌ Repair failed: {e}"
@@ -324,6 +441,9 @@ def build(vm):
             btn_repair.name = "Repair Index"
 
     btn_repair.on_click(_run_repair)
+
+    # Populate index size on load if engine is already available
+    _refresh_index_size()
 
     return pn.Column(
         pn.Row("## Create New Database from BAW", pn.Spacer(), database_help_btn),
@@ -352,9 +472,20 @@ def build(vm):
         progress_pane,
         pn.layout.Divider(),
         pn.Row("## Database Health Check"),
+        index_size_display,
         pn.Row(btn_health_check, align="start"),
         health_check_result,
         pn.Row(btn_repair, align="start"),
         repair_status,
+        pn.layout.Divider(),
+        pn.Row("## Index Management"),
+        pn.pane.Alert(
+            "Deleting the index frees disk space. The SQLite data is untouched and "
+            "the index can be rebuilt with **Repair Index** above.",
+            alert_type="info",
+        ),
+        pn.Row(btn_delete_index, align="start"),
+        delete_index_status,
+        dialogs_container,
         sizing_mode="stretch_width"
     )

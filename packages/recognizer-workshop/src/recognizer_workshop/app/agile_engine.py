@@ -29,7 +29,11 @@ from recognizer_workshop.app.services.db_labels.add_db_labels import add_labels_
 from recognizer_workshop.app.services.db_labels.db_labels_info import get_db_summary, get_label_counts
 from recognizer_workshop.app.services.db_labels.dataclasses import LabelName
 from recognizer_workshop.app.services import training as training_service
-from recognizer_workshop.app.create_database.db_health_check import run_health_check
+from recognizer_workshop.app.create_database.db_health_check import (
+    delete_usearch_index as _delete_usearch_index,
+    get_database_status,
+    database_exists_at,
+)
 from recognizer_workshop.app.create_database.repair_index import repair_index
 from recognizer_workshop.app.services.baw_insertions import get_last_filter_for_dataset
 from recognizer_workshop.app.services.inference.inference import run_inference as inference_service_run_inference
@@ -622,7 +626,7 @@ class agile_state:
         - embedding_runtime_ready: Whether the worker-based embedding runtime is ready
         - embedding_model_config: The configuration of the embedding model
         - db_metadata: Metadata stored in the hoplite DB
-        - db_summary: A summary of the database contents (self.db.summary())
+        - database: A DatabaseStatus snapshot (or None when no DB is loaded)
         """
 
         embedding_runtime_ready = (
@@ -637,26 +641,34 @@ class agile_state:
             "embedding_model_loaded": embedding_runtime_ready,
             "embedding_model_config": self.db_model_config,
             "db_metadata": self.db.get_metadata(None) if self.db else None,
-            "db_summary": self.db_summary() if self.db else None,
+            "database": self.get_database_status() if self.db else None,
         }
 
         return status
 
+    def get_database_status(self, include_health: bool = False):
+        """Return a consolidated DatabaseStatus snapshot for the loaded database.
+
+        This is the single entry point for database status. Cheap sections
+        (existence, counts, datasets, label counts, index size) are always
+        populated; the expensive consistency check is only included when
+        ``include_health=True``.
+        """
+        if not self.db:
+            raise ValueError("Database not initialized.")
+        return get_database_status(self.db, include_health=include_health)
+
+    def database_exists(self) -> bool:
+        """True if a database exists on disk at the configured path.
+
+        Path-only check that does not require the database to be loaded; used to
+        drive UI state before the engine has initialised a database.
+        """
+        return database_exists_at(self.config.db_path)
+
     def db_summary(self):
         """Debugging/sanity checking to see what's in the database"""
         return get_db_summary(self.db)
-
-    def db_health_check(self):
-        """Check consistency between SQLite embeddings and usearch index."""
-        if not self.db:
-            raise ValueError("Database not initialized.")
-        try:
-            result = run_health_check(self.db)
-            log.info("Health check result: %s", result)
-            return result
-        except Exception:
-            log.exception("Health check failed")
-            raise
 
     def repair_db_index(self, progress_callback=None, stop_event=None):
         """Rebuild the usearch index by re-downloading parquet files."""
@@ -676,6 +688,12 @@ class agile_state:
         except Exception:
             log.exception("Index repair failed")
             raise
+
+    def delete_usearch_index(self):
+        """Delete the usearch index file from disk (SQLite tables are untouched)."""
+        if not self.db:
+            raise ValueError("Database not initialized.")
+        return _delete_usearch_index(self.db)
 
     def get_baw_filters(self):
         """returns a list of audio_recording filter critera used to create the database
