@@ -122,14 +122,14 @@ def database_exists_at(db_path) -> bool:
 
     This is a cheap, path-only check that does NOT require an open database
     connection. A database is considered present if the directory exists and
-    contains at least one ``*.sqlite`` or ``*.usearch`` file. Used to decide UI
+    contains at least one ``*.sqlite`` or ``usearch.index`` file. Used to decide UI
     state (e.g. button labels) before the engine has loaded a database.
     """
     if not db_path:
         return False
     path = Path(db_path).expanduser()
     return path.exists() and (
-        any(path.glob("*.sqlite")) or any(path.glob("*.usearch"))
+        any(path.glob("*.sqlite")) or (path / "usearch.index").exists()
     )
 
 

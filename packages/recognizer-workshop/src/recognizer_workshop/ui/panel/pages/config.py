@@ -223,7 +223,6 @@ def build(vm):
     annotator_id = pn.widgets.TextInput(name="Annotator Name", value=vm.config.annotator_id)
     # Create help buttons for key fields
     annotator_help_btn = vm.help_system.create_help_button("help-annotator-id", "Help: Annotator ID")
-    domain_help_btn = vm.help_system.create_help_button("help-api-domain", "Help: API Domain")
     folder_help_btn = vm.help_system.create_help_button("help-folder-config", "Help: Folder Configuration")
     engine_help_btn = vm.help_system.create_help_button("help-engine", "Help: Engine")
     project_help_btn = vm.help_system.create_help_button("help-project-file", "Help: Project Files")
@@ -703,7 +702,7 @@ def build(vm):
     )
 
     left_column = pn.Column(
-        pn.Row("### Workbench Connection", domain_help_btn, pn.Spacer()),
+        pn.Row("### Workbench Connection", pn.Spacer()),
         workbench_auth_section,
         pn.Row(show_advanced, folder_help_btn, sizing_mode="stretch_width"),
         advanced_section,

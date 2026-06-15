@@ -31,7 +31,6 @@ def build(vm):
 
     # inputs for how many results to fetch, target score
     num_results = pn.widgets.IntInput(name="Num results", value=10, start=1)
-    #target_score = pn.widgets.TextInput(name="Target score (float or 'None')", value="None")
     active_label_picker = build_active_label_picker(vm)
 
     # button to embed and search for the selected window
@@ -102,7 +101,6 @@ def build(vm):
     async def _search(_):
         if not vm.eng:
             return vm.notify("Initialize first.", "error")
-        # ts = parse_target_score(target_score.value)
         # for search, it's not very intuitive what a target score might mean. 
         # so we just use None (best match) 
         ts = None
