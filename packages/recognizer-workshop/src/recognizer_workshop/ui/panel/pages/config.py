@@ -4,6 +4,7 @@ from functools import partial
 from pathlib import Path
 import logging
 import panel as pn
+from panel_material_ui import Dialog
 
 from recognizer_workshop.app.agile_engine import AgileConfig
 from recognizer_workshop.app.agile_engine import agile_state
@@ -13,16 +14,6 @@ from baw_helpers.settings import baw_settings
 from recognizer_workshop.app.app_settings import app_settings
 
 log = logging.getLogger(__name__)
-
-# TODO: tidy this up
-try:
-    from panel_material_ui import Dialog
-except ImportError:
-    # Provide a helpful error if the library isn't installed.
-    raise ImportError(
-        "The panel-material-ui library is not installed. "
-        "Please run 'pip install panel-material-ui' in your environment."
-    )
 
 
 def build(vm):
@@ -388,8 +379,6 @@ def build(vm):
 
     def _on_open_click(_):
         """Opens a dialog to select a configuration file to load."""
-        if Dialog is None: return vm.notify("panel-material-ui not installed for file dialog.", "warn")
-        
         recent_files = get_recent_files()
         file_selector = pn.widgets.FileSelector(Path.home(), only_files=True)
         recent_selector = pn.widgets.Select(name="Recent Files", options=recent_files, value=None)
@@ -438,9 +427,6 @@ def build(vm):
 
     def _on_save_as_click(_):
         """Save current config to a chosen path."""
-        if Dialog is None:
-            return vm.notify("panel-material-ui not installed for file dialog.", "warn")
-
         # Directory picker + filename input makes "Save As" UX clearer.
         dir_selector = pn.widgets.FileSelector(Path.home(), only_files=False)
         filename_input = pn.widgets.TextInput(name="Filename", value="agile_config.json")

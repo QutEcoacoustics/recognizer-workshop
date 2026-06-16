@@ -6,11 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 import panel as pn
-
-try:
-    from panel_material_ui import Dialog
-except ImportError:
-    Dialog = None
+from panel_material_ui import Dialog
 
 from recognizer_workshop.app.create_database.database_creation_task import (
     DatabaseCreationTask,
@@ -324,9 +320,6 @@ def build(vm):
         if not vm.eng or not vm.eng.db:
             vm.notify("No database loaded.", "error")
             return
-        if Dialog is None:
-            vm.notify("panel-material-ui not installed; cannot show confirmation dialog.", "error")
-            return
 
         try:
             status = vm.eng.get_database_status()
@@ -445,7 +438,7 @@ def build(vm):
     _refresh_status_section()
 
     return pn.Column(
-        pn.Row("## Build Databse", pn.Spacer(), database_help_btn),
+        pn.Row("## Build Database", pn.Spacer(), database_help_btn),
         auth_warning,  # Show auth warning when no token
         pn.Row(
             pn.Column(
