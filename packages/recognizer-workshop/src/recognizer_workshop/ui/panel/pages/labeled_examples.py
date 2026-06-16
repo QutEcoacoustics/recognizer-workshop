@@ -3,7 +3,7 @@ import threading
 import pandas as pd
 import panel as pn
 
-from recognizer_workshop.ui.panel.components.native.filter_editor import build_filter_editor
+from recognizer_workshop.ui.panel.components.native.filter_editor import FilterEditor
 
 def build(vm):
     # Create help buttons
@@ -54,41 +54,35 @@ def build(vm):
         )
         btn_fetch.disabled = is_busy
         btn_add.disabled = is_busy or not _has_ready_labels()
-    
-    def _get_filters():
-        if not (vm.eng and vm.eng.is_db_loaded):
-            return None
-        return vm.eng.get_baw_filters()
-
-    def _set_filters(filters):
-        if not (vm.eng and vm.eng.is_db_loaded):
-            raise RuntimeError("Initialize the engine on the Config tab first.")
-        vm.eng.set_baw_filters(filters)
 
     engine_warning = pn.pane.Alert(
         "Initialize the engine on the 'Config' tab to set up filters.",
         alert_type="warning"
     )
     filter_section = pn.Column(sizing_mode="stretch_width")
-
-    def _build_filter_editor_widget():
-        """Build a fresh filter editor each time the engine state changes."""
-        return build_filter_editor(
-            _get_filters,
-            _set_filters,
-            vm,
-            dataset_priority=['fetched_labels', 'search_set'],
-            fallback_to_legacy=True,
-        )
+    # The currently-mounted filter editor. Its ``value`` is the source of truth
+    # for which filter the Fetch step uses.
+    filter_editor = None
 
     def _update_filter_section():
-        """Show filter editor when engine is ready, warning otherwise."""
+        """Show filter editor when engine is ready, warning otherwise.
+
+        The editor is rebuilt fresh each time the engine state changes so it
+        reflects the latest DB metadata. It seeds its value from the most recent
+        ``fetched_labels`` filter, then ``search_set``. Whatever is shown in the
+        editor is what the Fetch step uses; nothing is persisted on save.
+        """
+        nonlocal filter_editor
         if not (vm.eng and vm.eng.is_db_loaded):
+            filter_editor = None
             filter_section.objects = [engine_warning]
         else:
-            # Rebuild the filter editor to ensure it reflects latest DB metadata
-            filter_editor = _build_filter_editor_widget()
-            filter_section.objects = [filter_editor]
+            filter_editor = FilterEditor(
+                vm,
+                dataset_priority=['fetched_labels', 'search_set'],
+                fallback_to_legacy=True,
+            )
+            filter_section.objects = [filter_editor.view]
 
 
     def _format_filter_params_for_display(filter_params: dict, fallback_name: str = "Filter") -> str:
@@ -324,7 +318,11 @@ def build(vm):
 
 
     def _fetch(_):
-        if not vm.eng: return vm.notify("Initialize on Config tab first.", "error")
+        if not (vm.eng and vm.eng.is_db_loaded) or filter_editor is None:
+            return vm.notify("Initialize the engine on the Config tab first.", "error")
+        baw_filters = filter_editor.value
+        if not baw_filters:
+            return vm.notify("Set a recording filter before fetching.", "warn")
         log.object = "Fetching labels..."
         _sync_add_button_state()
         doc = pn.state.curdoc
@@ -338,7 +336,7 @@ def build(vm):
 
         def _do_fetch():
             try:
-                result = vm.eng.fetch_labels()
+                result = vm.eng.fetch_labels(baw_filters)
                 result_sets = result if isinstance(result, list) else []
 
                 def _apply_success():

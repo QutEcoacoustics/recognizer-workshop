@@ -11,10 +11,11 @@ from perch_hoplite import audio_io
 from perch_hoplite.db import interface as hoplite_interface
 
 from baw_helpers.baw_utils import extract_arid_and_domain
-from recognizer_workshop.app.services.db_labels.dataclasses import LabelCounts, DatabaseSummary
+from recognizer_workshop.app.services.db_labels.dataclasses import LabelCounts
 from baw_helpers.baw_helpers import get_events_for_sites, get_verifications_for_sites
 from recognizer_workshop.app.agile_modeling_helpers import get_embeddings_by_source
 from recognizer_workshop.app.create_database.create_database import add_parquet_to_db
+from recognizer_workshop.app.services.baw_insertions import record_embeddings_added
 
 log = logging.getLogger(__name__)
 
@@ -158,6 +159,14 @@ def add_labels_to_db(db, config, items, api_client=None, filter_dict=None, progr
         filter_dict=filter_dict,
         progress_callback=progress_callback,
     )
+
+    # Persist the filter used for this add as a baseline (count 0) under the
+    # 'fetched_labels' dataset, so the labeled-examples editor can re-seed from it
+    # next time even when no new embeddings were inserted. If embeddings were added,
+    # ensure_embeddings_exist has already recorded the real count for this same
+    # filter, and adding 0 here is a no-op bump.
+    if filter_dict is not None:
+        record_embeddings_added(db, 'fetched_labels', filter_dict, 0)
 
     for source_index, (source_id, labels_data) in enumerate(items.items(), start=1):
 

@@ -3,7 +3,7 @@ import html
 import pandas as pd
 import panel as pn
 
-from recognizer_workshop.app.create_database.db_health_check import DatabaseStatus
+from recognizer_workshop.app.services.database_status import DatabaseStatus
 from recognizer_workshop.app.services.version import get_version_status_string
 from recognizer_workshop.ui.panel.view_model import ViewModel
 
@@ -94,10 +94,11 @@ def _build_status_view(vm: ViewModel):
 
         db_summary_view = pn.Column(
             "### Database Summary",
-            pn.pane.HTML(f"<strong>Total Embeddings:</strong> {db_status.total_embeddings}", margin=(0, 0)),
+            pn.pane.HTML(f"<strong>Embeddings (database):</strong> {db_status.db_embeddings}", margin=(0, 0)),
+            pn.pane.HTML(f"<strong>Embeddings (index):</strong> {db_status.index_embeddings}", margin=(0, 0)),
             pn.pane.HTML(f"<strong>Datasets:</strong> {', '.join(db_status.datasets) if db_status.datasets else 'None'}", margin=(0, 0)),
             pn.pane.HTML(
-                f"<strong>Usearch Index:</strong> {db_status.index.format_size() if db_status.index else 'unknown'}",
+                f"<strong>Usearch Index:</strong> {db_status.index_size_str()}",
                 margin=(0, 0),
             ),
             labels_table,
