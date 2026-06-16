@@ -4,6 +4,7 @@ from functools import partial
 from pathlib import Path
 import logging
 import panel as pn
+from panel_material_ui import Dialog
 
 from recognizer_workshop.app.agile_engine import AgileConfig
 from recognizer_workshop.app.agile_engine import agile_state
@@ -13,16 +14,6 @@ from baw_helpers.settings import baw_settings
 from recognizer_workshop.app.app_settings import app_settings
 
 log = logging.getLogger(__name__)
-
-# TODO: tidy this up
-try:
-    from panel_material_ui import Dialog
-except ImportError:
-    # Provide a helpful error if the library isn't installed.
-    raise ImportError(
-        "The panel-material-ui library is not installed. "
-        "Please run 'pip install panel-material-ui' in your environment."
-    )
 
 
 def build(vm):
@@ -223,7 +214,6 @@ def build(vm):
     annotator_id = pn.widgets.TextInput(name="Annotator Name", value=vm.config.annotator_id)
     # Create help buttons for key fields
     annotator_help_btn = vm.help_system.create_help_button("help-annotator-id", "Help: Annotator ID")
-    domain_help_btn = vm.help_system.create_help_button("help-api-domain", "Help: API Domain")
     folder_help_btn = vm.help_system.create_help_button("help-folder-config", "Help: Folder Configuration")
     engine_help_btn = vm.help_system.create_help_button("help-engine", "Help: Engine")
     project_help_btn = vm.help_system.create_help_button("help-project-file", "Help: Project Files")
@@ -266,13 +256,27 @@ def build(vm):
 
 
     def _has_custom_paths():
-        """Check if any custom paths are set in the config."""
-        return bool(
-            str(vm.config.db_path) != str(default_paths['db_path']) or
-            str(vm.config.labeled_examples_folder) != str(default_paths['labeled_examples_folder']) or
-            str(vm.config.models_folder) != str(default_paths['models_folder']) or
-            str(vm.config.predictions_folder) != str(default_paths['predictions_folder'])
-        )
+        """Check if any paths deviate from the defaults relative to the config file location.
+
+        After load/save-as, config paths are resolved to absolute. We compare each one
+        against what it would be if the user had simply accepted the defaults — i.e.
+        (config_parent / default_name).resolve(). If the user never customised a path
+        the comparison is equal and we don't open the advanced section uninvited.
+        """
+        base_dir = vm.config.config_path.parent if vm.config.config_path else None
+        for field, default in default_paths.items():
+            actual = getattr(vm.config, field)
+            if actual is None:
+                continue
+            if base_dir is not None:
+                expected = (base_dir / default).resolve()
+                if actual.resolve() != expected:
+                    return True
+            else:
+                # Unsaved config — paths are still relative defaults, compare directly
+                if actual != default:
+                    return True
+        return False
 
     def sync_config_to_ui():
         """Updates all UI widgets from the current vm.config object."""
@@ -375,8 +379,6 @@ def build(vm):
 
     def _on_open_click(_):
         """Opens a dialog to select a configuration file to load."""
-        if Dialog is None: return vm.notify("panel-material-ui not installed for file dialog.", "warn")
-        
         recent_files = get_recent_files()
         file_selector = pn.widgets.FileSelector(Path.home(), only_files=True)
         recent_selector = pn.widgets.Select(name="Recent Files", options=recent_files, value=None)
@@ -425,9 +427,6 @@ def build(vm):
 
     def _on_save_as_click(_):
         """Save current config to a chosen path."""
-        if Dialog is None:
-            return vm.notify("panel-material-ui not installed for file dialog.", "warn")
-
         # Directory picker + filename input makes "Save As" UX clearer.
         dir_selector = pn.widgets.FileSelector(Path.home(), only_files=False)
         filename_input = pn.widgets.TextInput(name="Filename", value="agile_config.json")
@@ -689,7 +688,7 @@ def build(vm):
     )
 
     left_column = pn.Column(
-        pn.Row("### Workbench Connection", domain_help_btn, pn.Spacer()),
+        pn.Row("### Workbench Connection", pn.Spacer()),
         workbench_auth_section,
         pn.Row(show_advanced, folder_help_btn, sizing_mode="stretch_width"),
         advanced_section,

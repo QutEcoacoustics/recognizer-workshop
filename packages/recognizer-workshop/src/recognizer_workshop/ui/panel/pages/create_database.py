@@ -6,12 +6,18 @@ from datetime import datetime
 from pathlib import Path
 
 import panel as pn
+from panel_material_ui import Dialog
 
 from recognizer_workshop.app.create_database.database_creation_task import (
     DatabaseCreationTask,
     format_progress_event,
 )
-from recognizer_workshop.ui.panel.components.native.filter_editor import build_filter_editor, resolve_filters_for_editor
+from recognizer_workshop.app.services.database_status import (
+    database_exists_at,
+    format_size,
+    USEARCH_INDEX_FILENAME,
+)
+from recognizer_workshop.ui.panel.components.native.filter_editor import FilterEditor
 from recognizer_workshop.ui.panel.utils import patch_tqdm
 
 log = logging.getLogger(__name__)
@@ -28,7 +34,7 @@ def build(vm):
     db_settings_help_btn = vm.help_system.create_help_button("help-db-creation-settings", "Help: Database Creation Settings")
     recordings_filter_help_btn = vm.help_system.create_help_button("help-recordings-filter", "Help: Recordings Filter")
 
-    page_state = {'filters': [], 'task': None}
+    page_state: dict = {'task': None}
     max_files = pn.widgets.IntInput(name="Max Recordings to Scan", value=1000, start=-1)
     max_embeddings = pn.widgets.IntInput(name="Max Total Embeddings in DB", value=200_000, start=-1)
     use_cached_list = pn.widgets.Checkbox(name="Use Cached Recording List", value=True, visible=False)
@@ -67,7 +73,7 @@ def build(vm):
         return db_dir / f"_source_arids_{filter_hash}.json"
 
     def _update_cache_toggle_state():
-        cached_file = _cached_file_for_filters(page_state.get('filters'))
+        cached_file = _cached_file_for_filters(filter_editor.value)
         has_cache = cached_file is not None and cached_file.exists()
         use_cached_list.visible = has_cache
         cache_hint.visible = has_cache
@@ -76,44 +82,35 @@ def build(vm):
         else:
             cache_hint.object = ""
 
-    def get_page_filters():
-        # Hydrate local page state from shared resolver if empty.
-        if page_state.get('filters'):
-            return page_state.get('filters')
-        resolved = resolve_filters_for_editor(
-            lambda: page_state.get('filters'),
-            vm,
-            dataset_priority=['search_set'],
-            fallback_to_legacy=True,
-        )
-        if resolved:
-            page_state['filters'] = resolved
-        return page_state.get('filters')
-
-    def set_page_filters(filters):
-        page_state['filters'] = filters
-        _update_cache_toggle_state()
-
-    filter_editor = build_filter_editor(
-        get_page_filters,
-        set_page_filters,
+    # The filter editor owns the recording filter. Read it via `filter_editor.value`;
+    # it seeds itself from existing DB metadata and refreshes the cache toggle on save.
+    filter_editor = FilterEditor(
         vm,
         dataset_priority=['search_set'],
         fallback_to_legacy=True,
+        on_save=lambda _f: _update_cache_toggle_state(),
     )
 
+    def _db_exists() -> bool:
+        """Return True if a database already exists at the configured path."""
+        if not vm.config or not vm.config.db_path:
+            return False
+        return database_exists_at(vm.config.db_path)
+
     def _update_button_state():
-        """Enable/disable create button based on whether we have a valid token."""
+        """Enable/disable create button and update its label based on DB existence and token."""
         has_token = vm.eng and vm.eng.active_client and vm.eng.active_client.token
         btn_create.disabled = not has_token
         auth_warning.visible = not has_token
-        
+
+        btn_create.name = "Add Embeddings to Database" if _db_exists() else "Create Database"
+
         if not has_token:
             log.warning("Database creation disabled: No authentication token available")
 
     async def _run_creation_process(use_cache=False):
         db_dir = vm.config.db_path.expanduser()
-        filters = get_page_filters()
+        filters = filter_editor.value
         filter_hash = _hash_filters(filters)
         filelist_path = db_dir / f"_source_arids_{filter_hash}.json"
         btn_create.disabled = True
@@ -184,18 +181,18 @@ def build(vm):
             vm.notify(f"DB creation failed: {e}", "error")
             log.error(f"Database creation failed: {e}", exc_info=True)
         finally:
-            btn_create.disabled = False
             btn_stop.visible = False
             page_state['task'] = None
             progress_bar.visible = False
             progress_pane.visible = False
+            _update_button_state()  # re-check: DB may now exist
 
     async def _create_db(_):
         db_dir = vm.config.db_path.expanduser()
         if db_dir.exists() and any(db_dir.iterdir()) and not list(db_dir.glob("_source_arids_*.json")):
             log.warning(f"Directory '{db_dir}' is not empty.")
              #return vm.notify(f"Directory '{db_dir}' is not empty.", "error")
-        filters = get_page_filters()
+        filters = filter_editor.value
         if not filters or not filters[0]: return vm.notify("Please define at least one filter.", "warn")
         cached_file = _cached_file_for_filters(filters)
         selected_use_cache = bool(use_cached_list.value and cached_file is not None and cached_file.exists())
@@ -210,6 +207,7 @@ def build(vm):
             # This case shouldn't happen due to the check at the top, but it's safe to handle
             db_path_display.value = "Not set in config."
         _update_cache_toggle_state()
+        _update_button_state()
 
     # Watch for config changes instead of engine changes
     @pn.depends(vm.obs.ensure("config_state").param.version, watch=True)
@@ -218,14 +216,12 @@ def build(vm):
         """Reacts to config changes and updates button availability."""
         _update_button_state()
 
-        # Rebuild to ensure the editor reflects latest metadata when engine/db state changes.
-        filter_editor.objects = build_filter_editor(
-            get_page_filters,
-            set_page_filters,
-            vm,
-            dataset_priority=['search_set'],
-            fallback_to_legacy=True,
-        ).objects
+        # Seed the editor from the latest DB metadata when engine/db state changes.
+        # This only fills the value if the user hasn't already set one.
+        filter_editor.seed_from_db()
+
+        # Re-render the status box and button visibility for the (re)loaded DB.
+        _refresh_status_section()
 
     btn_create.on_click(_create_db)
 
@@ -243,33 +239,145 @@ def build(vm):
     _update_cache_toggle_state()
 
     # --- Health Check ---
+    dialogs_container = pn.Column()
+
     btn_health_check = pn.widgets.Button(name="Check DB Health", button_type="warning", icon="stethoscope")
-    health_check_result = pn.pane.Markdown("", sizing_mode="stretch_width")
+
+    # The dark status box: always shows the lightweight status (embeddings, index
+    # size, datasets, label counts). After a health check it also shows the
+    # consistency verdict. The dark background comes from the ``` code fence.
+    status_box = pn.pane.Markdown("", sizing_mode="stretch_width")
 
     # --- Repair Index ---
     btn_repair = pn.widgets.Button(name="Repair Index", button_type="danger", icon="tool", visible=False)
     repair_status = pn.pane.Markdown("", sizing_mode="stretch_width")
 
+    # --- Delete Index ---
+    btn_delete_index = pn.widgets.Button(
+        name="Delete Usearch Index",
+        button_type="danger",
+        icon="trash",
+    )
+    delete_index_status = pn.pane.Markdown("", sizing_mode="stretch_width")
+
+    def _update_action_buttons(status):
+        """Set visibility of the three action buttons from the current status.
+
+        - Check Health: visible whenever a database is loaded.
+        - Delete Index: visible only when the usearch index file is present.
+        - Repair Index: visible whenever the status is known to be unhealthy
+          (``is_healthy is False``): index missing, count mismatch, or a health
+          check that found missing embeddings.
+        """
+        loaded = bool(vm.eng and vm.eng.db)
+        index_present = bool(status and status.index_present)
+
+        btn_health_check.visible = loaded
+        btn_delete_index.visible = index_present
+        btn_repair.visible = bool(status) and status.is_healthy is False
+
+    def _refresh_status_section():
+        """Render the lightweight status box and refresh button visibility.
+
+        Called on page build, engine/DB state change, and after delete/repair.
+        """
+        if not (vm.eng and vm.eng.db):
+            status_box.object = "_No database loaded._"
+            _update_action_buttons(None)
+            return
+        try:
+            status = vm.eng.get_database_status()
+        except Exception as e:
+            status_box.object = f"_(Could not read database status: {e})_"
+            _update_action_buttons(None)
+            return
+        status_box.object = f"```\n{status}\n```"
+        _update_action_buttons(status)
+
     async def _run_health_check(_):
-        if not vm.eng or not vm.eng.db:
-            health_check_result.object = "⚠️ No database loaded. Please initialize the engine on the Config tab first."
+        if not (vm.eng and vm.eng.db):
+            status_box.object = "_No database loaded. Initialize the engine on the Config tab first._"
             return
         btn_health_check.disabled = True
         btn_health_check.name = "Checking..."
-        btn_repair.visible = False
         repair_status.object = ""
         try:
-            result = await asyncio.get_running_loop().run_in_executor(None, vm.eng.db_health_check)
-            health_check_result.object = f"```\n{result}\n```"
-            if not result.is_healthy:
-                btn_repair.visible = True
+            status = await asyncio.get_running_loop().run_in_executor(
+                None, lambda: vm.eng.get_database_status(include_health=True)
+            )
+            status_box.object = f"```\n{status}\n```"
+            _update_action_buttons(status)
         except Exception as e:
-            health_check_result.object = f"❌ Health check failed: {e}"
+            status_box.object = f"❌ Health check failed: {e}"
         finally:
             btn_health_check.disabled = False
             btn_health_check.name = "Check DB Health"
 
     btn_health_check.on_click(_run_health_check)
+
+    def _on_delete_index(_):
+        """Show a confirmation dialog before deleting the usearch index."""
+        if not vm.eng or not vm.eng.db:
+            vm.notify("No database loaded.", "error")
+            return
+
+        try:
+            status = vm.eng.get_database_status()
+        except Exception as e:
+            vm.notify(f"Could not read index info: {e}", "error")
+            return
+
+        if not status.index_present:
+            vm.notify("Usearch index file does not exist.", "warn")
+            return
+
+        btn_cancel = pn.widgets.Button(name="Cancel", button_type="default")
+        btn_confirm = pn.widgets.Button(name="Yes, delete it", button_type="danger")
+
+        dialog_content = pn.Column(
+            pn.pane.Markdown(
+                f"### Delete usearch index?\n\n"
+                f"This will permanently delete the usearch index file "
+                f"(`{USEARCH_INDEX_FILENAME}`, **{status.index_size_str()}**) from disk.\n\n"
+                f"The SQLite tables are untouched. You can rebuild the index "
+                f"afterwards using **Repair Index**."
+            ),
+            pn.Row(btn_cancel, btn_confirm),
+        )
+
+        dialog = Dialog(dialog_content, title="Confirm index deletion")
+        dialogs_container[:] = [dialog]
+        dialog.open = True
+
+        def _cancel(_):
+            dialog.open = False
+            dialogs_container.clear()
+
+        async def _confirm(_):
+            dialog.open = False
+            dialogs_container.clear()
+            btn_delete_index.disabled = True
+            delete_index_status.object = "⏳ Deleting index..."
+            try:
+                freed_bytes = await asyncio.get_running_loop().run_in_executor(
+                    None, vm.eng.delete_usearch_index
+                )
+                delete_index_status.object = (
+                    f"🗑 Index deleted ({format_size(freed_bytes)} freed). "
+                    f"Use **Repair Index** to rebuild it."
+                )
+                _refresh_status_section()
+                vm.notify("Usearch index deleted.", "success")
+            except Exception as e:
+                delete_index_status.object = f"❌ Delete failed: {e}"
+                vm.notify(f"Delete failed: {e}", "error")
+            finally:
+                btn_delete_index.disabled = False
+
+        btn_cancel.on_click(_cancel)
+        btn_confirm.on_click(_confirm)
+
+    btn_delete_index.on_click(_on_delete_index)
 
     async def _run_repair(_):
         btn_repair.disabled = True
@@ -319,19 +427,21 @@ def build(vm):
             await _run_health_check(None)
         except Exception as e:
             repair_status.object = f"❌ Repair failed: {e}"
+            _refresh_status_section()
         finally:
             btn_repair.disabled = False
             btn_repair.name = "Repair Index"
 
     btn_repair.on_click(_run_repair)
 
+    # Populate the status box and button visibility on load.
+    _refresh_status_section()
+
     return pn.Column(
-        pn.Row("## Create New Database from BAW", pn.Spacer(), database_help_btn),
-        pn.pane.Alert("This tool will build a new database in the directory specified in your current project configuration.", alert_type="info"),
+        pn.Row("## Build Database", pn.Spacer(), database_help_btn),
         auth_warning,  # Show auth warning when no token
         pn.Row(
             pn.Column(
-                pn.Row("Creation Settings", pn.Spacer(), db_settings_help_btn),
                 db_path_display,
                 pn.Row(max_files, max_embeddings, sizing_mode="stretch_width"),
                 use_cached_list,
@@ -339,8 +449,7 @@ def build(vm):
                 sizing_mode="stretch_width",
             ),
             pn.Column(
-                pn.Row("Recording Filters", pn.Spacer(), recordings_filter_help_btn),
-                filter_editor,
+                filter_editor.view,
                 sizing_mode="stretch_width",
             ),
             sizing_mode="stretch_width",
@@ -351,10 +460,24 @@ def build(vm):
         status_pane,
         progress_pane,
         pn.layout.Divider(),
-        pn.Row("## Database Health Check"),
-        pn.Row(btn_health_check, align="start"),
-        health_check_result,
-        pn.Row(btn_repair, align="start"),
-        repair_status,
+        pn.Row("## Database Status"),
+        pn.Row(
+            pn.Column(
+                status_box,
+                repair_status,
+                delete_index_status,
+                sizing_mode="stretch_width",
+                styles={"flex": "3"},
+            ),
+            pn.Column(
+                btn_health_check,
+                btn_delete_index,
+                btn_repair,
+                sizing_mode="stretch_width",
+                styles={"flex": "1"},
+            ),
+            sizing_mode="stretch_width",
+        ),
+        dialogs_container,
         sizing_mode="stretch_width"
     )

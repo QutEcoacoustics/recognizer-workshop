@@ -3,7 +3,7 @@ import html
 import pandas as pd
 import panel as pn
 
-from recognizer_workshop.app.services.db_labels.add_db_labels import DatabaseSummary
+from recognizer_workshop.app.services.database_status import DatabaseStatus
 from recognizer_workshop.app.services.version import get_version_status_string
 from recognizer_workshop.ui.panel.view_model import ViewModel
 
@@ -48,11 +48,11 @@ def _build_status_view(vm: ViewModel):
     )
 
     # Database Summary Section
-    db_summary: DatabaseSummary = status_data.get('db_summary')
+    db_status: DatabaseStatus = status_data.get('database')
     db_metadata = status_data.get('db_metadata')
-    if db_summary:
+    if db_status:
         # Create a table for the label counts
-        labels_dict = db_summary.label_counts
+        labels_dict = db_status.label_counts
         if labels_dict:
             # Reformat dict for better display in DataFrame
             table_data = []
@@ -94,8 +94,13 @@ def _build_status_view(vm: ViewModel):
 
         db_summary_view = pn.Column(
             "### Database Summary",
-            pn.pane.HTML(f"<strong>Total Embeddings:</strong> {db_summary.total_embeddings}", margin=(0, 0)),
-            pn.pane.HTML(f"<strong>Datasets:</strong> {', '.join(db_summary.datasets) if db_summary.datasets else 'None'}", margin=(0, 0)),
+            pn.pane.HTML(f"<strong>Embeddings (database):</strong> {db_status.db_embeddings}", margin=(0, 0)),
+            pn.pane.HTML(f"<strong>Embeddings (index):</strong> {db_status.index_embeddings}", margin=(0, 0)),
+            pn.pane.HTML(f"<strong>Datasets:</strong> {', '.join(db_status.datasets) if db_status.datasets else 'None'}", margin=(0, 0)),
+            pn.pane.HTML(
+                f"<strong>Usearch Index:</strong> {db_status.index_size_str()}",
+                margin=(0, 0),
+            ),
             labels_table,
             pn.pane.Markdown("#### Database Metadata"),
             pn.pane.HTML(

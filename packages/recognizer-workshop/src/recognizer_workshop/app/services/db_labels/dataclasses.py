@@ -225,27 +225,3 @@ class LabelCounts:
     def __str__(self) -> str:
         return f"{self.label_name}: {self.positive} positive, {self.negative} negative"
 
-
-@dataclasses.dataclass
-class DatabaseSummary:
-    total_embeddings: int
-    datasets: List[str]
-    label_counts: Dict[str, LabelCounts]
-
-    def __str__(self) -> str:
-        lines = [
-            "DB Summary:",
-            f"  Number of embeddings: {self.total_embeddings}",
-            f"  {len(self.datasets)} Dataset(s): {', '.join(self.datasets)}",
-            ""
-        ]
-        
-        if self.label_counts:
-            lines.append("Label counts:")
-            for label_name in sorted(self.label_counts.keys()):
-                lines.append(f"  {str(self.label_counts[label_name])}")
-        else:
-            lines.append("No labeled embeddings in db.")
-            
-        return "\n".join(lines)
-

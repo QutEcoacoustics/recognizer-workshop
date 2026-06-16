@@ -26,11 +26,15 @@ from recognizer_workshop.app.app_settings import app_settings  # noqa: F401 — 
 from recognizer_workshop.app.services.events.upload_detections import upload_detections
 from recognizer_workshop.app.services.db_labels.fetch_baw_labels import labels_from_event_taggings
 from recognizer_workshop.app.services.db_labels.add_db_labels import add_labels_to_db
-from recognizer_workshop.app.services.db_labels.db_labels_info import get_db_summary, get_label_counts
+from recognizer_workshop.app.services.db_labels.db_labels_info import get_label_counts
 from recognizer_workshop.app.services.db_labels.dataclasses import LabelName
 from recognizer_workshop.app.services import training as training_service
-from recognizer_workshop.app.create_database.db_health_check import run_health_check
 from recognizer_workshop.app.create_database.repair_index import repair_index
+from recognizer_workshop.app.services.database_status import (
+    get_database_status,
+    database_exists_at,
+    delete_usearch_index as _delete_usearch_index,
+)
 from recognizer_workshop.app.services.baw_insertions import get_last_filter_for_dataset
 from recognizer_workshop.app.services.inference.inference import run_inference as inference_service_run_inference
 
@@ -148,7 +152,7 @@ class agile_state:
 
         num_embeddings = self.db.count_embeddings()
         log.info(f'DB initialized with {num_embeddings} embeddings.')
-        self.db_summary()
+        log.info('DB status: %s', get_database_status(self.db))
 
         #TODO: This is a hack to get the audio loader to be created even when it's not used.  
         # seems that embed config metadata is not inserted during legacy conversion. 
@@ -622,7 +626,7 @@ class agile_state:
         - embedding_runtime_ready: Whether the worker-based embedding runtime is ready
         - embedding_model_config: The configuration of the embedding model
         - db_metadata: Metadata stored in the hoplite DB
-        - db_summary: A summary of the database contents (self.db.summary())
+        - database: A DatabaseStatus snapshot (or None when no DB is loaded)
         """
 
         embedding_runtime_ready = (
@@ -637,26 +641,30 @@ class agile_state:
             "embedding_model_loaded": embedding_runtime_ready,
             "embedding_model_config": self.db_model_config,
             "db_metadata": self.db.get_metadata(None) if self.db else None,
-            "db_summary": self.db_summary() if self.db else None,
+            "database": self.get_database_status() if self.db else None,
         }
 
         return status
 
-    def db_summary(self):
-        """Debugging/sanity checking to see what's in the database"""
-        return get_db_summary(self.db)
+    def get_database_status(self, include_health: bool = False):
+        """Return a consolidated DatabaseStatus snapshot for the loaded database.
 
-    def db_health_check(self):
-        """Check consistency between SQLite embeddings and usearch index."""
+        This is the single entry point for database status. Cheap sections
+        (existence, counts, datasets, label counts, index size) are always
+        populated; the expensive consistency check is only included when
+        ``include_health=True``.
+        """
         if not self.db:
             raise ValueError("Database not initialized.")
-        try:
-            result = run_health_check(self.db)
-            log.info("Health check result: %s", result)
-            return result
-        except Exception:
-            log.exception("Health check failed")
-            raise
+        return get_database_status(self.db, include_health=include_health)
+
+    def database_exists(self) -> bool:
+        """True if a database exists on disk at the configured path.
+
+        Path-only check that does not require the database to be loaded; used to
+        drive UI state before the engine has initialised a database.
+        """
+        return database_exists_at(self.config.db_path)
 
     def repair_db_index(self, progress_callback=None, stop_event=None):
         """Rebuild the usearch index by re-downloading parquet files."""
@@ -677,27 +685,54 @@ class agile_state:
             log.exception("Index repair failed")
             raise
 
-    def get_baw_filters(self):
-        """returns a list of audio_recording filter critera used to create the database
-        This is saved as hoplite db metadata and is used to get events from the workbench for
-        adding labels to embeddings
+    def delete_usearch_index(self):
+        """Delete the usearch index file from disk (SQLite tables are untouched).
+
+        After unlinking the file we reload the database so the in-memory usearch
+        index reflects the on-disk state. The loaded ``db.ui`` is a live
+        (memory-mapped) index; deleting the file alone leaves it populated, so
+        the health check would keep reporting the deleted embeddings as present
+        and a later commit could write the stale index back to disk.
         """
-        # Check baw_insertions first (last filter used for fetched_labels, falling back to search_set)
-        last_filter = get_last_filter_for_dataset(self.db, 'fetched_labels', fallback_dataset='search_set')
-        if last_filter is not None:
-            return [last_filter]
+        if not self.db:
+            raise ValueError("Database not initialized.")
+        freed_bytes = _delete_usearch_index(self.db)
+        # Reload via the single DB-loading path so the stale in-memory index is
+        # replaced by a fresh empty one. The SQLite file still exists, so this
+        # rebuilds an empty index ready to be repopulated by repair_db_index().
+        self.init_db()
+        return freed_bytes
+
+    def get_baw_filters(self, dataset_priority=None, fallback_to_legacy=True):
+        """Return the recording filter(s) stored in the database metadata.
+
+        Looks up the most recent insertion filter for each dataset in
+        *dataset_priority* order (defaults to ``fetched_labels`` then
+        ``search_set``), falling back to the legacy ``baw_filters`` metadata key
+        when *fallback_to_legacy* is true. Returns ``None`` when nothing is found.
+
+        This is the single non-UI resolver for "what filter is associated with
+        this database"; the filter editor widget reads through it.
+        """
+        dataset_priority = dataset_priority or ['fetched_labels', 'search_set']
+
+        # Check baw_insertions first (last filter used per dataset, in priority order)
+        for dataset_name in dataset_priority:
+            last_filter = get_last_filter_for_dataset(self.db, dataset_name)
+            if last_filter is not None:
+                return [last_filter]
 
         # Legacy fallback: read from old baw_filters metadata key
-        try:
-            baw_filters = self.db.get_metadata('baw_filters')
-        except KeyError:
-            baw_filters = None
+        if fallback_to_legacy:
+            try:
+                baw_filters = self.db.get_metadata('baw_filters')
+            except KeyError:
+                baw_filters = None
+            if baw_filters:
+                return baw_filters.get('filters', None)
 
-        if not baw_filters:
-            log.warning("No baw_filters found in db metadata")
-            return None
-        
-        return baw_filters.get('filters', None)
+        log.warning("No baw_filters found in db metadata")
+        return None
     
 
     def set_baw_filters(self, baw_filters: list):
@@ -712,10 +747,11 @@ class agile_state:
         self.db.commit()
 
 
-    def fetch_labels(self):
+    def fetch_labels(self, baw_filters=None):
         """
-        For the configured target labels, fetches labels from the workbench based on the baw_filters 
-        configured in the database metadata. 
+        For the configured target labels, fetches labels from the workbench using the
+        supplied *baw_filters*. When *baw_filters* is ``None`` it falls back to the
+        filter(s) stored in the database metadata.
         """
 
         self.labels_fetch_state = 'running'
@@ -723,7 +759,8 @@ class agile_state:
         self.labels_fetch_message = 'Fetching labels from workbench...'
 
         try:
-            baw_filters = self.get_baw_filters()
+            if baw_filters is None:
+                baw_filters = self.get_baw_filters()
             if not baw_filters:
                 log.warning("No baw_filters found in db metadata. Cannot update labels.")
                 self.fetched_label_result_sets = []
@@ -874,8 +911,20 @@ class agile_state:
     def save_classifier(self, path=None):
         if path is None:
             path = Path(self.config.models_folder) / 'classifier.json'
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        self.classifier.save(path)
+        output_path = Path(path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # I prefer it to save pretty. Perch hoplite saves compact. 
+        # This hack just opens it, prettifies it, and saves it again.
+        self.classifier.save(output_path)
+        try:
+            with output_path.open('r', encoding='utf-8') as f:
+                classifier_json = json.load(f)
+            with output_path.open('w', encoding='utf-8') as f:
+                json.dump(classifier_json, f, indent=2)
+                f.write('\n')
+        except (OSError, ValueError) as exc:
+            log.warning('Could not prettify classifier JSON at %s: %s', output_path, exc)
       
 
     def run_inference(self, output_filepath=None, threshold=0.0, labels=None, dataset=None, subset=1, exclude_labeled=False):

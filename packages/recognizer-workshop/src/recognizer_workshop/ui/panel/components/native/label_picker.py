@@ -28,8 +28,11 @@ def build_active_label_picker(vm) -> pn.Row:
             select.disabled = True
             return
 
-        pool = eng.config.target_labels or []   # List[LabelName]
-        log.debug(f"Rebuilding active label picker with {len(pool)} target labels...")
+        pool = [
+            ln for ln in (eng.config.target_labels or [])
+            if getattr(ln, "species", "") and str(getattr(ln, "species", "")).strip()
+        ]
+        log.debug("Rebuilding active label picker with %d target labels...", len(pool))
         # Options map friendly text -> LabelName
         opts = {str(ln): ln for ln in pool}
         select.options = opts
@@ -47,7 +50,12 @@ def build_active_label_picker(vm) -> pn.Row:
             eng.active_label = first_ln
             vm.obs.bump("active_label")
         else:
+            # No selectable labels remain: clear the picker and the engine so
+            # downstream actions don't keep using a now-filtered active label.
             select.value = None
+            if getattr(eng, "active_label", None) is not None:
+                eng.active_label = None
+                vm.obs.bump("active_label")
 
     # React to changes in the available labels
     @pn.depends(vm.obs.ensure("target_labels").param.version, watch=True)

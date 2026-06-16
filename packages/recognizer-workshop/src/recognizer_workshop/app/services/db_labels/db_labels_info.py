@@ -11,7 +11,7 @@ from perch_hoplite import audio_io
 from perch_hoplite.db import interface as hoplite_interface
 
 from baw_helpers.baw_utils import extract_arid_and_domain
-from recognizer_workshop.app.services.db_labels.dataclasses import LabelCounts, DatabaseSummary
+from recognizer_workshop.app.services.db_labels.dataclasses import LabelCounts
 from baw_helpers.baw_helpers import get_events_for_sites, get_verifications_for_sites
 from recognizer_workshop.app.agile_modeling_helpers import get_embeddings_by_source
 from recognizer_workshop.app.create_database.create_database import add_parquet_to_db
@@ -38,22 +38,6 @@ def get_label_counts(db) -> Dict[str, LabelCounts]:
             negative=negative_counts.get(lbl, 0) # Use .get for safety
         )
     return all_counts
-
-
-def get_db_summary(db) -> DatabaseSummary:
-    """
-    Returns:
-        A DatabaseSummary instance containing the state of the DB.
-    """
-    total_embeddings = db.count_embeddings()
-    dataset_names = db.get_dataset_names()
-    label_counts_data = get_label_counts(db)
-    
-    return DatabaseSummary(
-        total_embeddings=total_embeddings,
-        datasets=dataset_names,
-        label_counts=label_counts_data
-    )
 
 
 def get_db_arids(db) -> set:
