@@ -385,12 +385,17 @@ def get_events_for_sites(baw_api, filter_params, tags=None):
     Get audio_events for the filter_params provided.
     If tags is provided, only get events with those tags.
     Include verification summary. 
+    If filter_params is False, no filter constraints are applied (fetch all events for the given tags).
     """
     
-    ae_filter = filter_params.copy()
+    # Special case: False means no filter constraints
+    if filter_params is False:
+        ae_filter = {}
+    else:
+        ae_filter = filter_params.copy()
 
-    if "filter" in ae_filter:
-        ae_filter = ae_filter["filter"]
+        if "filter" in ae_filter:
+            ae_filter = ae_filter["filter"]
 
     if tags is not None:
         if isinstance(tags, str):

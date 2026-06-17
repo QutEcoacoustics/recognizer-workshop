@@ -3,6 +3,7 @@ import threading
 import pandas as pd
 import panel as pn
 
+from recognizer_workshop.app.services.baw_filters import format_filter_params_for_display
 from recognizer_workshop.ui.panel.components.native.filter_editor import FilterEditor
 
 def build(vm):
@@ -84,24 +85,6 @@ def build(vm):
             )
             filter_section.objects = [filter_editor.view]
 
-
-    def _format_filter_params_for_display(filter_params: dict, fallback_name: str = "Filter") -> str:
-        """Convert filter parameters to human-readable description."""
-        filter_parts = []
-        
-        if 'projects.id' in filter_params and 'in' in filter_params['projects.id']:
-            project_ids = ', '.join(map(str, filter_params['projects.id']['in']))
-            filter_parts.append(f"Projects: {project_ids}")
-        if 'regions.id' in filter_params and 'in' in filter_params['regions.id']:
-            region_ids = ', '.join(map(str, filter_params['regions.id']['in']))
-            filter_parts.append(f"Regions: {region_ids}")
-        if 'sites.id' in filter_params and 'in' in filter_params['sites.id']:
-            site_ids = ', '.join(map(str, filter_params['sites.id']['in']))
-            filter_parts.append(f"Sites: {site_ids}")
-        
-        return ' + '.join(filter_parts) if filter_parts else fallback_name
-
-
     def _ensure_tables():
         nonlocal summary_table, outcomes_table, details_table
         if summary_table is not None:
@@ -147,7 +130,7 @@ def build(vm):
             counts = result_set.get('counts', {})
             
             # Use the abstracted function to get filter description
-            filter_desc = _format_filter_params_for_display(filter_params, f"Filter {i+1}")
+            filter_desc = format_filter_params_for_display(filter_params, f"Filter {i+1}")
             
             # Add rows for each species and label type
             for species, label_counts in counts.items():
@@ -405,7 +388,7 @@ def build(vm):
                     # each item in the outcomes list corresponds to a result_set, which corresponds to an audio recording filter.
                     # we display the filter in a human-readable way
                     for i, item in enumerate(outcomes_list):
-                        item['filter_desc'] = _format_filter_params_for_display(
+                        item['filter_desc'] = format_filter_params_for_display(
                             item['filter_params'],
                             fallback_name=f"Filter {i+1}"
                         )
