@@ -9,7 +9,6 @@ import logging
 
 log = logging.getLogger(__name__)
 
-
 def build(vm):
     def _ensure_tabulator():
         if getattr(_ensure_tabulator, "_loaded", False):
@@ -151,7 +150,7 @@ def build(vm):
 
     def _run(_):
         if not vm.eng: return vm.notify("Initialize first.", "error")
-        if not hasattr(vm.eng, 'classifier') or vm.eng.classifier is None:
+        if not vm.eng.has_trained_classifier():
             return vm.notify("No classifier available. Train a classifier first.", "error")
         
         try:

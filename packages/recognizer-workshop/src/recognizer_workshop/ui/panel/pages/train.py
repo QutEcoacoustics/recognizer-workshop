@@ -19,6 +19,8 @@ def build(vm):
     train_ratio   = pn.widgets.FloatInput(name="Train Ratio", value=0.9, start=0.1, end=0.99, step=0.01)
     weak_neg_weight = pn.widgets.FloatInput(name="Weak Negative Weight", value=0.05, step=0.01)
     weak_negs_batch = pn.widgets.IntInput(name="Weak Negatives Batch Size", value=16, start=0)
+    btn_auto_weak_negs = pn.widgets.Button(name="Auto Set", button_type="default", sizing_mode="fixed", width=100)
+    balance_dataset = pn.widgets.Checkbox(name="Balance dataset", value=True)
 
     btn_train = pn.widgets.Button(name="Train classifier", button_type="success", sizing_mode="fixed", width=150)
     
@@ -48,6 +50,7 @@ def build(vm):
                 train_ratio=train_ratio.value,
                 batch_size=batch_size.value,
                 weak_negatives_batch_size=weak_negs_batch.value,
+                balance_dataset=balance_dataset.value,
             )
         
 
@@ -56,10 +59,26 @@ def build(vm):
             progress_bar.bar_color = 'success'
             progress_bar.value = 0 
             with patch_tqdm(progress_bar):
-                scores = await asyncio.to_thread(run_training)
+                train_result = await asyncio.to_thread(run_training)
+
+            scores = train_result.get('metrics', train_result)
+            info = train_result.get('info', {}) if isinstance(train_result, dict) else {}
 
             metrics_df = format_metrics_matrix_df(scores)
-            results_view.objects = [render_html_table(metrics_df, show_header=True)]
+            view_objects = [
+                pn.pane.Markdown("### Metrics"),
+                render_html_table(metrics_df, show_header=True),
+            ]
+            if info:
+                info_df = format_training_info_df(info)
+                view_objects.append(pn.pane.Markdown("### Training Setup & Balancing"))
+                view_objects.append(render_html_table(info_df, show_header=True))
+
+                factors_df = format_oversample_factors_df(info)
+                if factors_df is not None:
+                    view_objects.append(pn.pane.Markdown("### Oversample Factors"))
+                    view_objects.append(render_html_table(factors_df, show_header=True))
+            results_view.objects = view_objects
             vm.notify("Training complete.", "success")
             
         except Exception as e:
@@ -70,10 +89,23 @@ def build(vm):
             btn_train.disabled = False
             progress_bar.visible = False
 
+    def _auto_set_weak_negs(_):
+        if not vm.eng: return vm.notify("Initialize first.", "error")
+        try:
+            resolved_batch, adjusted_weight, message = vm.eng.calculate_balanced_weak_negatives_batch_size(
+                weak_neg_weight=weak_neg_weight.value,
+                batch_size=batch_size.value,
+            )
+            weak_negs_batch.value = resolved_batch
+            weak_neg_weight.value = adjusted_weight
+            vm.notify(message, "info")
+        except Exception as e:
+            vm.notify(f"Could not auto-set weak negatives batch size: {e}", "error")
+
 
     def _save(_):
         if not vm.eng: return vm.notify("Initialize first.", "error")
-        if not hasattr(vm.eng, 'classifier') or vm.eng.classifier is None:
+        if not vm.eng.has_trained_classifier():
             return vm.notify("No classifier has been trained yet.", "warn")
         try:
             out = (vm.eng.config.models_folder / f"{cls_name.value}.json").absolute()
@@ -84,6 +116,7 @@ def build(vm):
             vm.notify(f"Save classifier failed: {e}", "error")
 
     btn_train.on_click(_train)
+    btn_auto_weak_negs.on_click(_auto_set_weak_negs)
     btn_save.on_click(_save)
 
     # training params
@@ -96,7 +129,7 @@ def build(vm):
             ),
             pn.Column(
                 pn.Row("Labeled Data Parameters", pn.Spacer(), labeled_data_params_help_btn),
-                pn.Row(train_ratio, weak_neg_weight, weak_negs_batch),
+                pn.Row(train_ratio, weak_neg_weight, weak_negs_batch, btn_auto_weak_negs, balance_dataset),
                 sizing_mode="stretch_width",
             ),
             sizing_mode="stretch_width",
@@ -202,6 +235,69 @@ def _format_metric_value(value):
             return ''
         return f'{float(value):.3f}'
     return str(value)
+
+
+def format_training_info_df(info: dict) -> pd.DataFrame:
+    weak_negs = info.get('resolved_weak_negatives_batch_size')
+    balance_enabled = info.get('balance_dataset_enabled')
+    oversampling_applied = info.get('oversampling_applied')
+    requested = info.get('oversampled_train_ids_requested_count')
+    used = info.get('oversampled_train_ids_used_count')
+    excluded_eval = info.get('excluded_eval_from_oversampled_count')
+    original_train = info.get('original_train_ids_count')
+    eval_count = info.get('eval_ids_count')
+
+    rows = [
+        {'Setting': 'Weak negatives batch size', 'Value': weak_negs if weak_negs is not None else 'n/a'},
+        {'Setting': 'Balance dataset enabled', 'Value': str(bool(balance_enabled))},
+        {'Setting': 'Oversampling applied', 'Value': str(bool(oversampling_applied))},
+    ]
+
+    if requested is not None:
+        rows.append({'Setting': 'Oversampled IDs requested', 'Value': str(requested)})
+    if used is not None:
+        rows.append({'Setting': 'Oversampled IDs used in train split', 'Value': str(used)})
+    if excluded_eval is not None:
+        rows.append({'Setting': 'Oversampled IDs excluded (in eval split)', 'Value': str(excluded_eval)})
+    if original_train is not None:
+        rows.append({'Setting': 'Original train IDs before oversampling', 'Value': str(original_train)})
+    if eval_count is not None:
+        rows.append({'Setting': 'Eval IDs', 'Value': str(eval_count)})
+
+    return pd.DataFrame(rows, columns=['Setting', 'Value'])
+
+
+def format_oversample_factors_df(info: dict) -> pd.DataFrame | None:
+    # Prefer the richer per-label breakdown when available (includes original counts).
+    breakdown = info.get('per_label_oversample_breakdown')
+    if isinstance(breakdown, dict) and breakdown:
+        rows = []
+        for label, entry in breakdown.items():
+            rows.append(
+                {
+                    'Label': str(label),
+                    'Pos count': entry.get('pos_count', ''),
+                    'Neg count': entry.get('neg_count', ''),
+                    'Pos factor': _format_metric_value(entry.get('pos_factor', 1.0)),
+                    'Neg factor': _format_metric_value(entry.get('neg_factor', 1.0)),
+                }
+            )
+        return pd.DataFrame(rows, columns=['Label', 'Pos count', 'Neg count', 'Pos factor', 'Neg factor'])
+
+    # Fall back to the bare factors dict for older results.
+    factors = info.get('oversample_factors')
+    if not isinstance(factors, dict) or not factors:
+        return None
+    rows = []
+    for label, factor_info in factors.items():
+        rows.append(
+            {
+                'Label': str(label),
+                'Pos factor': _format_metric_value(factor_info.get('pos_factor', 1.0)),
+                'Neg factor': _format_metric_value(factor_info.get('neg_factor', 1.0)),
+            }
+        )
+    return pd.DataFrame(rows, columns=['Label', 'Pos factor', 'Neg factor'])
 
 
 def render_html_table(df: pd.DataFrame, show_header: bool = True):

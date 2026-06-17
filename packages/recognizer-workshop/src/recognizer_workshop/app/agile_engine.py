@@ -76,6 +76,7 @@ class agile_state:
     labels_commit_state = 'idle'
     labels_commit_message = ''
     labels_commit_error = None
+    train_result = None
 
     def __init__(self, config):
         self.config = config
@@ -97,14 +98,18 @@ class agile_state:
 
     @staticmethod
     def count_fetched_labels(result_sets) -> int:
-        """Count converted hoplite labels across fetched result sets."""
+        """Count actual labeled segments across fetched result sets."""
         if not result_sets or not isinstance(result_sets, list):
             return 0
         total = 0
         for result_set in result_sets:
-            labels_map = result_set.get("labels", {}) if isinstance(result_set, dict) else {}
-            if isinstance(labels_map, dict):
-                total += len(labels_map)
+            counts = result_set.get("counts", {}) if isinstance(result_set, dict) else {}
+            if isinstance(counts, dict):
+                # Sum positive and negative counts across all labels
+                for label_counts in counts.values():
+                    if isinstance(label_counts, dict):
+                        total += label_counts.get('positive', 0)
+                        total += label_counts.get('negative', 0)
         return total
 
     @property
@@ -561,8 +566,10 @@ class agile_state:
                         num_steps = 128,
                         train_ratio = 0.9,
                         batch_size = 128,
-                        weak_negatives_batch_size = 128):
+                        weak_negatives_batch_size = 128,
+                        balance_dataset: bool = True):
         target_labels = self.get_target_labels()
+        resolved_weak_negatives_batch_size = max(int(weak_negatives_batch_size), 0)
 
         params = training_service.TrainClassifierParams(
             learning_rate=learning_rate,
@@ -570,17 +577,43 @@ class agile_state:
             num_steps=num_steps,
             train_ratio=train_ratio,
             batch_size=batch_size,
-            weak_negatives_batch_size=weak_negatives_batch_size,
+            weak_negatives_batch_size=resolved_weak_negatives_batch_size,
         )
         log.info('Training for target labels: %s', target_labels)
+
         result = training_service.train_classifier(
             db=self.db,
             target_labels=target_labels,
             params=params,
+            balance_dataset=balance_dataset,
         )
 
-        self.classifier = result.classifier_model
-        return result.eval_scores
+        # Keep a single source of truth in state: model + metrics + training_info.
+        self.train_result = result
+        return training_service.training_result_to_json(result)
+
+    def has_trained_classifier(self) -> bool:
+        return bool(
+            self.train_result is not None
+            and getattr(self.train_result, 'classifier_model', None) is not None
+        )
+
+    def get_trained_classifier(self):
+        if not self.has_trained_classifier():
+            raise ValueError('No classifier available. Train a classifier first.')
+        return self.train_result.classifier_model
+
+    def calculate_balanced_weak_negatives_batch_size(self,
+                        weak_neg_weight = 0.05,
+                        batch_size = 128) -> tuple[int, float, str]:
+        target_labels = self.get_target_labels()
+
+        return training_service.calculate_balanced_weak_negatives_batch_size(
+            db=self.db,
+            target_labels=target_labels,
+            weak_neg_weight=weak_neg_weight,
+            batch_size=batch_size,
+        )
 
 
 
@@ -596,16 +629,17 @@ class agile_state:
         """
         
         # unless we specify target labels, search for everything we trained on
+        classifier = self.get_trained_classifier()
         if target_labels is None:
-            target_labels = self.classifier.classes
+            target_labels = classifier.classes
             log.info("target_labels: %s", ','.join(target_labels))
         
         for target_label_idx, target_label in enumerate(target_labels):
 
             log.info('Searching for %s ...', target_label)
 
-            class_query = self.classifier.beta[:, target_label_idx]
-            bias = self.classifier.beta_bias[target_label_idx]
+            class_query = classifier.beta[:, target_label_idx]
+            bias = classifier.beta_bias[target_label_idx]
 
             # don't return anything, it saves to the self.search_results dict    
             self.search(
@@ -909,6 +943,7 @@ class agile_state:
 
 
     def save_classifier(self, path=None):
+        classifier = self.get_trained_classifier()
         if path is None:
             path = Path(self.config.models_folder) / 'classifier.json'
         output_path = Path(path)
@@ -916,7 +951,7 @@ class agile_state:
 
         # I prefer it to save pretty. Perch hoplite saves compact. 
         # This hack just opens it, prettifies it, and saves it again.
-        self.classifier.save(output_path)
+        classifier.save(output_path)
         try:
             with output_path.open('r', encoding='utf-8') as f:
                 classifier_json = json.load(f)
@@ -933,11 +968,12 @@ class agile_state:
         injecting the site_id and link columns via a row_func that uses baw_utils and 
         """
 
+        classifier = self.get_trained_classifier()
         if output_filepath is None:
             output_filepath = Path(self.config.predictions_folder) / 'inference.csv'
         Path(output_filepath).parent.mkdir(parents=True, exist_ok=True)
         # not self.run_inference
-        inference_service_run_inference(self.classifier,
+        inference_service_run_inference(classifier,
                         self.db,
                         output_filepath,
                         self.active_client,
