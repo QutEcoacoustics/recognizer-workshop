@@ -53,7 +53,12 @@ def test_calculate_balanced_weak_negatives_batch_size_matches_ratio_formula(tmp_
         batch_size=10,
     )
 
-    assert _resolved_batch == 0
+    # we need to add 8 negative's 'worth' @ 0.2 weight, so 40 weak negatives total, across all batches
+    # for 100% balancing. Default balancing factor is 0.6, so adjust that to 0.6*40 = 24 weak negatives across all batches. 
+    # with a batch size of 10, we are doing 12/10 batches, which means we need 10/12 * 24 = 20 weak negatives per 
+    # batch to achieve the desired balancing.
+
+    assert _resolved_batch == 20
 
 
 def test_calculate_balanced_weak_negatives_batch_size_returns_half_batch_size_when_already_balanced(tmp_path):
@@ -184,6 +189,7 @@ def test_train_classifier_balance_flow_uses_isolated_splits(monkeypatch, tmp_pat
     params = training.TrainClassifierParams(
         batch_size=4, weak_neg_weight=0.1, weak_negatives_batch_size=0, seed=42
     )
+
     captured = {}
 
     class DummyClassifier:

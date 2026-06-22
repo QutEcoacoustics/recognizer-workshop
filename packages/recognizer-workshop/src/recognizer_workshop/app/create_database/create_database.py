@@ -63,6 +63,7 @@ def create_database_from_baw(
         max_embeddings: int = 1_000_000,
         max_files: int = -1,
         use_cache: bool = True,
+        commit_every_files: int = 50,
         progress_callback: Callable[[dict], None] | None = None,
         stop_event: threading.Event | None = None,
 ):
@@ -108,6 +109,7 @@ def create_database_from_baw(
         api_client=client,    
         max_count=max_embeddings,
         config=config,
+        commit_every_files=commit_every_files,
         filter_dict=filter_params['filter'] if filter_params is not None else None,
         progress_callback=progress_callback,
         stop_event=stop_event,
@@ -124,6 +126,7 @@ def convert_parquet(
     db_type: str = 'sqlite_usearch',
     dataset_name: str = 'search_set',
     max_count: int = -1,
+    commit_every_files: int = 50,
     max_size: int | None = None,
     source_map_fn = _DEFAULT,
     api_client = None,
@@ -139,6 +142,7 @@ def convert_parquet(
         "db_type": db_type,
         "dataset_name": dataset_name,
         "max_count": max_count,
+        "commit_every_files": commit_every_files,
         "max_size": max_size,
         "source_map_fn": source_map_fn,
         "filter_dict": filter_dict,
@@ -647,6 +651,7 @@ def add_parquet_to_existing_db(
     db_type: str = 'sqlite_usearch',
     dataset_name: str = 'search_set',
     max_count: int = -1,
+    commit_every_files: int = 50,
     max_size: int | None = None,
     source_map_fn = _DEFAULT,
     filter_dict: dict | None = None,
@@ -667,6 +672,7 @@ def add_parquet_to_existing_db(
         api_client=api_client,
         dataset_name=dataset_name,
         max_count=max_count,
+        commit_every_files=commit_every_files,
         max_size=max_size,
         source_map_fn=source_map_fn,
         hop_size_s=hop_size_s,
@@ -696,6 +702,7 @@ def add_parquet_to_db(
     api_client: baw_api.baw_api | None = None,
     dataset_name: str = 'search_set',
     max_count: int = -1,
+    commit_every_files: int = 50,
     max_size: int = None,
     source_map_fn = _DEFAULT,
     hop_size_s: float = 5.0,
@@ -704,6 +711,9 @@ def add_parquet_to_db(
     stop_event: threading.Event | None = None,
 ):
     """Adds parquet files to an existing hoplite database."""
+
+    if commit_every_files < 0:
+        raise ValueError("commit_every_files must be >= 0")
     
     # if the source column values in the parquet files need to be converted, e.g. from friendly filename to original recording url
     if source_map_fn is _DEFAULT:
@@ -733,6 +743,7 @@ def add_parquet_to_db(
         )
         if filter_dict is not None:
             record_embeddings_added(db, dataset_name, filter_dict, 0)
+            db.commit()
         if progress_callback is not None:
             progress_callback({
                 "stage": "ingest_complete",
@@ -772,6 +783,14 @@ def add_parquet_to_db(
         
         if filter_dict is not None and num_inserted > 0:
             record_embeddings_added(db, dataset_name, filter_dict, num_inserted)
+
+        if commit_every_files > 0 and files_processed % commit_every_files == 0:
+            db.commit()
+            log.info(
+                "Checkpoint commit after %d files (total inserted: %d)",
+                files_processed,
+                total_inserted,
+            )
 
         if progress_callback is not None:
             progress_callback({
