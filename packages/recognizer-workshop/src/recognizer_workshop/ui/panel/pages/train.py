@@ -17,7 +17,7 @@ def build(vm):
     num_steps     = pn.widgets.IntInput(name="Num Steps", value=101, start=1)
     batch_size    = pn.widgets.IntInput(name="Batch Size", value=32, start=1)
     train_ratio   = pn.widgets.FloatInput(name="Train Ratio", value=0.9, start=0.1, end=0.99, step=0.01)
-    weak_neg_weight = pn.widgets.FloatInput(name="Weak Negative Weight", value=0.05, step=0.01)
+    weak_neg_weight = pn.widgets.FloatInput(name="Weak Negative Weight", value=0.05, start=0.0, step=0.01)
     weak_negs_batch = pn.widgets.IntInput(name="Weak Negatives Batch Size", value=16, start=0)
     btn_auto_weak_negs = pn.widgets.Button(name="Auto Set", button_type="default", sizing_mode="fixed", width=100)
     balance_dataset = pn.widgets.Checkbox(name="Balance dataset", value=True)
@@ -249,8 +249,8 @@ def format_training_info_df(info: dict) -> pd.DataFrame:
 
     rows = [
         {'Setting': 'Weak negatives batch size', 'Value': weak_negs if weak_negs is not None else 'n/a'},
-        {'Setting': 'Balance dataset enabled', 'Value': str(bool(balance_enabled))},
-        {'Setting': 'Oversampling applied', 'Value': str(bool(oversampling_applied))},
+        {'Setting': 'Balance dataset enabled', 'Value': str(bool(balance_enabled)) if balance_enabled is not None else 'n/a'},
+        {'Setting': 'Oversampling applied', 'Value': str(bool(oversampling_applied)) if oversampling_applied is not None else 'n/a'},
     ]
 
     if requested is not None:
@@ -276,8 +276,8 @@ def format_oversample_factors_df(info: dict) -> pd.DataFrame | None:
             rows.append(
                 {
                     'Label': str(label),
-                    'Pos count': entry.get('pos_count', ''),
-                    'Neg count': entry.get('neg_count', ''),
+                    'Pos count': entry.get('train_pos_count', ''),
+                    'Neg count': entry.get('train_neg_count', ''),
                     'Pos factor': _format_metric_value(entry.get('pos_factor', 1.0)),
                     'Neg factor': _format_metric_value(entry.get('neg_factor', 1.0)),
                 }

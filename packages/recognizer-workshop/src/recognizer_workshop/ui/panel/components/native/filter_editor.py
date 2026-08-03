@@ -127,7 +127,8 @@ class FilterEditor:
         clobbers a value the user has already set. Safe to call when no DB is
         loaded (it simply leaves the value untouched).
         """
-        if self._value and self._value[0]:
+        # Don't overwrite if a filter (including wildcard) is already saved
+        if self._value and (self._value[0] is False or self._value[0]):
             self._update_display()
             return
         resolved = resolve_filters_for_editor(
@@ -157,17 +158,19 @@ class FilterEditor:
         self._container[:] = [view]
 
     def _update_save_state(self, *_):
-        current = normalize_first_filter(self._value) if self._value and self._value[0] is not False else False
+        if self._value and self._value[0] is False:
+            current = False  # wildcard is already saved
+        elif self._value and self._value[0]:
+            current = normalize_first_filter(self._value)
+        else:
+            current = None  # nothing saved yet — distinct from wildcard
         candidate = self._parse_editor_value()
         self._btn_save.disabled = (candidate is None) or (candidate == current)
 
     def _show_edit_mode(self):
-        has_existing = (self._value and self._value[0] is False) or (normalize_first_filter(self._value) is not None)
-        self._edit_controls.objects = (
-            [self._filter_type_select, self._ids_input, self._btn_save, self._btn_cancel]
-            if has_existing else
-            [self._filter_type_select, self._ids_input, self._btn_save]
-        )
+        self._edit_controls.objects = [
+            self._filter_type_select, self._ids_input, self._btn_save, self._btn_cancel
+        ]
         self._populate_editors()
         self._update_save_state()
         self._set_container_view(self._edit_view)

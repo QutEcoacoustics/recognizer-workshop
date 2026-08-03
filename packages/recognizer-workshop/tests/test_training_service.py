@@ -53,7 +53,7 @@ def test_calculate_balanced_weak_negatives_batch_size_matches_ratio_formula(tmp_
         batch_size=10,
     )
 
-    # we need to add 8 negative's 'worth' @ 0.2 weight, so 40 weak negatives total, across all batches
+    # we need to add 8 negatives 'worth' @ 0.2 weight, so 40 weak negatives total, across all batches
     # for 100% balancing. Default balancing factor is 0.6, so adjust that to 0.6*40 = 24 weak negatives across all batches. 
     # with a batch size of 10, we are doing 12/10 batches, which means we need 10/12 * 24 = 20 weak negatives per 
     # batch to achieve the desired balancing.
