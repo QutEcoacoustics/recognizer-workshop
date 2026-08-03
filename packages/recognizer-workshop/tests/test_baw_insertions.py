@@ -39,7 +39,7 @@ def test_record_embeddings_added_creates_first_entry():
     assert log_data["datasets"]["search_set"]["insertions"] == [
         {"filter": filt, "embeddings_added": 7}
     ]
-    assert db.commit_calls == 1
+    assert db.commit_calls == 0
 
 
 def test_record_embeddings_added_increments_semantically_equivalent_filter():
@@ -54,7 +54,7 @@ def test_record_embeddings_added_increments_semantically_equivalent_filter():
     insertions = log_data["datasets"]["search_set"]["insertions"]
     assert len(insertions) == 1
     assert insertions[0]["embeddings_added"] == 8
-    assert db.commit_calls == 2
+    assert db.commit_calls == 0
 
 
 def test_record_embeddings_added_appends_for_distinct_filter():

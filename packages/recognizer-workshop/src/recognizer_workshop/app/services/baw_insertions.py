@@ -79,7 +79,7 @@ def record_embeddings_added(db, dataset_name: str, filter_dict: dict, count: int
 
     If an entry with a semantically equivalent filter already exists it is
     updated in place; otherwise a new entry is appended.  The metadata is
-    written and committed to the DB before returning.
+    written to the current DB transaction before returning.
     """
     log_data = get_baw_insertions(db)
     datasets = log_data.setdefault("datasets", {})
@@ -99,5 +99,6 @@ def record_embeddings_added(db, dataset_name: str, filter_dict: dict, count: int
         insertions.append({"filter": filter_dict, "embeddings_added": count})
 
     db.insert_metadata('baw_insertions', config_dict.ConfigDict(log_data))
-    db.commit()
     log.debug("Recorded %d embeddings added to dataset '%s'", count, dataset_name)
+
+

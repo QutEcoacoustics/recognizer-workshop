@@ -134,6 +134,7 @@ class DatabaseCreationTask:
         max_files: int = -1,
         max_embeddings: int = 1_000_000,
         use_cache: bool = True,
+        commit_every_files: int = 50,
         config=None,
     ):
         self.db_path = db_path
@@ -143,6 +144,7 @@ class DatabaseCreationTask:
         self.max_files = max_files
         self.max_embeddings = max_embeddings
         self.use_cache = use_cache
+        self.commit_every_files = commit_every_files
         self.config = config
         self._stop_event = threading.Event()
 
@@ -172,6 +174,7 @@ class DatabaseCreationTask:
             max_files=self.max_files,
             max_embeddings=self.max_embeddings,
             use_cache=self.use_cache,
+            commit_every_files=self.commit_every_files,
             config=self.config,
             progress_callback=progress_callback,
             stop_event=self._stop_event,

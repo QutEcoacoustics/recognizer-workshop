@@ -7,6 +7,7 @@ import pytest
 from ml_collections import config_dict
 
 from perch_hoplite.agile.classifier import LinearClassifier
+from recognizer_workshop.app.services.training import TrainingResult
 
 from recognizer_workshop.app.agile_config import AgileConfig
 from recognizer_workshop.app.agile_engine import agile_state
@@ -27,7 +28,11 @@ def engine_with_classifier(tmp_path):
         models_folder=tmp_path / "models",
     )
     eng = agile_state(config)
-    eng.classifier = _make_linear_classifier()
+    eng.train_result = TrainingResult(
+        classifier_model=_make_linear_classifier(),
+        eval_scores={},
+        training_info={},
+    )
     return eng, tmp_path
 
 
@@ -69,8 +74,8 @@ class TestSaveClassifier:
 
     def test_roundtrip_loads_correctly(self, engine_with_classifier):
         """Saved file must be loadable by LinearClassifier.load with equal weights."""
-        eng, tmp_path = engine_with_classifier
-        original = eng.classifier
+        eng, tmp_path = engine_with_classifier        
+        original = eng.get_trained_classifier()
         out = tmp_path / "classifier.json"
         eng.save_classifier(out)
         loaded = LinearClassifier.load(str(out))

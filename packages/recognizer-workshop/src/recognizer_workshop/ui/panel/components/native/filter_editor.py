@@ -6,7 +6,11 @@ The user supplies comma-separated IDs for one or more of projects, regions, and 
 """
 import panel as pn
 
-from recognizer_workshop.app.services.baw_filters import parse_csv_ints, normalize_first_filter
+from recognizer_workshop.app.services.baw_filters import (
+    format_filter_params_for_display,
+    normalize_first_filter,
+    parse_csv_ints,
+)
 
 
 def resolve_filters_for_editor(
@@ -123,7 +127,8 @@ class FilterEditor:
         clobbers a value the user has already set. Safe to call when no DB is
         loaded (it simply leaves the value untouched).
         """
-        if self._value and self._value[0]:
+        # Don't overwrite if a filter (including wildcard) is already saved
+        if self._value and (self._value[0] is False or self._value[0]):
             self._update_display()
             return
         resolved = resolve_filters_for_editor(
@@ -137,6 +142,12 @@ class FilterEditor:
     # --- Internal logic ---
     def _parse_editor_value(self):
         selected_key = self._filter_type_select.value
+        input_text = self._ids_input.value.strip()
+        
+        # Special case: "*" means fetch all recordings (no filter)
+        if input_text == "*":
+            return False
+        
         id_list = parse_csv_ints(self._ids_input.value)
         if not id_list:
             return None
@@ -147,47 +158,50 @@ class FilterEditor:
         self._container[:] = [view]
 
     def _update_save_state(self, *_):
-        current = normalize_first_filter(self._value)
+        if self._value and self._value[0] is False:
+            current = False  # wildcard is already saved
+        elif self._value and self._value[0]:
+            current = normalize_first_filter(self._value)
+        else:
+            current = None  # nothing saved yet — distinct from wildcard
         candidate = self._parse_editor_value()
         self._btn_save.disabled = (candidate is None) or (candidate == current)
 
     def _show_edit_mode(self):
-        has_existing = normalize_first_filter(self._value) is not None
-        self._edit_controls.objects = (
-            [self._filter_type_select, self._ids_input, self._btn_save, self._btn_cancel]
-            if has_existing else
-            [self._filter_type_select, self._ids_input, self._btn_save]
-        )
+        self._edit_controls.objects = [
+            self._filter_type_select, self._ids_input, self._btn_save, self._btn_cancel
+        ]
         self._populate_editors()
         self._update_save_state()
         self._set_container_view(self._edit_view)
 
-    @staticmethod
-    def _format_filters(filters):
-        """Formats the single filter for display."""
-        if not filters or not filters[0]:
-            return "No filter set."
-
-        filter_dict = filters[0]
-        # Find the first (and only) key in the dictionary (e.g., 'projects.id')
-        key = next(iter(filter_dict), None)
-        if not key or 'in' not in filter_dict[key]:
-            return "Invalid filter format."
-
-        display_name = KEY_MAP.get(key, key)  # Get the user-friendly name
-        ids_str = ', '.join(map(str, filter_dict[key]['in']))
-        return f"**{display_name}:** `{ids_str}`"
-
     def _update_display(self):
-        self._filter_display.object = self._format_filters(self._value)
-        if self._value and self._value[0]:
+        if not self._value or (self._value[0] is not False and not self._value[0]):
+            self._filter_display.object = "No filter set."
+        elif self._value[0] is False:
+            # Special case: False represents wildcard ("*")
+            self._filter_display.object = "**Fetch all recordings** (no filter)"
+        else:
+            self._filter_display.object = format_filter_params_for_display(
+                self._value[0],
+                fallback_name="Invalid filter format.",
+                key_labels=KEY_MAP,
+            )
+        if self._value and self._value[0] is not False and self._value[0]:
+            self._set_container_view(self._display_view)
+        elif self._value and self._value[0] is False:
+            # False is a valid saved filter state, show display view
             self._set_container_view(self._display_view)
         else:
             self._show_edit_mode()
 
     def _populate_editors(self):
         """Populates the edit fields based on the current filter."""
-        if self._value and self._value[0]:
+        if self._value and self._value[0] is False:
+            # Special case: False represents wildcard ("*")
+            self._filter_type_select.value = 'projects.id'
+            self._ids_input.value = "*"
+        elif self._value and self._value[0]:
             filter_dict = self._value[0]
             key = next(iter(filter_dict), 'projects.id')  # Default to projects.id
             self._filter_type_select.value = key
@@ -202,9 +216,11 @@ class FilterEditor:
         """Constructs and saves the filter based on the dropdown and text input."""
         candidate = self._parse_editor_value()
         if candidate is None:
-            self.vm.notify("Please enter at least one numeric ID.", "warn")
+            self.vm.notify("Please enter at least one numeric ID or '*' for all recordings.", "warn")
             return
-        if candidate == normalize_first_filter(self._value):
+        # Check if candidate is unchanged from current value (handle False specially)
+        current = self._value[0] if self._value else None
+        if candidate == current:
             self._update_display()
             return
 
