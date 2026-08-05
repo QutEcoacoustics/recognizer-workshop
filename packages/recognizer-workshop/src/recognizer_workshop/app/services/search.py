@@ -5,7 +5,14 @@ from recognizer_workshop.app.agile_modeling_helpers import list_audio_files
 
 def resolve_query_uri(query: Union[str, int], labeled_examples_folder: Path) -> str:
     s = str(query).strip()
-    
+
+    # xeno-canto webpage URL, e.g. https://xeno-canto.org/172064
+    # Extract the numeric ID and treat as an XC id (xc172064)
+    import re
+    xc_page_match = re.match(r'https?://(?:www\.)?xeno-canto\.org/(\d+)/?$', s, re.IGNORECASE)
+    if xc_page_match:
+        return f"xc{xc_page_match.group(1)}"
+
     # xc ids need to be lowercased
     if s.upper().startswith('XC'):
         return s.lower()

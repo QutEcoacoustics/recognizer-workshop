@@ -383,7 +383,6 @@ class PanelUI(param.Parameterized):
         *,
         num_results: int = 10,
         target_score=None,
-        on_save: Optional[Callable[[], None]] = None,
         selector_region: str = "search.query_selector",
         results_region: str = "search.results",
     ):
@@ -409,12 +408,11 @@ class PanelUI(param.Parameterized):
             return
         else:
             self.clear_region_box(results_region)
-        
 
         log.info(f'Starting search for label {active_label}...')
         eng.search_with_query(num_results=num_results, sample_size=None, target_score=target_score, target_label=active_label)
         log.info(f'Search completed for label {active_label}, showing results.')
-        self.show_results(eng, active_label, results_region=results_region, on_save=on_save)
+        self.show_results(eng, active_label, results_region=results_region)
         log.info(f'Results rendered for label {active_label}.')
 
 
@@ -424,23 +422,15 @@ class PanelUI(param.Parameterized):
         *,
         num_results: int = 10,
         target_score=None,
-        on_save: Optional[Callable[[], None]] = None,
         results_region: str = "refine.results",
     ):
         """Read samples from the selector, embed, run search, then render results."""
-
         eng.search_with_classifier(num_results=num_results, sample_size=None, target_score=target_score)
-
         active_label = eng.active_label
         if not active_label:
             self.render(pn.pane.Alert("Pick target label(s) on the Config tab.", alert_type="warning"), results_region)
             return
-        self.show_results(
-            eng,
-            active_label,
-            results_region=results_region,
-            on_save=on_save,
-        )
+        self.show_results(eng, active_label, results_region=results_region)
 
 
 
@@ -451,24 +441,46 @@ class PanelUI(param.Parameterized):
         *,
         results_region: str,
         page_size: int = 10,
-        on_save: Optional[Callable[[], None]] = None,
     ):
-        """Render a pageable group for a label’s TopK results."""
+        """Render a pageable group for a label's TopK results with auto-save on label change."""
         label_str = str(label)
         results = eng.search_results.get(label_str)
         if not results:
             self.render(pn.pane.Alert(f"No results for '{label_str}'.", alert_type="info"), results_region)
             return
 
-        # TODO: support search and verification of multiple labels
-        
+        result_ids = {int(r.embedding_id) for r in results}
+        all_db_labels = eng.db.get_all_labels()
+        label_states_by_id: dict = {}
+        type_to_state = {
+            hoplite_interface.LabelType.POSITIVE.value: 1,
+            hoplite_interface.LabelType.NEGATIVE.value: -1,
+        }
+        for eid, lbl_name, lbl_type in all_db_labels:
+            if eid in result_ids and lbl_name == label_str:
+                label_states_by_id.setdefault(eid, {})[lbl_name] = type_to_state.get(lbl_type, 0)
+
+        provenance = eng.config.annotator_id
+
+        def _on_label_change(embedding_id: int, lbl_name: str, new_state: int):
+            try:
+                if new_state == 0:
+                    eng.delete_label(embedding_id, lbl_name)
+                else:
+                    from perch_hoplite.db import interface as _iface
+                    ltype = _iface.LabelType.POSITIVE if new_state == 1 else _iface.LabelType.NEGATIVE
+                    eng.upsert_label(embedding_id, lbl_name, ltype, provenance)
+            except Exception as e:
+                import logging as _logging
+                _logging.getLogger(__name__).error("Auto-save label failed: %s", e)
 
         group = PanelEmbeddingDisplayGroup.from_search_results(
             results,
             db=eng.db,
             labels=[label_str],
             page_size=page_size,
-            on_save=on_save,
+            label_states_by_id=label_states_by_id,
+            on_label_change=_on_label_change,
             sample_rate_hz=eng.db_model_config.model_config.sample_rate,
             frame_rate=100,
             window_size_s=5.0,
@@ -499,15 +511,6 @@ class PanelUI(param.Parameterized):
         except Exception as e:
             self.render(pn.pane.Alert(f"Could not load embedding `{embedding_id}`: {e}", alert_type="danger"), region_name)
 
-
-
-    def harvest_labels(self, eng, *, results_region: str):
-        """Collect user judgements from the current results page(s)."""
-        group = self._regions[results_region].state.get("group")
-        if group is None:
-            return []
-        provenance = eng.config.annotator_id
-        return group.harvest_labels(provenance)
 
 
     # # ------------------------------------------------------------------

@@ -559,6 +559,26 @@ class agile_state:
         labels_after = get_label_counts(self.db)
         return labels_before, labels_after, success_count, failed_count
 
+    def upsert_label(self, embedding_id: int, label_name: str, label_type, provenance: str) -> None:
+        """Insert or update a single label, then commit."""
+        existing = [l for l in self.db.get_labels(embedding_id) if l.label == label_name]
+        if existing:
+            self.db.update_label_type(embedding_id, label_name, label_type)
+        else:
+            lbl = hoplite_interface.Label(
+                embedding_id=embedding_id,
+                label=label_name,
+                type=label_type,
+                provenance=provenance,
+            )
+            self.db.insert_label(lbl, skip_duplicates=False)
+        self.db.commit()
+
+    def delete_label(self, embedding_id: int, label_name: str) -> None:
+        """Remove a label for an embedding, then commit."""
+        self.db.delete_label(embedding_id, label_name)
+        self.db.commit()
+
 
     def train_classifier(self,
                         learning_rate = 1e-3,

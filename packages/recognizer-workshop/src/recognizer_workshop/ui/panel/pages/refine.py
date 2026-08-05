@@ -40,43 +40,35 @@ def build(vm):
 
     search_strategy.param.watch(_on_strategy_change, "value")
 
-    def _search(_):
-        if not vm.eng:
-            return vm.notify("Initialize first.", "error")
+    def _resolve_target_score():
         strategy = search_strategy.value
         if strategy == "Best match":
-            ts = None
+            return None
         elif strategy == "Margin sampling":
-            ts = 0
+            return 0
         else:
             raw_score = target_score.value.strip()
             normalized = raw_score.lower()
             if not normalized or normalized == "max":
-                ts = None
+                return None
             else:
                 try:
-                    ts = float(raw_score)
+                    return float(raw_score)
                 except (TypeError, ValueError):
                     target_score.value = "0"
-                    ts = 0.0
-        vm.ui.search_with_classifier(vm.eng, 
-                                     num_results=int(num_results.value), 
-                                     target_score=ts,
-                                     on_save=_save)
+                    return 0.0
 
+    def _do_search():
+        vm.ui.search_with_classifier(
+            vm.eng,
+            num_results=int(num_results.value),
+            target_score=_resolve_target_score(),
+        )
 
-    def _save(_=None):
+    def _search(_):
         if not vm.eng:
             return vm.notify("Initialize first.", "error")
-        labels = list(vm.ui.harvest_labels(vm.eng, results_region="refine.results"))
-        if not labels:
-            return vm.notify("No labels to save.", "warn")
-        try:
-            before, after, ok, dup = vm.eng.save_labels(labels)
-            vm.notify(f"Saved {ok} labels ({dup} duplicates skipped).", "success")
-        except Exception as e:
-            vm.notify(f"Save failed: {e}", "error")
-
+        _do_search()
 
 
     btn_search.on_click(_search)
