@@ -63,34 +63,12 @@ def build(vm):
             vm.eng,
             num_results=int(num_results.value),
             target_score=_resolve_target_score(),
-            on_save=_save,
         )
 
     def _search(_):
         if not vm.eng:
             return vm.notify("Initialize first.", "error")
-        if vm.ui.has_unsaved_labels(results_region="refine.results"):
-            vm.ui.show_unsaved_warning(
-                results_region="refine.results",
-                on_save=lambda: (_save(), _do_search()),
-                on_discard=_do_search,
-            )
-            return
         _do_search()
-
-
-    def _save(_=None):
-        if not vm.eng:
-            return vm.notify("Initialize first.", "error")
-        labels = list(vm.ui.harvest_labels(vm.eng, results_region="refine.results"))
-        if not labels:
-            return vm.notify("No labels to save.", "warn")
-        try:
-            before, after, ok, dup = vm.eng.save_labels(labels)
-            vm.notify(f"Saved {ok} labels ({dup} duplicates skipped).", "success")
-        except Exception as e:
-            vm.notify(f"Save failed: {e}", "error")
-
 
 
     btn_search.on_click(_search)

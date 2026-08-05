@@ -1,4 +1,3 @@
-import asyncio
 from pathlib import Path
 import logging
 
@@ -105,39 +104,15 @@ def build(vm):
             vm.eng,
             num_results=int(num_results.value),
             target_score=ts,
-            on_save=_save,
         )
 
     async def _search(_):
         if not vm.eng:
             return vm.notify("Initialize first.", "error")
-        if vm.ui.has_unsaved_labels(results_region="search.results"):
-            vm.ui.show_unsaved_warning(
-                results_region="search.results",
-                on_save=lambda: (_save(), asyncio.ensure_future(_do_search())),
-                on_discard=lambda: asyncio.ensure_future(_do_search()),
-            )
-            return
         await _do_search()
-
-    def _save(_=None):
-        if not vm.eng:
-            return vm.notify("Initialize first.", "error")
-        labels = list(vm.ui.harvest_labels(vm.eng, results_region="search.results"))
-        if not labels:
-            return vm.notify("No labels to save.", "warn")
-        try:
-            before, after, ok, dup = vm.eng.save_labels(labels)
-            vm.notify(f"Saved {ok} labels ({dup} duplicates skipped).", "success")
-        except Exception as e:
-            vm.notify(f"Save failed: {e}", "error")
 
     btn_load_uri.on_click(_load_remote)
     btn_search.on_click(_search)
-
-
-
-
 
     return pn.Column(
         pn.Row("## Search (single example)", pn.Spacer(), search_help_btn),

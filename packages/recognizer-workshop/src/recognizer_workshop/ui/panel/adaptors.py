@@ -383,7 +383,6 @@ class PanelUI(param.Parameterized):
         *,
         num_results: int = 10,
         target_score=None,
-        on_save: Optional[Callable[[], None]] = None,
         selector_region: str = "search.query_selector",
         results_region: str = "search.results",
     ):
@@ -409,12 +408,11 @@ class PanelUI(param.Parameterized):
             return
         else:
             self.clear_region_box(results_region)
-        
 
         log.info(f'Starting search for label {active_label}...')
         eng.search_with_query(num_results=num_results, sample_size=None, target_score=target_score, target_label=active_label)
         log.info(f'Search completed for label {active_label}, showing results.')
-        self.show_results(eng, active_label, results_region=results_region, on_save=on_save)
+        self.show_results(eng, active_label, results_region=results_region)
         log.info(f'Results rendered for label {active_label}.')
 
 
@@ -424,23 +422,15 @@ class PanelUI(param.Parameterized):
         *,
         num_results: int = 10,
         target_score=None,
-        on_save: Optional[Callable[[], None]] = None,
         results_region: str = "refine.results",
     ):
         """Read samples from the selector, embed, run search, then render results."""
-
         eng.search_with_classifier(num_results=num_results, sample_size=None, target_score=target_score)
-
         active_label = eng.active_label
         if not active_label:
             self.render(pn.pane.Alert("Pick target label(s) on the Config tab.", alert_type="warning"), results_region)
             return
-        self.show_results(
-            eng,
-            active_label,
-            results_region=results_region,
-            on_save=on_save,
-        )
+        self.show_results(eng, active_label, results_region=results_region)
 
 
 
@@ -451,24 +441,43 @@ class PanelUI(param.Parameterized):
         *,
         results_region: str,
         page_size: int = 10,
-        on_save: Optional[Callable[[], None]] = None,
     ):
-        """Render a pageable group for a label’s TopK results."""
+        """Render a pageable group for a label's TopK results with auto-save on label change."""
         label_str = str(label)
         results = eng.search_results.get(label_str)
         if not results:
             self.render(pn.pane.Alert(f"No results for '{label_str}'.", alert_type="info"), results_region)
             return
 
-        # TODO: support search and verification of multiple labels
-        
+        result_ids = {int(r.embedding_id) for r in results}
+        all_db_labels = eng.db.get_all_labels()
+        label_states_by_id: dict = {}
+        type_to_state = {1: 1, 2: -1}
+        for eid, lbl_name, lbl_type in all_db_labels:
+            if eid in result_ids and lbl_name == label_str:
+                label_states_by_id.setdefault(eid, {})[lbl_name] = type_to_state.get(lbl_type, 0)
+
+        provenance = eng.config.annotator_id
+
+        def _on_label_change(embedding_id: int, lbl_name: str, new_state: int):
+            try:
+                if new_state == 0:
+                    eng.delete_label(embedding_id, lbl_name)
+                else:
+                    from perch_hoplite.db import interface as _iface
+                    ltype = _iface.LabelType.POSITIVE if new_state == 1 else _iface.LabelType.NEGATIVE
+                    eng.upsert_label(embedding_id, lbl_name, ltype, provenance)
+            except Exception as e:
+                import logging as _logging
+                _logging.getLogger(__name__).error("Auto-save label failed: %s", e)
 
         group = PanelEmbeddingDisplayGroup.from_search_results(
             results,
             db=eng.db,
             labels=[label_str],
             page_size=page_size,
-            on_save=on_save,
+            label_states_by_id=label_states_by_id,
+            on_label_change=_on_label_change,
             sample_rate_hz=eng.db_model_config.model_config.sample_rate,
             frame_rate=100,
             window_size_s=5.0,
@@ -499,45 +508,6 @@ class PanelUI(param.Parameterized):
         except Exception as e:
             self.render(pn.pane.Alert(f"Could not load embedding `{embedding_id}`: {e}", alert_type="danger"), region_name)
 
-
-
-    def has_unsaved_labels(self, *, results_region: str) -> bool:
-        """Return True if the current results group has any unsaved label states."""
-        group = self._regions[results_region].state.get("group")
-        return group is not None and group.has_unsaved_labels()
-
-    def show_unsaved_warning(self, *, results_region: str, on_save, on_discard) -> None:
-        """Prepend an inline warning banner to the results region.
-
-        The banner is inserted above the existing results (which remain visible).
-        Save and Discard remove the banner then execute their action; Cancel just
-        removes the banner, leaving the results untouched.
-        """
-        box = self.get_region_box(results_region)
-        btn_save = pn.widgets.Button(name="Save before searching", button_type="warning", sizing_mode="fixed")
-        btn_discard = pn.widgets.Button(name="Discard and search", button_type="danger", sizing_mode="fixed")
-        btn_cancel = pn.widgets.Button(name="Cancel", button_type="default", sizing_mode="fixed")
-        banner = pn.Column(
-            pn.pane.Alert(
-                "⚠ You have unsaved verifications. Save them first, discard and search, or cancel.",
-                alert_type="warning",
-            ),
-            pn.Row(btn_save, btn_discard, btn_cancel),
-        )
-        def _remove():
-            box.remove(banner)
-        btn_save.on_click(lambda _: (_remove(), on_save()))
-        btn_discard.on_click(lambda _: (_remove(), on_discard()))
-        btn_cancel.on_click(lambda _: _remove())
-        box.insert(0, banner)
-
-    def harvest_labels(self, eng, *, results_region: str):
-        """Collect user judgements from the current results page(s)."""
-        group = self._regions[results_region].state.get("group")
-        if group is None:
-            return []
-        provenance = eng.config.annotator_id
-        return group.harvest_labels(provenance)
 
 
     # # ------------------------------------------------------------------

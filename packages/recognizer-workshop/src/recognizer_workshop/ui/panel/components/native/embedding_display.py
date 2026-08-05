@@ -210,7 +210,9 @@ class PanelEmbeddingDisplay(pn.Column):
         recording_info: Optional[dict[str, Any]] = None,
         domain: Optional[str] = None,
         arid: Optional[int] = None,
-        labels: Sequence[str] = (),  
+        labels: Sequence[str] = (),
+        initial_states: Optional[Dict[str, int]] = None,
+        on_label_change: Optional[Callable[[int, str, int], None]] = None,
         sample_rate_hz: int = 32000,
         frame_rate: int = 100,
         window_size_s: float = 5.0,
@@ -266,8 +268,14 @@ class PanelEmbeddingDisplay(pn.Column):
 
         # tri-state per label: 0=skip, 1=pos, -1=neg
         self._label_states: Dict[str, int] = {lbl: 0 for lbl in self.labels}
+        if initial_states:
+            for lbl, state in initial_states.items():
+                if lbl in self._label_states:
+                    self._label_states[lbl] = state
         self._buttons: Dict[str, pn.widgets.Button] = {}
-        # optional callback invoked whenever any label state changes
+        # callback invoked on every label change: (embedding_id, label_name, new_state)
+        self._on_label_change: Optional[Callable[[int, str, int], None]] = on_label_change
+        # legacy no-arg callback used by group save-button logic (kept for compatibility)
         self.on_label_change: Optional[Callable[[], None]] = None
         self._load_started = False
 
@@ -375,7 +383,9 @@ class PanelEmbeddingDisplay(pn.Column):
         """
         btns = []
         for lbl in self.labels:
-            b = pn.widgets.Button(name=lbl, button_type="default")
+            initial_state = self._label_states.get(lbl, 0)
+            btn_type = "success" if initial_state == 1 else ("warning" if initial_state == -1 else "default")
+            b = pn.widgets.Button(name=lbl, button_type=btn_type)
             self._buttons[lbl] = b
 
             def _cycle(event=None, label=lbl, button=b):
@@ -386,6 +396,8 @@ class PanelEmbeddingDisplay(pn.Column):
                 self._label_states[label] = nxt
                 # update color
                 button.button_type = "success" if nxt == 1 else ("warning" if nxt == -1 else "default")
+                if self._on_label_change:
+                    self._on_label_change(self.embedding_id, label, nxt)
                 if self.on_label_change:
                     self.on_label_change()
 
@@ -502,7 +514,6 @@ class PanelEmbeddingDisplayGroup(pn.Column):
         page_size: int = 10,
         item_width: int = 300,
         item_margin: int = 8,
-        on_save: Optional[Callable[[], None]] = None,
         **kwargs,
     ):
         self._items = items
@@ -520,59 +531,13 @@ class PanelEmbeddingDisplayGroup(pn.Column):
         self._prev = pn.widgets.Button(name="Prev", button_type="default", width=60, sizing_mode="fixed")
         self._next = pn.widgets.Button(name="Next", button_type="default", width=60, sizing_mode="fixed")
         self._label = pn.pane.Markdown("", sizing_mode="stretch_width")
-        self._save_btn = None
-
-        if on_save:
-            self._save_btn = pn.widgets.Button(
-                name="Save verifications",
-                button_type="default",
-                width=180,
-                sizing_mode="fixed",
-                disabled=True,
-            )
-            self._save_btn.on_click(lambda _event: on_save())
 
         self._prev.on_click(lambda _: self._goto(-1))
         self._next.on_click(lambda _: self._goto(+1))
 
-        header_items = [self._prev, self._next, self._label]
-        if self._save_btn:
-            header_items.extend([pn.Spacer(), self._save_btn])
-        header = pn.Row(*header_items, sizing_mode="stretch_width")
+        header = pn.Row(self._prev, self._next, self._label, sizing_mode="stretch_width")
         super().__init__(header, self._list_box, sizing_mode="stretch_both", **kwargs)
         self._refresh()
-
-        # wire label-change callbacks so save button updates live
-        for item in self._items:
-            item.on_label_change = self._update_save_btn
-
-    def unsaved_count(self) -> int:
-        """Return the number of non-skip label states across all items."""
-        return sum(
-            1 for item in self._items for state in item._label_states.values() if state != 0
-        )
-
-    def _update_save_btn(self) -> None:
-        """Update the save button label and style to reflect current unsaved count."""
-        if self._save_btn is None:
-            return
-        count = self.unsaved_count()
-        if count == 0:
-            self._save_btn.name = "Save verifications"
-            self._save_btn.button_type = "default"
-            self._save_btn.disabled = True
-        else:
-            self._save_btn.name = f"Save {count} verification{'s' if count != 1 else ''}"
-            self._save_btn.button_type = "warning"
-            self._save_btn.disabled = False
-
-    def has_unsaved_labels(self) -> bool:
-        """Return True if any item has a non-default (non-skip) label state."""
-        return any(
-            state != 0
-            for item in self._items
-            for state in item._label_states.values()
-        )
 
     def harvest_labels(self, provenance: str):
         out = []
@@ -591,7 +556,8 @@ class PanelEmbeddingDisplayGroup(pn.Column):
         page_size: int = 10,
         item_width: int = 300,
         item_margin: int = 8,
-        on_save: Optional[Callable[[], None]] = None,
+        label_states_by_id: Optional[Dict[int, Dict[str, int]]] = None,
+        on_label_change: Optional[Callable[[int, str, int], None]] = None,
         sample_rate_hz: int = 32000,
         frame_rate: int = 100,
         window_size_s: float = 5.0,
@@ -607,9 +573,10 @@ class PanelEmbeddingDisplayGroup(pn.Column):
             if source is None:
                 raise ValueError("Search results missing metadata.source; call attach_metadata_to_search_results")
             recording_info = metadata.get("recording_info")
+            eid = int(r.embedding_id)
             items.append(
                 PanelEmbeddingDisplay(
-                    embedding_id=int(r.embedding_id),
+                    embedding_id=eid,
                     dataset_name=source.dataset_name,
                     uri=source.source_id,
                     offset_s=float(source.offsets[0]),
@@ -618,6 +585,8 @@ class PanelEmbeddingDisplayGroup(pn.Column):
                     domain=metadata.get("domain"),
                     arid=metadata.get("arid"),
                     labels=list(labels),
+                    initial_states=label_states_by_id.get(eid) if label_states_by_id else None,
+                    on_label_change=on_label_change,
                     sample_rate_hz=sample_rate_hz,
                     frame_rate=frame_rate,
                     window_size_s=window_size_s,
@@ -632,7 +601,6 @@ class PanelEmbeddingDisplayGroup(pn.Column):
             page_size=page_size,
             item_width=item_width,
             item_margin=item_margin,
-            on_save=on_save,
             **kwargs,
         )
 

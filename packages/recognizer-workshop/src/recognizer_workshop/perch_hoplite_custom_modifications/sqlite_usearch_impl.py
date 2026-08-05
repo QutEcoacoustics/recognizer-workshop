@@ -194,6 +194,14 @@ class ThreadedSQLiteUsearchDB(SQLiteUsearchDB):
             (new_type.value, embedding_id, label),
         )
 
+    def delete_label(self, embedding_id: int, label: str) -> None:
+        """Remove a label entry for the given embedding and label string."""
+        cursor = self._get_cursor()
+        cursor.execute(
+            "DELETE FROM hoplite_labels WHERE embedding_id = ? AND label = ?",
+            (embedding_id, label),
+        )
+
     def get_all_labels(self) -> list[tuple]:
         """
         Efficiently fetches all labels (embedding_id, label, type) 
