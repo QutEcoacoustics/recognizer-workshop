@@ -16,7 +16,6 @@ def resolve_query_uri(query: Union[str, int], labeled_examples_folder: Path) -> 
     # xc ids need to be lowercased
     if s.upper().startswith('XC'):
         return s.lower()
-        return s.lower()
     
     # We can accept a file number (index into the list of files in labeled_examples_folder)
     # used in some UIs

@@ -452,7 +452,10 @@ class PanelUI(param.Parameterized):
         result_ids = {int(r.embedding_id) for r in results}
         all_db_labels = eng.db.get_all_labels()
         label_states_by_id: dict = {}
-        type_to_state = {1: 1, 2: -1}
+        type_to_state = {
+            hoplite_interface.LabelType.POSITIVE.value: 1,
+            hoplite_interface.LabelType.NEGATIVE.value: -1,
+        }
         for eid, lbl_name, lbl_type in all_db_labels:
             if eid in result_ids and lbl_name == label_str:
                 label_states_by_id.setdefault(eid, {})[lbl_name] = type_to_state.get(lbl_type, 0)
