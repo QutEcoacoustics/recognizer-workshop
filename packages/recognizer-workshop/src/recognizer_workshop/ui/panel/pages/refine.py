@@ -40,29 +40,43 @@ def build(vm):
 
     search_strategy.param.watch(_on_strategy_change, "value")
 
-    def _search(_):
-        if not vm.eng:
-            return vm.notify("Initialize first.", "error")
+    def _resolve_target_score():
         strategy = search_strategy.value
         if strategy == "Best match":
-            ts = None
+            return None
         elif strategy == "Margin sampling":
-            ts = 0
+            return 0
         else:
             raw_score = target_score.value.strip()
             normalized = raw_score.lower()
             if not normalized or normalized == "max":
-                ts = None
+                return None
             else:
                 try:
-                    ts = float(raw_score)
+                    return float(raw_score)
                 except (TypeError, ValueError):
                     target_score.value = "0"
-                    ts = 0.0
-        vm.ui.search_with_classifier(vm.eng, 
-                                     num_results=int(num_results.value), 
-                                     target_score=ts,
-                                     on_save=_save)
+                    return 0.0
+
+    def _do_search():
+        vm.ui.search_with_classifier(
+            vm.eng,
+            num_results=int(num_results.value),
+            target_score=_resolve_target_score(),
+            on_save=_save,
+        )
+
+    def _search(_):
+        if not vm.eng:
+            return vm.notify("Initialize first.", "error")
+        if vm.ui.has_unsaved_labels(results_region="refine.results"):
+            vm.ui.show_unsaved_warning(
+                results_region="refine.results",
+                on_save=lambda: (_save(), _do_search()),
+                on_discard=_do_search,
+            )
+            return
+        _do_search()
 
 
     def _save(_=None):

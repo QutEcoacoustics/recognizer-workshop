@@ -501,6 +501,36 @@ class PanelUI(param.Parameterized):
 
 
 
+    def has_unsaved_labels(self, *, results_region: str) -> bool:
+        """Return True if the current results group has any unsaved label states."""
+        group = self._regions[results_region].state.get("group")
+        return group is not None and group.has_unsaved_labels()
+
+    def show_unsaved_warning(self, *, results_region: str, on_save, on_discard) -> None:
+        """Prepend an inline warning banner to the results region.
+
+        The banner is inserted above the existing results (which remain visible).
+        Save and Discard remove the banner then execute their action; Cancel just
+        removes the banner, leaving the results untouched.
+        """
+        box = self.get_region_box(results_region)
+        btn_save = pn.widgets.Button(name="Save before searching", button_type="warning", sizing_mode="fixed")
+        btn_discard = pn.widgets.Button(name="Discard and search", button_type="danger", sizing_mode="fixed")
+        btn_cancel = pn.widgets.Button(name="Cancel", button_type="default", sizing_mode="fixed")
+        banner = pn.Column(
+            pn.pane.Alert(
+                "⚠ You have unsaved verifications. Save them first, discard and search, or cancel.",
+                alert_type="warning",
+            ),
+            pn.Row(btn_save, btn_discard, btn_cancel),
+        )
+        def _remove():
+            box.remove(banner)
+        btn_save.on_click(lambda _: (_remove(), on_save()))
+        btn_discard.on_click(lambda _: (_remove(), on_discard()))
+        btn_cancel.on_click(lambda _: _remove())
+        box.insert(0, banner)
+
     def harvest_labels(self, eng, *, results_region: str):
         """Collect user judgements from the current results page(s)."""
         group = self._regions[results_region].state.get("group")

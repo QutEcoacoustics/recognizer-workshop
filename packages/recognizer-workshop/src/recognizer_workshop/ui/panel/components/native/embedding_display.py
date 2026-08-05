@@ -258,6 +258,8 @@ class PanelEmbeddingDisplay(pn.Column):
         # tri-state per label: 0=skip, 1=pos, -1=neg
         self._label_states: Dict[str, int] = {lbl: 0 for lbl in self.labels}
         self._buttons: Dict[str, pn.widgets.Button] = {}
+        # optional callback invoked whenever any label state changes
+        self.on_label_change: Optional[Callable[[], None]] = None
         self._load_started = False
 
         # --- UI elements ---
@@ -368,12 +370,15 @@ class PanelEmbeddingDisplay(pn.Column):
             self._buttons[lbl] = b
 
             def _cycle(event=None, label=lbl, button=b):
+                """tri-state button: Cycle the state of a label through and update the button color."""
                 state = self._label_states[label]
                 # 0 -> 1 -> -1 -> 0
                 nxt = 1 if state == 0 else (-1 if state == 1 else 0)
                 self._label_states[label] = nxt
                 # update color
                 button.button_type = "success" if nxt == 1 else ("warning" if nxt == -1 else "default")
+                if self.on_label_change:
+                    self.on_label_change()
 
             b.on_click(_cycle)
             btns.append(b)
@@ -489,7 +494,6 @@ class PanelEmbeddingDisplayGroup(pn.Column):
         item_width: int = 300,
         item_margin: int = 8,
         on_save: Optional[Callable[[], None]] = None,
-        save_label: str = "Save responses",
         **kwargs,
     ):
         self._items = items
@@ -511,10 +515,11 @@ class PanelEmbeddingDisplayGroup(pn.Column):
 
         if on_save:
             self._save_btn = pn.widgets.Button(
-                name=save_label,
-                button_type="warning",
-                width=160,
+                name="Save verifications",
+                button_type="default",
+                width=180,
                 sizing_mode="fixed",
+                disabled=True,
             )
             self._save_btn.on_click(lambda _event: on_save())
 
@@ -527,6 +532,38 @@ class PanelEmbeddingDisplayGroup(pn.Column):
         header = pn.Row(*header_items, sizing_mode="stretch_width")
         super().__init__(header, self._list_box, sizing_mode="stretch_both", **kwargs)
         self._refresh()
+
+        # wire label-change callbacks so save button updates live
+        for item in self._items:
+            item.on_label_change = self._update_save_btn
+
+    def unsaved_count(self) -> int:
+        """Return the number of non-skip label states across all items."""
+        return sum(
+            1 for item in self._items for state in item._label_states.values() if state != 0
+        )
+
+    def _update_save_btn(self) -> None:
+        """Update the save button label and style to reflect current unsaved count."""
+        if self._save_btn is None:
+            return
+        count = self.unsaved_count()
+        if count == 0:
+            self._save_btn.name = "Save verifications"
+            self._save_btn.button_type = "default"
+            self._save_btn.disabled = True
+        else:
+            self._save_btn.name = f"Save {count} verification{'s' if count != 1 else ''}"
+            self._save_btn.button_type = "warning"
+            self._save_btn.disabled = False
+
+    def has_unsaved_labels(self) -> bool:
+        """Return True if any item has a non-default (non-skip) label state."""
+        return any(
+            state != 0
+            for item in self._items
+            for state in item._label_states.values()
+        )
 
     def harvest_labels(self, provenance: str):
         out = []
@@ -546,7 +583,6 @@ class PanelEmbeddingDisplayGroup(pn.Column):
         item_width: int = 300,
         item_margin: int = 8,
         on_save: Optional[Callable[[], None]] = None,
-        save_label: str = "Save responses",
         sample_rate_hz: int = 32000,
         frame_rate: int = 100,
         window_size_s: float = 5.0,
@@ -588,7 +624,6 @@ class PanelEmbeddingDisplayGroup(pn.Column):
             item_width=item_width,
             item_margin=item_margin,
             on_save=on_save,
-            save_label=save_label,
             **kwargs,
         )
 

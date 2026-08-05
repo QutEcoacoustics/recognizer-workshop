@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 import logging
 
@@ -98,11 +99,7 @@ def build(vm):
         except Exception as e:
             vm.notify(f"Could not load remote: {e}", "error")
 
-    async def _search(_):
-        if not vm.eng:
-            return vm.notify("Initialize first.", "error")
-        # for search, it's not very intuitive what a target score might mean. 
-        # so we just use None (best match) 
+    async def _do_search():
         ts = None
         await vm.ui.search_with_selected_window(
             vm.eng,
@@ -110,6 +107,18 @@ def build(vm):
             target_score=ts,
             on_save=_save,
         )
+
+    async def _search(_):
+        if not vm.eng:
+            return vm.notify("Initialize first.", "error")
+        if vm.ui.has_unsaved_labels(results_region="search.results"):
+            vm.ui.show_unsaved_warning(
+                results_region="search.results",
+                on_save=lambda: (_save(), asyncio.ensure_future(_do_search())),
+                on_discard=lambda: asyncio.ensure_future(_do_search()),
+            )
+            return
+        await _do_search()
 
     def _save(_=None):
         if not vm.eng:
