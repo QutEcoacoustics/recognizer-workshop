@@ -89,7 +89,7 @@ def build(vm):
         if not vm.eng:
             return vm.notify("Initialize on Config tab first.", "error")
 
-        if not uri.value:
+        if not uri.value.strip():
             return vm.notify("Please provide an ID, URL, or path.", "warn")
         try:
             # Normalize the query URI before passing it to the selector

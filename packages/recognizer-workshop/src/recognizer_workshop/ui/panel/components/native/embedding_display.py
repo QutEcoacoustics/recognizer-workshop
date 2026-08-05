@@ -74,24 +74,22 @@ class PanelQuerySelector(pn.Column):
         self.uri = str(uri)
         self.window_size_s = float(window_size_s)
 
-        # UI bits
-        self.status = pn.pane.Markdown("Loading audio…", sizing_mode="stretch_width")
+        # UI bits — single header line updated in place
+        self._header = pn.pane.Markdown(f"**Source:** `{self.uri}` — Loading…", sizing_mode="stretch_width")
         self.full_pane   = pn.pane.Matplotlib(tight=True, height=260, sizing_mode="stretch_width")
         self.window_pane = pn.pane.Matplotlib(tight=True, height=200, sizing_mode="stretch_width")
         self.slider = pn.widgets.FloatSlider(name="Offset (s)", start=0.0, end=0.0, step=0.05,
                                              value=0.0, disabled=True, sizing_mode="stretch_width")
         self.audio_full = pn.pane.Audio(name="Full audio", sample_rate=32000, sizing_mode="stretch_width")
         self.audio_win  = pn.pane.Audio(name="Selected window", sample_rate=32000, sizing_mode="stretch_width")
+        self._slider_row = pn.Row(self.slider)
 
-        card = pn.Card(
-            pn.pane.Markdown(f"**Source:** `{self.uri}`"),
-            self.status,
+        card = pn.Column(
+            self._header,
             self.full_pane,
             self.window_pane,
-            pn.Row(self.slider),
+            self._slider_row,
             pn.Row(self.audio_full, self.audio_win),
-            title="# Select query window",
-            collapsible=False,
             sizing_mode="stretch_width",
         )
         super().__init__(card, sizing_mode="stretch_width", **params)
@@ -136,7 +134,7 @@ class PanelQuerySelector(pn.Column):
     def _render_all(self):
         # Safety: audio must exist
         if self.qd.audio is None:
-            self.status.object = "❌ Could not load audio."
+            self._header.object = f"**Source:** `{self.uri}` — ❌ Could not load audio."
             return
 
         # Update spectrograms for current offset
@@ -158,14 +156,20 @@ class PanelQuerySelector(pn.Column):
         end   = int(start + self.qd.window_size_s * self.qd.sample_rate_hz)
         self.audio_win.object = self.qd.audio[start:end]
 
-        self.status.object = "✅ Audio loaded. Move the slider to pick a window."
+        self._header.object = f"**Source:** `{self.uri}` — Move the slider to pick a window."
+
+    def _hide_full_audio_ui(self):
+        """Hide the full-clip spectrogram, slider, and full audio player."""
+        self.full_pane.visible = False
+        self._slider_row.visible = False
+        self.audio_full.visible = False
 
     async def _init(self):
         try:
             # Load audio (this must succeed or everything stays empty)
             self.qd.update_audio()
             if self.qd.audio is None or len(self.qd.audio) == 0:
-                self.status.object = f"❌ No audio loaded for `{self.uri}`."
+                self._header.object = f"**Source:** `{self.uri}` — ❌ No audio loaded."
                 return
 
             duration = len(self.qd.audio) / self.qd.sample_rate_hz
@@ -174,8 +178,13 @@ class PanelQuerySelector(pn.Column):
 
             # First render
             self._render_all()
+
+            # If the whole clip fits in the window, hide the full-clip UI
+            if duration <= self.window_size_s:
+                self._hide_full_audio_ui()
+                self._header.object = f"**Source:** `{self.uri}`"
         except Exception as e:
-            self.status.object = f"❌ Error loading audio: `{e}`"
+            self._header.object = f"**Source:** `{self.uri}` — ❌ Error loading audio: `{e}`"
 
 
 
