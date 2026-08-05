@@ -960,6 +960,65 @@ class agile_state:
                 f.write('\n')
         except (OSError, ValueError) as exc:
             log.warning('Could not prettify classifier JSON at %s: %s', output_path, exc)
+
+    def save_classifier_versioned(self, train_result: dict) -> Path:
+        """Save the trained classifier and metrics to a versioned directory.
+
+        Directory structure:
+            <models_folder>/<classifier_name>/<YYYYMMDD_HHMMSS>/recognizer.json
+            <models_folder>/<classifier_name>/<YYYYMMDD_HHMMSS>/metrics.json
+
+        Returns the version directory path.
+        """
+        from datetime import datetime as _dt
+        name = (self.config.classifier_name or "classifier").strip()
+        version = _dt.now().strftime("%Y%m%d_%H%M%S")
+        version_dir = Path(self.config.models_folder) / name / version
+        version_dir.mkdir(parents=True, exist_ok=True)
+
+        self.save_classifier(version_dir / "recognizer.json")
+
+        metrics_path = version_dir / "metrics.json"
+        with metrics_path.open('w', encoding='utf-8') as f:
+            json.dump(train_result, f, indent=2, default=str)
+
+        return version_dir
+
+    def list_saved_models(self) -> list[dict]:
+        """Return one entry per model name (the latest version), sorted newest first.
+
+        Each entry: {name, version, created, path}
+        """
+        models_folder = Path(self.config.models_folder) if self.config.models_folder else None
+        if not models_folder or not models_folder.exists():
+            return []
+        results = []
+        for model_dir in sorted(models_folder.iterdir()):
+            if not model_dir.is_dir():
+                continue
+            versions = sorted([v for v in model_dir.iterdir() if v.is_dir() and (v / "recognizer.json").exists()])
+            if not versions:
+                continue
+            latest = versions[-1]
+            from datetime import datetime as _dt
+            try:
+                created = _dt.strptime(latest.name, "%Y%m%d_%H%M%S")
+            except ValueError:
+                created = _dt.fromtimestamp(latest.stat().st_mtime)
+            results.append({
+                "name": model_dir.name,
+                "version": latest.name,
+                "created": created,
+                "path": latest / "recognizer.json",
+            })
+        return sorted(results, key=lambda x: x["created"], reverse=True)
+
+    def delete_model(self, model_name: str) -> None:
+        """Delete all versions of a saved model."""
+        import shutil
+        model_dir = Path(self.config.models_folder) / model_name
+        if model_dir.exists():
+            shutil.rmtree(model_dir)
       
 
     def run_inference(self, output_filepath=None, threshold=0.0, labels=None, dataset=None, subset=1, exclude_labeled=False):

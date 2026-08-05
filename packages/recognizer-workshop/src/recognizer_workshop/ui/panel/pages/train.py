@@ -1,4 +1,5 @@
 import asyncio
+import io
 
 import numpy as np
 import pandas as pd
@@ -13,6 +14,33 @@ def build(vm):
     algorithm_params_help_btn = vm.help_system.create_help_button("help-training-algorithm-params", "Help: Algorithm Parameters")
     labeled_data_params_help_btn = vm.help_system.create_help_button("help-labeled-data-params", "Help: Labeled Data Parameters")
 
+    # --- Model name (persisted in config) ---
+    def _default_classifier_name():
+        if vm.eng:
+            if vm.eng.config.classifier_name:
+                return vm.eng.config.classifier_name
+            labels = vm.eng.get_target_labels() if hasattr(vm.eng, 'get_target_labels') else []
+            if len(labels) == 1:
+                return str(labels[0])
+        return ""
+
+    cls_name = pn.widgets.TextInput(
+        name="Recognizer Name",
+        value=_default_classifier_name(),
+        placeholder="Required — e.g. imperial_pigeon",
+        sizing_mode="stretch_width",
+    )
+
+    def _on_cls_name_change(event):
+        if vm.eng:
+            vm.eng.config.classifier_name = event.new
+            try:
+                vm.eng.config.save()
+            except Exception:
+                pass  # config_path may not be set yet
+
+    cls_name.param.watch(_on_cls_name_change, 'value')
+
     learning_rate = pn.widgets.FloatInput(name="Learning Rate", value=1e-3, step=1e-4)
     num_steps     = pn.widgets.IntInput(name="Num Steps", value=101, start=1)
     batch_size    = pn.widgets.IntInput(name="Batch Size", value=32, start=1)
@@ -23,21 +51,102 @@ def build(vm):
     balance_dataset = pn.widgets.Checkbox(name="Balance dataset", value=True)
 
     btn_train = pn.widgets.Button(name="Train classifier", button_type="success", sizing_mode="fixed", width=150)
-    
+
     progress_bar = pn.widgets.Progress(name='Training Progress', active=True, visible=False, sizing_mode="stretch_width")
+
+    # --- Results area ---
+    metrics_view = pn.Column(sizing_mode="stretch_width")
+    balancing_view = pn.Column(visible=False, sizing_mode="stretch_width")
+    btn_toggle_balancing = pn.widgets.Toggle(
+        name="▶ Show balancing info",
+        button_type="light",
+        sizing_mode="fixed",
+        width=200,
+        visible=False,
+    )
+
+    def _on_toggle_balancing(event):
+        balancing_view.visible = event.new
+        btn_toggle_balancing.name = "▼ Hide balancing info" if event.new else "▶ Show balancing info"
+
+    btn_toggle_balancing.param.watch(_on_toggle_balancing, 'value')
 
     results_view = pn.Column(
         pn.pane.Markdown("Training results will be shown here."),
-        sizing_mode="stretch_width"
+        sizing_mode="stretch_width",
     )
 
-    cls_name = pn.widgets.TextInput(name="Classifier name", value="my_classifier", sizing_mode="fixed", width=320)
-    btn_save = pn.widgets.Button(name="Save classifier", button_type="primary", sizing_mode="fixed", width=140)
+    # --- Saved models table ---
+    models_table_view = pn.Column(sizing_mode="stretch_width")
+
+    def _refresh_models_table():
+        if not vm.eng:
+            models_table_view.objects = []
+            return
+        models = vm.eng.list_saved_models()
+        if not models:
+            models_table_view.objects = [pn.pane.Markdown("_No saved models yet._")]
+            return
+
+        rows = []
+        for m in models:
+            dl_btn = pn.widgets.FileDownload(
+                filename=f"{m['name']}.json",
+                button_type="primary",
+                label="Download",
+                sizing_mode="fixed",
+                width=110,
+                embed=False,
+            )
+            model_path = m['path']
+
+            def _make_callback(p):
+                def _cb():
+                    return io.BytesIO(p.read_bytes())
+                return _cb
+
+            dl_btn.callback = _make_callback(model_path)
+
+            del_btn = pn.widgets.Button(
+                name="Delete",
+                button_type="danger",
+                sizing_mode="fixed",
+                width=80,
+            )
+            model_name = m['name']
+
+            def _make_delete(n):
+                def _del(_):
+                    try:
+                        vm.eng.delete_model(n)
+                        vm.notify(f"Deleted model '{n}'.", "success")
+                    except Exception as e:
+                        vm.notify(f"Delete failed: {e}", "error")
+                    _refresh_models_table()
+                return _del
+
+            del_btn.on_click(_make_delete(model_name))
+            rows.append(pn.Row(
+                pn.pane.Markdown(f"**{m['name']}**", width=200, sizing_mode="fixed"),
+                pn.pane.Markdown(m['created'].strftime("%Y-%m-%d %H:%M"), width=160, sizing_mode="fixed"),
+                dl_btn,
+                del_btn,
+                align="center",
+            ))
+
+        header = pn.Row(
+            pn.pane.Markdown("**Model**", width=200, sizing_mode="fixed"),
+            pn.pane.Markdown("**Created**", width=160, sizing_mode="fixed"),
+            pn.pane.Markdown("", width=110, sizing_mode="fixed"),
+            pn.pane.Markdown("", width=80, sizing_mode="fixed"),
+        )
+        models_table_view.objects = [header] + rows
 
     async def _train(_):
         if not vm.eng: return vm.notify("Initialize first.", "error")
+        if not cls_name.value.strip():
+            return vm.notify("Please enter a model name before training.", "error")
 
-        # Disable the button and show the progress bar to give user feedback
         btn_train.disabled = True
         progress_bar.visible = True
         results_view.objects = [pn.pane.Markdown("⏳ Training in progress... please wait.")]
@@ -52,40 +161,54 @@ def build(vm):
                 weak_negatives_batch_size=weak_negs_batch.value,
                 balance_dataset=balance_dataset.value,
             )
-        
 
         try:
-
             progress_bar.bar_color = 'success'
-            progress_bar.value = 0 
+            progress_bar.value = 0
             with patch_tqdm(progress_bar):
                 train_result = await asyncio.to_thread(run_training)
 
             scores = train_result.get('metrics', train_result)
             info = train_result.get('info', {}) if isinstance(train_result, dict) else {}
 
+            # Auto-save
+            try:
+                version_dir = await asyncio.to_thread(vm.eng.save_classifier_versioned, train_result)
+                vm.notify(f"Model saved: {version_dir}", "success")
+                _refresh_models_table()
+            except Exception as e:
+                vm.notify(f"Auto-save failed: {e}", "warning")
+
             metrics_df = format_metrics_matrix_df(scores)
             view_objects = [
                 pn.pane.Markdown("### Metrics"),
                 render_html_table(metrics_df, show_header=True),
             ]
-            if info:
-                info_df = format_training_info_df(info)
-                view_objects.append(pn.pane.Markdown("### Training Setup & Balancing"))
-                view_objects.append(render_html_table(info_df, show_header=True))
 
+            # Balancing info (hidden by default)
+            has_balancing = bool(info)
+            btn_toggle_balancing.visible = has_balancing
+            btn_toggle_balancing.value = False
+            balancing_view.visible = False
+            balancing_view.objects = []
+            if has_balancing:
+                bal_objects = []
+                info_df = format_training_info_df(info)
+                bal_objects.append(pn.pane.Markdown("### Training Setup & Balancing"))
+                bal_objects.append(render_html_table(info_df, show_header=True))
                 factors_df = format_oversample_factors_df(info)
                 if factors_df is not None:
-                    view_objects.append(pn.pane.Markdown("### Oversample Factors"))
-                    view_objects.append(render_html_table(factors_df, show_header=True))
-            results_view.objects = view_objects
+                    bal_objects.append(pn.pane.Markdown("### Oversample Factors"))
+                    bal_objects.append(render_html_table(factors_df, show_header=True))
+                balancing_view.objects = bal_objects
+
+            results_view.objects = view_objects + [btn_toggle_balancing, balancing_view]
             vm.notify("Training complete.", "success")
-            
+
         except Exception as e:
             results_view.objects = [pn.pane.Alert(f"**Error:** {e}", alert_type="danger")]
             vm.notify(f"Training failed: {e}", "error")
         finally:
-            # ALWAYS re-enable the button and hide the progress bar
             btn_train.disabled = False
             progress_bar.visible = False
 
@@ -102,24 +225,12 @@ def build(vm):
         except Exception as e:
             vm.notify(f"Could not auto-set weak negatives batch size: {e}", "error")
 
-
-    def _save(_):
-        if not vm.eng: return vm.notify("Initialize first.", "error")
-        if not vm.eng.has_trained_classifier():
-            return vm.notify("No classifier has been trained yet.", "warn")
-        try:
-            out = (vm.eng.config.models_folder / f"{cls_name.value}.json").absolute()
-            out.parent.mkdir(parents=True, exist_ok=True)
-            vm.eng.save_classifier(out)
-            vm.notify(f"Classifier saved: {out}", "success")
-        except Exception as e:
-            vm.notify(f"Save classifier failed: {e}", "error")
-
     btn_train.on_click(_train)
     btn_auto_weak_negs.on_click(_auto_set_weak_negs)
-    btn_save.on_click(_save)
 
-    # training params
+    # Seed the models table on load
+    _refresh_models_table()
+
     hyperparameters = pn.Card(
         pn.Row(
             pn.Column(
@@ -135,19 +246,20 @@ def build(vm):
             sizing_mode="stretch_width",
         ),
         title="Hyperparameters",
-        collapsible=False
+        collapsible=False,
     )
 
     return pn.Column(
         pn.Row("## Train Classifier", pn.Spacer(), train_help_btn),
+        pn.Row(cls_name, sizing_mode="stretch_width"),
         hyperparameters,
         pn.Row(btn_train),
         progress_bar,
         pn.layout.Divider(),
         results_view,
         pn.layout.Divider(),
-        pn.pane.Markdown("### Save Model"),
-        pn.Row(cls_name, btn_save, align="start"),
+        pn.pane.Markdown("### Saved Models"),
+        models_table_view,
         sizing_mode="stretch_both",
     )
 
