@@ -44,6 +44,20 @@ from concurrent.futures import ProcessPoolExecutor
 log = logging.getLogger(__name__)
 
 
+def sanitize_model_name(name: str) -> str:
+    """Return a filesystem-safe, lowercase model name.
+
+    - Whitespace and hyphens → underscore
+    - Anything outside [0-9A-Za-z._] → removed
+    - Converted to lowercase
+    - Falls back to 'classifier' if the result is empty
+    """
+    import re
+    name = re.sub(r'[\s\-]+', '_', name)
+    name = re.sub(r'[^0-9A-Za-z._]', '', name)
+    name = name.lower().strip('._')
+    return name or 'classifier'
+
 
 class agile_state:
 
@@ -971,9 +985,13 @@ class agile_state:
         Returns the version directory path.
         """
         from datetime import datetime as _dt
-        name = (self.config.classifier_name or "classifier").strip()
+        name = sanitize_model_name(self.config.classifier_name or "classifier")
+        models_root = Path(self.config.models_folder).resolve()
         version = _dt.now().strftime("%Y%m%d_%H%M%S")
-        version_dir = Path(self.config.models_folder) / name / version
+        version_dir = (models_root / name / version).resolve()
+        # Guard: ensure we stay inside models_folder
+        if not str(version_dir).startswith(str(models_root)):
+            raise ValueError(f"Resolved path {version_dir} escapes models folder {models_root}")
         version_dir.mkdir(parents=True, exist_ok=True)
 
         self.save_classifier(version_dir / "recognizer.json")
@@ -1016,7 +1034,11 @@ class agile_state:
     def delete_model(self, model_name: str) -> None:
         """Delete all versions of a saved model."""
         import shutil
-        model_dir = Path(self.config.models_folder) / model_name
+        safe_name = sanitize_model_name(model_name)
+        models_root = Path(self.config.models_folder).resolve()
+        model_dir = (models_root / safe_name).resolve()
+        if not str(model_dir).startswith(str(models_root)):
+            raise ValueError(f"Resolved path {model_dir} escapes models folder {models_root}")
         if model_dir.exists():
             shutil.rmtree(model_dir)
       

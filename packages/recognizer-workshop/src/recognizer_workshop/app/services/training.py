@@ -403,9 +403,14 @@ def training_result_to_json(result: TrainingResult) -> dict[str, Any]:
 
     def _to_json_safe(value: Any) -> Any:
         if isinstance(value, np.ndarray):
-            return value.tolist()
+            return _to_json_safe(value.tolist())
+        if isinstance(value, float):
+            return None if not math.isfinite(value) else value
         if isinstance(value, (np.floating, np.integer)):
-            return value.item()
+            scalar = value.item()
+            if isinstance(scalar, float) and not math.isfinite(scalar):
+                return None
+            return scalar
         if isinstance(value, dict):
             return {str(k): _to_json_safe(v) for k, v in value.items()}
         if isinstance(value, (list, tuple)):

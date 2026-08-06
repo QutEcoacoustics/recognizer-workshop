@@ -5,10 +5,14 @@ import numpy as np
 import pandas as pd
 import panel as pn
 
+from recognizer_workshop.app.agile_engine import sanitize_model_name
 from recognizer_workshop.ui.panel.utils.patch_tqdm import patch_tqdm
+from recognizer_workshop.ui.panel.utils.validation import ensure_validation_css, set_validity
 
 
 def build(vm):
+    ensure_validation_css()
+
     # Create help buttons
     train_help_btn = vm.help_system.create_help_button("help-train-overview", "Help: Training")
     algorithm_params_help_btn = vm.help_system.create_help_button("help-training-algorithm-params", "Help: Algorithm Parameters")
@@ -31,26 +35,28 @@ def build(vm):
         sizing_mode="stretch_width",
     )
 
-    def _on_cls_name_change(event):
-        if vm.eng:
-            vm.eng.config.classifier_name = event.new
-            try:
-                vm.eng.config.save()
-            except Exception:
-                pass  # config_path may not be set yet
+    def _update_cls_name_validation(value: str):
+        is_valid = bool(value.strip())
+        set_validity(cls_name, is_valid=is_valid)
+        btn_train.disabled = not is_valid
+        return is_valid
 
-    cls_name.param.watch(_on_cls_name_change, 'value')
+    def _on_cls_name_input_change(event):
+        _update_cls_name_validation(event.new)
 
-    learning_rate = pn.widgets.FloatInput(name="Learning Rate", value=1e-3, step=1e-4)
-    num_steps     = pn.widgets.IntInput(name="Num Steps", value=101, start=1)
-    batch_size    = pn.widgets.IntInput(name="Batch Size", value=32, start=1)
-    train_ratio   = pn.widgets.FloatInput(name="Train Ratio", value=0.9, start=0.1, end=0.99, step=0.01)
-    weak_neg_weight = pn.widgets.FloatInput(name="Weak Negative Weight", value=0.05, start=0.0, step=0.01)
-    weak_negs_batch = pn.widgets.IntInput(name="Weak Negatives Batch Size", value=16, start=0)
+    cls_name.param.watch(_on_cls_name_input_change, 'value_input')
+
+    learning_rate = pn.widgets.FloatInput(name="Learning Rate", value=1e-3, step=1e-4, sizing_mode="fixed", width=100)
+    num_steps     = pn.widgets.IntInput(name="Num Steps", value=101, start=1, sizing_mode="fixed", width=100)
+    batch_size    = pn.widgets.IntInput(name="Batch Size", value=32, start=1, sizing_mode="fixed", width=100)
+    train_ratio   = pn.widgets.FloatInput(name="Train Ratio", value=0.9, start=0.1, end=0.99, step=0.01, sizing_mode="fixed", width=100)
+    weak_neg_weight = pn.widgets.FloatInput(name="Weak Neg Weight", value=0.05, start=0.0, step=0.01, sizing_mode="fixed", width=140)
+    weak_negs_batch = pn.widgets.IntInput(name="Weak Neg Batch Size", value=16, start=0, sizing_mode="fixed", width=140)
     btn_auto_weak_negs = pn.widgets.Button(name="Auto Set", button_type="default", sizing_mode="fixed", width=100)
-    balance_dataset = pn.widgets.Checkbox(name="Balance dataset", value=True)
+    balance_dataset = pn.widgets.Checkbox(name="Balance", value=True)
 
     btn_train = pn.widgets.Button(name="Train classifier", button_type="success", sizing_mode="fixed", width=150)
+    btn_train.height = 40
 
     progress_bar = pn.widgets.Progress(name='Training Progress', active=True, visible=False, sizing_mode="stretch_width")
 
@@ -81,7 +87,7 @@ def build(vm):
 
     def _refresh_models_table():
         if not vm.eng:
-            models_table_view.objects = []
+            models_table_view.objects = [pn.pane.Markdown("_Initialize engine to view saved models._")]
             return
         models = vm.eng.list_saved_models()
         if not models:
@@ -134,18 +140,31 @@ def build(vm):
                 align="center",
             ))
 
-        header = pn.Row(
-            pn.pane.Markdown("**Model**", width=200, sizing_mode="fixed"),
-            pn.pane.Markdown("**Created**", width=160, sizing_mode="fixed"),
-            pn.pane.Markdown("", width=110, sizing_mode="fixed"),
-            pn.pane.Markdown("", width=80, sizing_mode="fixed"),
-        )
-        models_table_view.objects = [header] + rows
+        # header = pn.Row(
+        #     pn.pane.Markdown("**Model**", width=200, sizing_mode="fixed"),
+        #     pn.pane.Markdown("**Created**", width=160, sizing_mode="fixed"),
+        #     pn.pane.Markdown("", width=110, sizing_mode="fixed"),
+        #     pn.pane.Markdown("", width=80, sizing_mode="fixed"),
+        # )
+        models_table_view.objects = rows
 
     async def _train(_):
         if not vm.eng: return vm.notify("Initialize first.", "error")
-        if not cls_name.value.strip():
-            return vm.notify("Please enter a model name before training.", "error")
+        raw_name = cls_name.value_input if cls_name.value_input is not None else cls_name.value
+        if not raw_name.strip():
+            _update_cls_name_validation(raw_name)
+            return
+
+        sanitized_name = sanitize_model_name(raw_name)
+        if cls_name.value != sanitized_name:
+            cls_name.value = sanitized_name
+        vm.eng.config.classifier_name = sanitized_name
+        try:
+            vm.eng.config.save()
+        except ValueError:
+            pass  # config_path not set yet — fine, name is held in memory
+        except Exception as e:
+            vm.notify(f"Could not persist model name: {e}", "warning")
 
         btn_train.disabled = True
         progress_bar.visible = True
@@ -209,7 +228,7 @@ def build(vm):
             results_view.objects = [pn.pane.Alert(f"**Error:** {e}", alert_type="danger")]
             vm.notify(f"Training failed: {e}", "error")
         finally:
-            btn_train.disabled = False
+            _update_cls_name_validation(cls_name.value_input if cls_name.value_input is not None else cls_name.value)
             progress_bar.visible = False
 
     def _auto_set_weak_negs(_):
@@ -227,22 +246,25 @@ def build(vm):
 
     btn_train.on_click(_train)
     btn_auto_weak_negs.on_click(_auto_set_weak_negs)
+    _update_cls_name_validation(cls_name.value)
+
+    @pn.depends(vm.obs.ensure("engine_state").param.version, watch=True)
+    def _on_engine_state_change(_):
+        _refresh_models_table()
+
+    @pn.depends(vm.obs.ensure("config_state").param.version, watch=True)
+    def _on_config_state_change(_):
+        _refresh_models_table()
 
     # Seed the models table on load
     _refresh_models_table()
 
     hyperparameters = pn.Card(
-        pn.Row(
-            pn.Column(
-                pn.Row("Algorithm Parameters", pn.Spacer(), algorithm_params_help_btn),
-                pn.Row(learning_rate, num_steps, batch_size),
-                sizing_mode="stretch_width",
-            ),
-            pn.Column(
-                pn.Row("Labeled Data Parameters", pn.Spacer(), labeled_data_params_help_btn),
-                pn.Row(train_ratio, weak_neg_weight, weak_negs_batch, btn_auto_weak_negs, balance_dataset),
-                sizing_mode="stretch_width",
-            ),
+        pn.Column(
+            pn.Row("Algorithm Parameters", pn.Spacer(), algorithm_params_help_btn, sizing_mode="stretch_width"),
+            pn.Row(learning_rate, num_steps, batch_size, sizing_mode="stretch_width"),
+            pn.Row("Labeled Data Parameters", pn.Spacer(), labeled_data_params_help_btn, sizing_mode="stretch_width"),
+            pn.Row(train_ratio, weak_neg_weight, weak_negs_batch, btn_auto_weak_negs, balance_dataset, sizing_mode="stretch_width"),
             sizing_mode="stretch_width",
         ),
         title="Hyperparameters",
@@ -251,9 +273,13 @@ def build(vm):
 
     return pn.Column(
         pn.Row("## Train Classifier", pn.Spacer(), train_help_btn),
-        pn.Row(cls_name, sizing_mode="stretch_width"),
+        pn.Row(
+            cls_name,
+            btn_train,
+            align="end",
+            sizing_mode="stretch_width",
+        ),
         hyperparameters,
-        pn.Row(btn_train),
         progress_bar,
         pn.layout.Divider(),
         results_view,
