@@ -45,10 +45,12 @@ def build(vm):
         sizing_mode="stretch_width",
     )
 
+    _training_state = {"in_progress": False}
+
     def _update_recognizer_name_validation(value: str):
         is_valid = bool(value.strip())
         set_validity(recognizer_name_field, is_valid=is_valid)
-        btn_train.disabled = not is_valid
+        btn_train.disabled = not is_valid or _training_state["in_progress"]
         return is_valid
 
     def _on_recognizer_name_input_change(event):
@@ -175,13 +177,28 @@ def build(vm):
             if selected_classifier_name and selected_classifier_version:
                 btn_download.filename = f"{selected_classifier_name}_{selected_classifier_version}.json"
                 _render_active_saved_classifier_results()
+                load_error = getattr(vm.eng, 'train_result_load_error', None)
+                if load_error:
+                    vm.notify(f"Could not load {selected_classifier_name} ({selected_classifier_version}): {load_error}", "warning")
         finally:
             _selector_sync_guard["active"] = False
 
     def _render_active_saved_classifier_results():
         index = _get_saved_training_results_index()
         selected_item = index.get_active_classifier_entry() if index else None
-        if not selected_item or not vm.eng or not vm.eng.train_result:
+        if not selected_item or not vm.eng:
+            return
+
+        if not vm.eng.train_result:
+            load_error = getattr(vm.eng, 'train_result_load_error', None)
+            if load_error:
+                results_view.objects = [pn.pane.Alert(
+                    f"**Could not load {selected_item.classifier_name} ({selected_item.display_name}):**\n\n{load_error}",
+                    alert_type="warning",
+                )]
+            btn_toggle_balancing.visible = False
+            balancing_view.visible = False
+            balancing_view.objects = []
             return
 
         view_result = training_service.training_result_to_json(vm.eng.train_result)
@@ -312,6 +329,7 @@ def build(vm):
             recognizer_name_field.value = sanitized_name
 
         btn_train.disabled = True
+        _training_state["in_progress"] = True
         progress_bar.visible = True
         results_view.objects = [pn.pane.Markdown("⏳ Training in progress... please wait.")]
 
@@ -369,6 +387,7 @@ def build(vm):
             results_view.objects = [pn.pane.Alert(f"**Error:** {e}", alert_type="danger")]
             vm.notify(f"Training failed: {e}", "error")
         finally:
+            _training_state["in_progress"] = False
             _update_recognizer_name_validation(recognizer_name_field.value)
             progress_bar.visible = False
 

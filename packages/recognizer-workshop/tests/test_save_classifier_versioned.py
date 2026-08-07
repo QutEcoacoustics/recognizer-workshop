@@ -227,3 +227,61 @@ class TestEngineIndexManagement:
         eng.saved_training_results_index = None
         with pytest.raises(ValueError, match="not initialized"):
             eng.delete_active_saved_classifier_version()
+
+
+class TestCorruptClassifierHandling:
+
+    def _write_version(self, models_root: Path, name: str, version: str, *, corrupt: bool = False) -> Path:
+        version_dir = models_root / name / version
+        version_dir.mkdir(parents=True, exist_ok=True)
+        if corrupt:
+            (version_dir / "recognizer.json").write_text("not valid json", encoding="utf-8")
+        else:
+            _make_linear_classifier().save(version_dir / "recognizer.json")
+        return version_dir
+
+    def test_corrupt_recognizer_does_not_crash_refresh(self, engine):
+        eng, tmp_path = engine
+        self._write_version(tmp_path / "models", "owl", "v1", corrupt=True)
+        # must not raise
+        eng.refresh_saved_training_results_index()
+
+    def test_corrupt_recognizer_sets_train_result_none(self, engine):
+        eng, tmp_path = engine
+        self._write_version(tmp_path / "models", "owl", "v1", corrupt=True)
+        eng.refresh_saved_training_results_index()
+        assert eng.train_result is None
+
+    def test_corrupt_recognizer_sets_load_error_message(self, engine):
+        eng, tmp_path = engine
+        self._write_version(tmp_path / "models", "owl", "v1", corrupt=True)
+        eng.refresh_saved_training_results_index()
+        assert eng.train_result_load_error is not None
+        assert isinstance(eng.train_result_load_error, str)
+
+    def test_valid_load_clears_error(self, engine):
+        eng, tmp_path = engine
+        self._write_version(tmp_path / "models", "owl", "v1", corrupt=True)
+        eng.refresh_saved_training_results_index()
+        assert eng.train_result_load_error is not None
+        # now write a valid version and refresh
+        self._write_version(tmp_path / "models", "owl", "v2")
+        eng.refresh_saved_training_results_index()
+        assert eng.train_result_load_error is None
+        assert eng.train_result is not None
+
+    def test_corrupt_recognizer_index_still_has_entry(self, engine):
+        eng, tmp_path = engine
+        self._write_version(tmp_path / "models", "owl", "v1", corrupt=True)
+        eng.refresh_saved_training_results_index()
+        # index still knows about the entry so user can see/delete it
+        assert eng.saved_training_results_index.get_active_classifier_entry() is not None
+
+    def test_set_active_corrupt_sets_error(self, engine):
+        eng, tmp_path = engine
+        self._write_version(tmp_path / "models", "owl", "v1")
+        self._write_version(tmp_path / "models", "owl", "v2", corrupt=True)
+        eng.refresh_saved_training_results_index()
+        eng.set_active_saved_classifier("owl", "v2")
+        assert eng.train_result is None
+        assert eng.train_result_load_error is not None

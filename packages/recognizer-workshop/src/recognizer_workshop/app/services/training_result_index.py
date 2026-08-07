@@ -171,10 +171,17 @@ def load_training_result_from_classifier_entry(entry: SavedTrainingResultsItem) 
     eval_scores = None
     training_info = None
     if entry.has_metrics:
-        with entry.metrics_path.open('r', encoding='utf-8') as f:
-            metrics_json = json.load(f)
-        eval_scores = metrics_json.get('metrics')
-        training_info = metrics_json.get('info')
+        try:
+            with entry.metrics_path.open('r', encoding='utf-8') as f:
+                metrics_json = json.load(f)
+            eval_scores = metrics_json.get('metrics')
+            training_info = metrics_json.get('info')
+        except (OSError, ValueError) as exc:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                'Could not read metrics for %s/%s, ignoring: %s',
+                entry.classifier_name, entry.version_name, exc,
+            )
 
     return training_service.TrainingResult(
         classifier_model=classifier_model,

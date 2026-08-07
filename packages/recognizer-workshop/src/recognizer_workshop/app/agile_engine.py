@@ -106,6 +106,7 @@ class agile_state:
         self.labels_commit_message = ''
         self.labels_commit_error = None
         self.saved_training_results_index: Optional[SavedTrainingResultsIndex] = None
+        self.train_result_load_error: Optional[str] = None
         mp_context = multiprocessing.get_context('spawn')
         self._embed_runner = ProcessPoolExecutor(
             max_workers=1,
@@ -1094,8 +1095,15 @@ class agile_state:
         entry = self.saved_training_results_index.get_active_classifier_entry() if self.saved_training_results_index else None
         if entry is None:
             self.train_result = None
+            self.train_result_load_error = None
             return
-        self.train_result = load_training_result_from_classifier_entry(entry)
+        try:
+            self.train_result = load_training_result_from_classifier_entry(entry)
+            self.train_result_load_error = None
+        except Exception as exc:
+            log.warning('Could not load classifier %s/%s: %s', entry.classifier_name, entry.version_name, exc)
+            self.train_result = None
+            self.train_result_load_error = str(exc)
 
     def set_active_saved_classifier(self, classifier_name: str, version_name: str) -> None:
         """Sets the active saved classifier/version and loads it into train_result."""

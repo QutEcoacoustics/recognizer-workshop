@@ -282,6 +282,26 @@ class TestIsEmpty:
 
 class TestLoadTrainingResultFromEntry:
 
+    def test_corrupt_metrics_json_does_not_raise(self, tmp_path):
+        version_dir = _write_version(tmp_path, "owl", "v1")
+        (version_dir / "metrics.json").write_text("not valid json", encoding="utf-8")
+        index = SavedTrainingResultsIndex(tmp_path)
+        index.initialize_index()
+        entry = index.get_active_classifier_entry()
+        # should not raise; corrupt metrics treated as absent
+        result = load_training_result_from_classifier_entry(entry)
+        assert result.eval_scores is None
+        assert result.training_info is None
+
+    def test_corrupt_recognizer_json_raises(self, tmp_path):
+        version_dir = _write_version(tmp_path, "owl", "v1")
+        (version_dir / "recognizer.json").write_text("not valid json", encoding="utf-8")
+        index = SavedTrainingResultsIndex(tmp_path)
+        index.initialize_index()
+        entry = index.get_active_classifier_entry()
+        with pytest.raises(Exception):
+            load_training_result_from_classifier_entry(entry)
+
     def test_loads_classifier_model(self, tmp_path):
         _write_version(tmp_path, "owl", "v1")
         index = SavedTrainingResultsIndex(tmp_path)
