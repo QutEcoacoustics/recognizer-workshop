@@ -39,6 +39,22 @@ def debug_timer(pid):
         sys.stderr.flush()
 
 
+def warm_up_model(model_name: str) -> bool:
+    """
+    Runs in the worker process. Imports TF and loads the model into the cache.
+    Called proactively after init_db so the first real embed is fast.
+    """
+    import tensorflow as tf  # noqa: F401 — import triggers TF initialisation
+    from perch_hoplite.zoo import model_configs
+
+    global _WORKER_MODEL_CACHE
+    if model_name not in _WORKER_MODEL_CACHE:
+        print(f">>> [Worker warmup] Loading model '{model_name}'...")
+        _WORKER_MODEL_CACHE[model_name] = model_configs.load_model_by_name(model_name)
+        print(f">>> [Worker warmup] Model '{model_name}' ready.")
+    return True
+
+
 def run_embed_task(model_name: str, audio_window):
     """
     Runs in the separate process.
