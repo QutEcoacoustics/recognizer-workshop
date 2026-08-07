@@ -26,7 +26,7 @@ def build(vm):
     def _get_active_saved_classifier_entry():
         if not vm.eng:
             return None
-        index = getattr(vm.eng, "training_result_index", None)
+        index = getattr(vm.eng, "saved_training_results_index", None)
         return index.get_active_classifier_entry() if index else None
 
     def _build_refine_heading_text() -> str:

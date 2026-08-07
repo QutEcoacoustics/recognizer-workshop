@@ -29,7 +29,7 @@ from recognizer_workshop.app.services.db_labels.add_db_labels import add_labels_
 from recognizer_workshop.app.services.db_labels.db_labels_info import get_label_counts
 from recognizer_workshop.app.services.db_labels.dataclasses import LabelName
 from recognizer_workshop.app.services import training as training_service
-from recognizer_workshop.app.services.training_result_index import ClassifierResultIndex, load_training_result_from_classifier_entry
+from recognizer_workshop.app.services.training_result_index import SavedTrainingResultsIndex, load_training_result_from_classifier_entry
 from recognizer_workshop.app.create_database.repair_index import repair_index
 from recognizer_workshop.app.services.database_status import (
     get_database_status,
@@ -105,7 +105,7 @@ class agile_state:
         self.labels_commit_state = 'idle'
         self.labels_commit_message = ''
         self.labels_commit_error = None
-        self.training_result_index: Optional[ClassifierResultIndex] = None
+        self.saved_training_results_index: Optional[SavedTrainingResultsIndex] = None
         mp_context = multiprocessing.get_context('spawn')
         self._embed_runner = ProcessPoolExecutor(
             max_workers=1,
@@ -190,7 +190,7 @@ class agile_state:
 
         self.audio_filepath_loader = self._create_audio_loader()
 
-        self.refresh_training_result_index()
+        self.refresh_saved_training_results_index()
 
         return True
 
@@ -1066,14 +1066,14 @@ class agile_state:
         if classifier_dir.exists():
             shutil.rmtree(classifier_dir)
 
-    def refresh_training_result_index(self) -> None:
+    def refresh_saved_training_results_index(self) -> None:
         """(Re)scans saved classifiers and loads the active saved classifier into train_result."""
-        self.training_result_index = ClassifierResultIndex(self.config.models_folder)
-        self.training_result_index.initialize_index()
+        self.saved_training_results_index = SavedTrainingResultsIndex(self.config.models_folder)
+        self.saved_training_results_index.initialize_index()
         self._load_active_classifier_training_result()
 
     def _load_active_classifier_training_result(self) -> None:
-        entry = self.training_result_index.get_active_classifier_entry() if self.training_result_index else None
+        entry = self.saved_training_results_index.get_active_classifier_entry() if self.saved_training_results_index else None
         if entry is None:
             self.train_result = None
             return
@@ -1081,19 +1081,19 @@ class agile_state:
 
     def set_active_saved_classifier(self, classifier_name: str, version_name: str) -> None:
         """Sets the active saved classifier/version and loads it into train_result."""
-        if not self.training_result_index:
+        if not self.saved_training_results_index:
             raise ValueError("Training result index not initialized.")
-        self.training_result_index.set_active_classifier(classifier_name, version_name)
+        self.saved_training_results_index.set_active_classifier(classifier_name, version_name)
         self._load_active_classifier_training_result()
 
     def delete_active_saved_classifier_version(self) -> None:
         """Deletes only the currently active saved classifier version, then reselects the newest."""
-        if not self.training_result_index:
+        if not self.saved_training_results_index:
             raise ValueError("Training result index not initialized.")
-        entry = self.training_result_index.get_active_classifier_entry()
+        entry = self.saved_training_results_index.get_active_classifier_entry()
         if entry is None:
             raise ValueError("No active saved classifier to delete.")
-        self.training_result_index.delete_classifier_version(entry.classifier_name, entry.version_name)
+        self.saved_training_results_index.delete_classifier_version(entry.classifier_name, entry.version_name)
         self._load_active_classifier_training_result()
 
 

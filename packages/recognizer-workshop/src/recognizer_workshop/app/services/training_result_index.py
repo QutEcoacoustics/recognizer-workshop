@@ -34,7 +34,7 @@ def _parse_version_datetime(version_name: str) -> Optional[datetime]:
 
 
 @dataclass(frozen=True)
-class ClassifierVersionEntry:
+class SavedTrainingResultsItem:
     """A single saved classifier version on disk."""
     classifier_name: str
     version_name: str
@@ -62,14 +62,14 @@ class ClassifierVersionEntry:
         return self.version_name
 
 
-class ClassifierResultIndex:
+class SavedTrainingResultsIndex:
     """Scans the saved-classifier folder and tracks the active selection."""
 
     def __init__(self, models_folder: Path | str | None):
         self.models_folder = Path(models_folder) if models_folder else None
-        self.entries: dict[str, dict[str, ClassifierVersionEntry]] = {}
-        self.active_classifier: str | None = None
-        self.active_version: str | None = None
+        self.entries: dict[str, dict[str, SavedTrainingResultsItem]] = {}
+        self.selected_classifier_name: str | None = None
+        self.selected_classifier_version: str | None = None
 
     def initialize_index(self) -> None:
         """Rescans the models folder and resets the active selection to the newest entry."""
@@ -84,22 +84,22 @@ class ClassifierResultIndex:
         """
         self.initialize_index()
 
-    def _scan(self) -> dict[str, dict[str, ClassifierVersionEntry]]:
+    def _scan(self) -> dict[str, dict[str, SavedTrainingResultsItem]]:
         if not self.models_folder or not self.models_folder.exists():
             return {}
 
-        found: dict[str, dict[str, ClassifierVersionEntry]] = {}
+        found: dict[str, dict[str, SavedTrainingResultsItem]] = {}
         for classifier_dir in self.models_folder.iterdir():
             if not classifier_dir.is_dir():
                 continue
-            versions: dict[str, ClassifierVersionEntry] = {}
+            versions: dict[str, SavedTrainingResultsItem] = {}
             for version_dir in classifier_dir.iterdir():
                 if not version_dir.is_dir():
                     continue
                 if not (version_dir / RECOGNIZER_FILENAME).exists():
                     continue
                 modified_time = datetime.fromtimestamp(version_dir.stat().st_mtime)
-                versions[version_dir.name] = ClassifierVersionEntry(
+                versions[version_dir.name] = SavedTrainingResultsItem(
                     classifier_name=classifier_dir.name,
                     version_name=version_dir.name,
                     version_dir=version_dir,
@@ -109,7 +109,7 @@ class ClassifierResultIndex:
                 found[classifier_dir.name] = versions
         return found
 
-    def _newest_entry_overall(self) -> ClassifierVersionEntry | None:
+    def _newest_entry_overall(self) -> SavedTrainingResultsItem | None:
         all_entries = [entry for versions in self.entries.values() for entry in versions.values()]
         if not all_entries:
             return None
@@ -118,11 +118,11 @@ class ClassifierResultIndex:
     def _select_newest_globally(self) -> None:
         newest_entry = self._newest_entry_overall()
         if newest_entry is None:
-            self.active_classifier = None
-            self.active_version = None
+            self.selected_classifier_name = None
+            self.selected_classifier_version = None
             return
-        self.active_classifier = newest_entry.classifier_name
-        self.active_version = newest_entry.version_name
+        self.selected_classifier_name = newest_entry.classifier_name
+        self.selected_classifier_version = newest_entry.version_name
 
     def get_classifier_list(self) -> list[str]:
         """Classifier names, ordered by their newest version's modified time, newest first."""
@@ -131,25 +131,25 @@ class ClassifierResultIndex:
 
         return sorted(self.entries.keys(), key=newest_modified_time, reverse=True)
 
-    def get_versions_for_classifier(self, classifier_name: str) -> list[ClassifierVersionEntry]:
+    def get_versions_for_classifier(self, classifier_name: str) -> list[SavedTrainingResultsItem]:
         """Versions for a classifier, newest first by modified time."""
         versions = self.entries.get(classifier_name, {})
         return sorted(versions.values(), key=lambda e: e.modified_time, reverse=True)
 
-    def get_classifier_entry(self, classifier_name: str, version_name: str) -> ClassifierVersionEntry | None:
+    def get_classifier_entry(self, classifier_name: str, version_name: str) -> SavedTrainingResultsItem | None:
         return self.entries.get(classifier_name, {}).get(version_name)
 
-    def get_active_classifier_entry(self) -> ClassifierVersionEntry | None:
-        if self.active_classifier is None or self.active_version is None:
+    def get_active_classifier_entry(self) -> SavedTrainingResultsItem | None:
+        if self.selected_classifier_name is None or self.selected_classifier_version is None:
             return None
-        return self.get_classifier_entry(self.active_classifier, self.active_version)
+        return self.get_classifier_entry(self.selected_classifier_name, self.selected_classifier_version)
 
-    def set_active_classifier(self, classifier_name: str, version_name: str) -> ClassifierVersionEntry:
+    def set_active_classifier(self, classifier_name: str, version_name: str) -> SavedTrainingResultsItem:
         entry = self.get_classifier_entry(classifier_name, version_name)
         if entry is None:
             raise ValueError(f"No saved classifier found for '{classifier_name}' version '{version_name}'.")
-        self.active_classifier = classifier_name
-        self.active_version = version_name
+        self.selected_classifier_name = classifier_name
+        self.selected_classifier_version = version_name
         return entry
 
     def delete_classifier_version(self, classifier_name: str, version_name: str) -> None:
@@ -165,7 +165,7 @@ class ClassifierResultIndex:
         return not self.entries
 
 
-def load_training_result_from_classifier_entry(entry: ClassifierVersionEntry) -> training_service.TrainingResult:
+def load_training_result_from_classifier_entry(entry: SavedTrainingResultsItem) -> training_service.TrainingResult:
     """Load a TrainingResult from a saved on-disk classifier entry."""
     classifier_model = LinearClassifier.load(str(entry.recognizer_path))
     eval_scores = None
@@ -183,3 +183,6 @@ def load_training_result_from_classifier_entry(entry: ClassifierVersionEntry) ->
         classifier_name=entry.classifier_name,
         version_name=entry.version_name,
     )
+
+
+

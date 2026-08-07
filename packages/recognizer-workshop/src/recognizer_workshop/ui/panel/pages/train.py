@@ -20,19 +20,27 @@ def build(vm):
     algorithm_params_help_btn = vm.help_system.create_help_button("help-training-algorithm-params", "Help: Algorithm Parameters")
     labeled_data_params_help_btn = vm.help_system.create_help_button("help-labeled-data-params", "Help: Labeled Data Parameters")
 
-    # --- Classifier name (persisted in config) ---
-    def _default_classifier_name():
-        if vm.eng:
-            if vm.eng.config.classifier_name:
-                return vm.eng.config.classifier_name
-            labels = vm.eng.get_target_labels() if hasattr(vm.eng, 'get_target_labels') else []
-            if len(labels) == 1:
-                return str(labels[0])
+    # --- Classifier name (auto-populated from app state) ---
+    def _preferred_classifier_name() -> str:
+        if not vm.eng:
+            return ""
+
+        index = getattr(vm.eng, "saved_training_results_index", None)
+        selected_item = index.get_active_classifier_entry() if index else None
+        if selected_item and selected_item.classifier_name:
+            return str(selected_item.classifier_name)
+
+        labels = vm.eng.get_target_labels() if hasattr(vm.eng, 'get_target_labels') else []
+        if len(labels) == 1:
+            return str(labels[0])
+
         return ""
+
+    _cls_name_autofill_state = {"last_auto": _preferred_classifier_name()}
 
     cls_name = pn.widgets.TextInput(
         name="Recognizer Name",
-        value=_default_classifier_name(),
+        value=_cls_name_autofill_state["last_auto"],
         placeholder="Required — e.g. imperial_pigeon",
         sizing_mode="stretch_width",
     )
@@ -45,6 +53,19 @@ def build(vm):
 
     def _on_cls_name_input_change(event):
         _update_cls_name_validation(event.new)
+
+    def _sync_cls_name_autofill_from_state():
+        preferred = _preferred_classifier_name()
+        current_raw = cls_name.value_input if cls_name.value_input is not None else cls_name.value
+        current = (current_raw or "").strip()
+        last_auto = (_cls_name_autofill_state["last_auto"] or "").strip()
+
+        # Only auto-overwrite when the user hasn't diverged from the auto-filled value.
+        if current == "" or current == last_auto:
+            if cls_name.value != preferred:
+                cls_name.value = preferred
+            _update_cls_name_validation(preferred)
+        _cls_name_autofill_state["last_auto"] = preferred
 
     cls_name.param.watch(_on_cls_name_input_change, 'value_input')
 
@@ -101,13 +122,13 @@ def build(vm):
 
     _selector_sync_guard = {"active": False}
 
-    def _get_training_result_index():
-        return vm.eng.training_result_index if vm.eng else None
+    def _get_saved_training_results_index():
+        return vm.eng.saved_training_results_index if vm.eng else None
 
     def _download_recognizer_bytes():
-        index = _get_training_result_index()
-        active_entry = index.get_active_classifier_entry() if index else None
-        path = active_entry.recognizer_path if active_entry else None
+        index = _get_saved_training_results_index()
+        selected_item = index.get_active_classifier_entry() if index else None
+        path = selected_item.recognizer_path if selected_item else None
         if path is None or not path.exists():
             raise ValueError("No active saved recognizer available to download.")
         return io.BytesIO(path.read_bytes())
@@ -118,7 +139,7 @@ def build(vm):
         """Mirrors the engine's saved-classifier index/active-selection onto the dropdowns."""
         _selector_sync_guard["active"] = True
         try:
-            index = _get_training_result_index()
+            index = _get_saved_training_results_index()
             classifier_names = index.get_classifier_list() if index else []
             if not classifier_names:
                 classifier_select.options = []
@@ -134,30 +155,30 @@ def build(vm):
             btn_download.disabled = False
             btn_delete.disabled = False
 
-            active = index.get_active_classifier_entry() if index else None
-            active_classifier_name = active.classifier_name if active else classifier_names[0]
+            selected_item = index.get_active_classifier_entry() if index else None
+            selected_classifier_name = selected_item.classifier_name if selected_item else classifier_names[0]
 
             classifier_select.options = classifier_names
-            classifier_select.value = active_classifier_name
+            classifier_select.value = selected_classifier_name
 
-            versions = index.get_versions_for_classifier(active_classifier_name) if index else []
+            versions = index.get_versions_for_classifier(selected_classifier_name) if index else []
             version_select.options = {v.display_name: v.version_name for v in versions}
-            if active and active.classifier_name == active_classifier_name:
-                active_version_name = active.version_name
+            if selected_item and selected_item.classifier_name == selected_classifier_name:
+                selected_classifier_version = selected_item.version_name
             else:
-                active_version_name = versions[0].version_name if versions else None
-            version_select.value = active_version_name
+                selected_classifier_version = versions[0].version_name if versions else None
+            version_select.value = selected_classifier_version
 
-            if active_classifier_name and active_version_name:
-                btn_download.filename = f"{active_classifier_name}_{active_version_name}.json"
+            if selected_classifier_name and selected_classifier_version:
+                btn_download.filename = f"{selected_classifier_name}_{selected_classifier_version}.json"
                 _render_active_saved_classifier_results()
         finally:
             _selector_sync_guard["active"] = False
 
     def _render_active_saved_classifier_results():
-        index = _get_training_result_index()
-        active = index.get_active_classifier_entry() if index else None
-        if not active or not vm.eng or not vm.eng.train_result:
+        index = _get_saved_training_results_index()
+        selected_item = index.get_active_classifier_entry() if index else None
+        if not selected_item or not vm.eng or not vm.eng.train_result:
             return
 
         view_result = training_service.training_result_to_json(vm.eng.train_result)
@@ -166,7 +187,7 @@ def build(vm):
 
         if not scores:
             results_view.objects = [pn.pane.Markdown(
-                f"**{active.classifier_name}** - {active.display_name}\n\n_No metrics found._"
+                f"**{selected_item.classifier_name}** - {selected_item.display_name}\n\n_No metrics found._"
             )]
             btn_toggle_balancing.visible = False
             balancing_view.visible = False
@@ -175,7 +196,7 @@ def build(vm):
 
         metrics_df = format_metrics_matrix_df(scores)
         view_objects = [
-            pn.pane.Markdown(f"### Metrics - {active.classifier_name} ({active.display_name})"),
+            pn.pane.Markdown(f"### Metrics - {selected_item.classifier_name} ({selected_item.display_name})"),
             render_html_table(metrics_df, show_header=True),
         ]
 
@@ -201,7 +222,7 @@ def build(vm):
         if _selector_sync_guard["active"] or not vm.eng or event.new is None:
             return
         classifier_name = event.new
-        index = _get_training_result_index()
+        index = _get_saved_training_results_index()
         versions = index.get_versions_for_classifier(classifier_name) if index else []
         if not versions:
             return
@@ -240,9 +261,9 @@ def build(vm):
     def _on_delete_click(_):
         if not vm.eng:
             return vm.notify("Initialize first.", "error")
-        index = _get_training_result_index()
-        active = index.get_active_classifier_entry() if index else None
-        if not active:
+        index = _get_saved_training_results_index()
+        selected_item = index.get_active_classifier_entry() if index else None
+        if not selected_item:
             return vm.notify("No saved recognizer selected.", "warning")
 
         btn_cancel = pn.widgets.Button(name="Cancel", button_type="default")
@@ -254,7 +275,7 @@ def build(vm):
         def _confirm(_evt):
             try:
                 vm.eng.delete_active_saved_classifier_version()
-                vm.notify(f"Deleted '{active.classifier_name}' ({active.display_name}).", "success")
+                vm.notify(f"Deleted '{selected_item.classifier_name}' ({selected_item.display_name}).", "success")
             except Exception as e:
                 vm.notify(f"Delete failed: {e}", "error")
             dialog.open = False
@@ -265,7 +286,7 @@ def build(vm):
 
         dialog = Dialog(
             pn.Column(
-                f"Delete **{active.classifier_name}** version **{active.display_name}**? This cannot be undone.",
+                f"Delete **{selected_item.classifier_name}** version **{selected_item.display_name}**? This cannot be undone.",
                 pn.Row(btn_cancel, btn_confirm),
             ),
             title="Delete Saved Recognizer",
@@ -322,7 +343,7 @@ def build(vm):
             try:
                 version_dir = await asyncio.to_thread(vm.eng.save_classifier_versioned, train_result)
                 vm.notify(f"Recognizer saved: {version_dir}", "success")
-                await asyncio.to_thread(vm.eng.refresh_training_result_index)
+                await asyncio.to_thread(vm.eng.refresh_saved_training_results_index)
                 _refresh_saved_classifiers_selector_from_engine()
             except Exception as e:
                 vm.notify(f"Auto-save failed: {e}", "warning")
@@ -380,13 +401,16 @@ def build(vm):
     @pn.depends(vm.obs.ensure("engine_state").param.version, watch=True)
     def _on_engine_state_change(_):
         _refresh_saved_classifiers_selector_from_engine()
+        _sync_cls_name_autofill_from_state()
 
     @pn.depends(vm.obs.ensure("config_state").param.version, watch=True)
     def _on_config_state_change(_):
         _refresh_saved_classifiers_selector_from_engine()
+        _sync_cls_name_autofill_from_state()
 
     # Seed the selector on load
     _refresh_saved_classifiers_selector_from_engine()
+    _sync_cls_name_autofill_from_state()
 
     hyperparameters = pn.Card(
         pn.Column(
