@@ -92,6 +92,7 @@ def main(argv=None):
         allow_websocket_origin=["*"],
         show=False,
         autoreload=args.autoreload,
+        static_dirs={"assets": str(Path(__file__).parent / "assets")},
     )
     print(f"[startup] pn.serve returned {time.time():.3f}")
 

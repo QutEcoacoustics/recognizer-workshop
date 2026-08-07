@@ -1,5 +1,4 @@
 
-import base64
 import logging
 import os
 import sys
@@ -52,6 +51,7 @@ def _import_page(name: str):
 
 
 config = _import_page("config")
+getting_started = _import_page("getting_started")
 create_database = _import_page("create_database")
 labeled_examples = _import_page("labeled_examples")
 search = _import_page("search")
@@ -63,25 +63,6 @@ status = _import_page("status")
 log = _import_page("log")
 print(f"[startup] pages imported {time.time():.3f}")
 
-_LOGO_CACHE: dict[Path, str] = {}
-
-
-def encode_png_to_base64(path: Path) -> str:
-    """Reads a PNG file and returns a base64 encoded data URI."""
-    with open(path, "rb") as f:
-        binary_data = f.read()
-    encoded_data = base64.b64encode(binary_data).decode("utf-8")
-    return f"data:image/png;base64,{encoded_data}"
-
-
-def _get_cached_logo(path: Path) -> str:
-    cached = _LOGO_CACHE.get(path)
-    if cached:
-        return cached
-    encoded = encode_png_to_base64(path)
-    _LOGO_CACHE[path] = encoded
-    return encoded
-
 
 def build_app(vm):
     """Builds the main application layout using a Panel template."""
@@ -92,6 +73,7 @@ def build_app(vm):
 
     template = pn.template.FastListTemplate(
         title="Recognizer Workshop",
+        header_background="#79bdd1",
         sidebar_width=400,
         sidebar=[vm.help_system, vm.help_system.content]  # Pass components directly
     )
@@ -131,24 +113,8 @@ def build_app(vm):
     </div>
     """)
 
-    # seems to be problematic to do a relative src to the image files in the html
-    app_dir = Path(__file__).parent
-    qut_logo_path = app_dir / "assets" / "qut_logo_2.png"
-    ardc_logo_path = app_dir / "assets" / "ardc_logo_2.png"
-    perch_logo_path = app_dir / "assets" / "perch_humpback2.png"
-    qut_logo_base64 = _get_cached_logo(qut_logo_path)
-    ardc_logo_base64 = _get_cached_logo(ardc_logo_path)
-    perch_logo_base64 = _get_cached_logo(perch_logo_path)
-
-    header_logos = pn.pane.HTML(f"""
-    <div style="display: flex; align-items: center;  justify-content: space-between; width: 290px; gap: 20px; background: white; padding: 5px 10px; border-radius: 2px;">
-        <img src="{qut_logo_base64}" style="height: 40px; width: auto;">
-        <img src="{ardc_logo_base64}" style="height: 40px; width: auto;">
-        <img src="{perch_logo_base64}" style="height: 40px; width: auto;">
-    </div>
-    """)
-    
     tabs = pn.Tabs(
+        ("Getting started", getting_started.build(vm)),
         ("Config", config.build(vm)),
         ("Database", create_database.build(vm)),
         ("Labelled examples", labeled_examples.build(vm)),
@@ -166,8 +132,9 @@ def build_app(vm):
     )
 
     # Tab indices that require a loaded database (0-indexed):
-    # 2=Labelled examples, 3=Search, 4=Explore, 5=Train, 6=Refine, 7=Inference
-    _DB_REQUIRED_TABS = [2, 3, 4, 5, 6, 7]
+    # 0=Getting started, 1=Config, 2=Database, 3=Labelled examples,
+    # 4=Search, 5=Explore, 6=Train, 7=Refine, 8=Inference
+    _DB_REQUIRED_TABS = [3, 4, 5, 6, 7, 8]
 
     @pn.depends(vm.obs.ensure("engine_state").param.version, watch=True)
     def _update_disabled_tabs(_=None):
@@ -177,9 +144,8 @@ def build_app(vm):
 
 
 
-    template.header.append(header_logos)
+    template.header.append(vm.status)
     template.header.append(dev_toggle_button)
-    template.main.append(vm.status)
     template.main.append(tabs)
     # template.sidebar.append(vm.help_system) # append the js custom component for sidebar control
     # template.sidebar.append(vm.help_system.content) # append the actual help content

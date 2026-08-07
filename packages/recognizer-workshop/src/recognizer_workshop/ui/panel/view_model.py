@@ -9,6 +9,7 @@ import param
 
 from recognizer_workshop.ui.panel.help import HelpSystem
 from recognizer_workshop.ui.panel.utils.log_handler import PanelLogHandler
+from recognizer_workshop.ui.panel.utils.status_notifier import StatusNotifier
 
 
 
@@ -62,7 +63,8 @@ class ViewModel(SimpleNamespace):
 
     def __init__(self):
         super().__init__(eng=None, ui=None)
-        self.status = pn.pane.Markdown("", sizing_mode="stretch_width")
+        self._notifier = StatusNotifier()
+        self.status = self._notifier.widget
         self.log_pane = pn.pane.HTML(
             "",  # Start with empty content
             sizing_mode="stretch_both",
@@ -129,8 +131,7 @@ class ViewModel(SimpleNamespace):
 
     # unified status helper
     def notify(self, msg: str, kind: str = "info") -> None:
-        icon = {"info":"ℹ️","warn":"⚠️","error":"❌","success":"✅"}.get(kind,"ℹ️")
-        self.status.object = f"{icon} {msg}"
+        icon = {"info": "ℹ️", "warn": "⚠️", "error": "❌", "success": "✅"}.get(kind, "ℹ️")
         log = logging.getLogger(__name__)
         if kind == "error":
             log.error(msg)
@@ -138,6 +139,7 @@ class ViewModel(SimpleNamespace):
             log.warning(msg)
         else:
             log.info(msg)
+        self._notifier.notify(msg, icon)
 
     # mount the adapter view into a container (only when needed)
     def mount_ui_view(self, container: pn.layout.Panel) -> None:
