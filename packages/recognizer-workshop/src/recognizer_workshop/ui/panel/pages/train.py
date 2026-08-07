@@ -36,46 +36,45 @@ def build(vm):
 
         return ""
 
-    _cls_name_autofill_state = {"last_auto": _preferred_classifier_name()}
+    _recognizer_name_autofill_state = {"last_auto": _preferred_classifier_name()}
 
-    cls_name = pn.widgets.TextInput(
+    recognizer_name_field = pn.widgets.TextInput(
         name="Recognizer Name",
-        value=_cls_name_autofill_state["last_auto"],
+        value=_recognizer_name_autofill_state["last_auto"],
         placeholder="Required — e.g. imperial_pigeon",
         sizing_mode="stretch_width",
     )
 
-    def _update_cls_name_validation(value: str):
+    def _update_recognizer_name_validation(value: str):
         is_valid = bool(value.strip())
-        set_validity(cls_name, is_valid=is_valid)
+        set_validity(recognizer_name_field, is_valid=is_valid)
         btn_train.disabled = not is_valid
         return is_valid
 
-    def _on_cls_name_input_change(event):
-        _update_cls_name_validation(event.new)
+    def _on_recognizer_name_input_change(event):
+        _update_recognizer_name_validation(event.new)
 
-    def _sync_cls_name_autofill_from_state():
+    def _sync_recognizer_name_autofill_from_state():
         preferred = _preferred_classifier_name()
-        current_raw = cls_name.value_input if cls_name.value_input is not None else cls_name.value
-        current = (current_raw or "").strip()
-        last_auto = (_cls_name_autofill_state["last_auto"] or "").strip()
+        current = (recognizer_name_field.value or "").strip()
+        last_auto = (_recognizer_name_autofill_state["last_auto"] or "").strip()
 
         # Only auto-overwrite when the user hasn't diverged from the auto-filled value.
         if current == "" or current == last_auto:
-            if cls_name.value != preferred:
-                cls_name.value = preferred
-            _update_cls_name_validation(preferred)
-        _cls_name_autofill_state["last_auto"] = preferred
+            if recognizer_name_field.value != preferred:
+                recognizer_name_field.value = preferred
+            _update_recognizer_name_validation(preferred)
+        _recognizer_name_autofill_state["last_auto"] = preferred
 
-    cls_name.param.watch(_on_cls_name_input_change, 'value_input')
+    recognizer_name_field.param.watch(_on_recognizer_name_input_change, 'value_input')
 
     learning_rate = pn.widgets.FloatInput(name="Learning Rate", value=1e-3, step=1e-4, sizing_mode="fixed", width=100)
     num_steps     = pn.widgets.IntInput(name="Num Steps", value=101, start=1, sizing_mode="fixed", width=100)
     batch_size    = pn.widgets.IntInput(name="Batch Size", value=32, start=1, sizing_mode="fixed", width=100)
     train_ratio   = pn.widgets.FloatInput(name="Train Ratio", value=0.9, start=0.1, end=0.99, step=0.01, sizing_mode="fixed", width=100)
     weak_neg_weight = pn.widgets.FloatInput(name="Weak Neg Weight", value=0.05, start=0.0, step=0.01, sizing_mode="fixed", width=140)
-    weak_negs_batch = pn.widgets.IntInput(name="Weak Neg Batch Size", value=16, start=0, sizing_mode="fixed", width=140)
-    btn_auto_weak_negs = pn.widgets.Button(name="Auto Set", button_type="default", sizing_mode="fixed", width=100)
+    weak_neg_batch_size = pn.widgets.IntInput(name="Weak Neg Batch Size", value=16, start=0, sizing_mode="fixed", width=140)
+    btn_auto_set_weak_negs = pn.widgets.Button(name="Auto Set", button_type="default", sizing_mode="fixed", width=100)
     balance_dataset = pn.widgets.Checkbox(name="Balance", value=True)
 
     btn_train = pn.widgets.Button(name="Train recognizer", button_type="success", sizing_mode="fixed", width=150)
@@ -106,7 +105,7 @@ def build(vm):
     )
 
     # --- Saved classifiers selector ---
-    classifier_select = pn.widgets.Select(name="Recognizer", options=[], sizing_mode="fixed", width=220)
+    classifier_select = pn.widgets.Select(name="Recognizer", options=[], sizing_mode="fixed", width=290)
     version_select = pn.widgets.Select(name="Version", options=[], sizing_mode="fixed", width=200)
     btn_download = pn.widgets.FileDownload(
         filename="recognizer.json",
@@ -149,6 +148,10 @@ def build(vm):
                 saved_classifiers_empty_msg.visible = True
                 btn_download.disabled = True
                 btn_delete.disabled = True
+                results_view.objects = []
+                btn_toggle_balancing.visible = False
+                balancing_view.visible = False
+                balancing_view.objects = []
                 return
 
             saved_classifiers_empty_msg.visible = False
@@ -206,15 +209,15 @@ def build(vm):
         balancing_view.visible = False
         balancing_view.objects = []
         if has_balancing:
-            bal_objects = []
+            balancing_objects = []
             info_df = format_training_info_df(info)
-            bal_objects.append(pn.pane.Markdown("### Training Setup & Balancing"))
-            bal_objects.append(render_html_table(info_df, show_header=True))
+            balancing_objects.append(pn.pane.Markdown("### Training Setup & Balancing"))
+            balancing_objects.append(render_html_table(info_df, show_header=True))
             factors_df = format_oversample_factors_df(info)
             if factors_df is not None:
-                bal_objects.append(pn.pane.Markdown("### Oversample Factors"))
-                bal_objects.append(render_html_table(factors_df, show_header=True))
-            balancing_view.objects = bal_objects
+                balancing_objects.append(pn.pane.Markdown("### Oversample Factors"))
+                balancing_objects.append(render_html_table(factors_df, show_header=True))
+            balancing_view.objects = balancing_objects
 
         results_view.objects = view_objects + [btn_toggle_balancing, balancing_view]
 
@@ -299,21 +302,14 @@ def build(vm):
 
     async def _train(_):
         if not vm.eng: return vm.notify("Initialize first.", "error")
-        raw_name = cls_name.value_input if cls_name.value_input is not None else cls_name.value
+        raw_name = recognizer_name_field.value
         if not raw_name.strip():
-            _update_cls_name_validation(raw_name)
+            _update_recognizer_name_validation(raw_name)
             return
 
         sanitized_name = sanitize_classifier_name(raw_name)
-        if cls_name.value != sanitized_name:
-            cls_name.value = sanitized_name
-        vm.eng.config.classifier_name = sanitized_name
-        try:
-            vm.eng.config.save()
-        except ValueError:
-            pass  # config_path not set yet — fine, name is held in memory
-        except Exception as e:
-            vm.notify(f"Could not persist recognizer name: {e}", "warning")
+        if recognizer_name_field.value != sanitized_name:
+            recognizer_name_field.value = sanitized_name
 
         btn_train.disabled = True
         progress_bar.visible = True
@@ -321,12 +317,13 @@ def build(vm):
 
         def run_training():
             return vm.eng.train_classifier(
+                classifier_name=sanitized_name,
                 learning_rate=learning_rate.value,
                 weak_neg_weight=weak_neg_weight.value,
                 num_steps=num_steps.value,
                 train_ratio=train_ratio.value,
                 batch_size=batch_size.value,
-                weak_negatives_batch_size=weak_negs_batch.value,
+                weak_negatives_batch_size=weak_neg_batch_size.value,
                 balance_dataset=balance_dataset.value,
             )
 
@@ -336,17 +333,11 @@ def build(vm):
             with patch_tqdm(progress_bar):
                 train_result = await asyncio.to_thread(run_training)
 
+            vm.notify(f"Recognizer saved: {train_result.get('version_dir')}", "success")
+            _refresh_saved_classifiers_selector_from_engine()
+
             scores = train_result.get('metrics', train_result)
             info = train_result.get('info', {}) if isinstance(train_result, dict) else {}
-
-            # Auto-save
-            try:
-                version_dir = await asyncio.to_thread(vm.eng.save_classifier_versioned, train_result)
-                vm.notify(f"Recognizer saved: {version_dir}", "success")
-                await asyncio.to_thread(vm.eng.refresh_saved_training_results_index)
-                _refresh_saved_classifiers_selector_from_engine()
-            except Exception as e:
-                vm.notify(f"Auto-save failed: {e}", "warning")
 
             metrics_df = format_metrics_matrix_df(scores)
             view_objects = [
@@ -361,15 +352,15 @@ def build(vm):
             balancing_view.visible = False
             balancing_view.objects = []
             if has_balancing:
-                bal_objects = []
+                balancing_objects = []
                 info_df = format_training_info_df(info)
-                bal_objects.append(pn.pane.Markdown("### Training Setup & Balancing"))
-                bal_objects.append(render_html_table(info_df, show_header=True))
+                balancing_objects.append(pn.pane.Markdown("### Training Setup & Balancing"))
+                balancing_objects.append(render_html_table(info_df, show_header=True))
                 factors_df = format_oversample_factors_df(info)
                 if factors_df is not None:
-                    bal_objects.append(pn.pane.Markdown("### Oversample Factors"))
-                    bal_objects.append(render_html_table(factors_df, show_header=True))
-                balancing_view.objects = bal_objects
+                    balancing_objects.append(pn.pane.Markdown("### Oversample Factors"))
+                    balancing_objects.append(render_html_table(factors_df, show_header=True))
+                balancing_view.objects = balancing_objects
 
             results_view.objects = view_objects + [btn_toggle_balancing, balancing_view]
             vm.notify("Training complete.", "success")
@@ -378,7 +369,7 @@ def build(vm):
             results_view.objects = [pn.pane.Alert(f"**Error:** {e}", alert_type="danger")]
             vm.notify(f"Training failed: {e}", "error")
         finally:
-            _update_cls_name_validation(cls_name.value_input if cls_name.value_input is not None else cls_name.value)
+            _update_recognizer_name_validation(recognizer_name_field.value)
             progress_bar.visible = False
 
     def _auto_set_weak_negs(_):
@@ -388,36 +379,36 @@ def build(vm):
                 weak_neg_weight=weak_neg_weight.value,
                 batch_size=batch_size.value,
             )
-            weak_negs_batch.value = resolved_batch
+            weak_neg_batch_size.value = resolved_batch
             weak_neg_weight.value = adjusted_weight
             vm.notify(message, "info")
         except Exception as e:
             vm.notify(f"Could not auto-set weak negatives batch size: {e}", "error")
 
     btn_train.on_click(_train)
-    btn_auto_weak_negs.on_click(_auto_set_weak_negs)
-    _update_cls_name_validation(cls_name.value)
+    btn_auto_set_weak_negs.on_click(_auto_set_weak_negs)
+    _update_recognizer_name_validation(recognizer_name_field.value)
 
     @pn.depends(vm.obs.ensure("engine_state").param.version, watch=True)
     def _on_engine_state_change(_):
         _refresh_saved_classifiers_selector_from_engine()
-        _sync_cls_name_autofill_from_state()
+        _sync_recognizer_name_autofill_from_state()
 
     @pn.depends(vm.obs.ensure("config_state").param.version, watch=True)
     def _on_config_state_change(_):
         _refresh_saved_classifiers_selector_from_engine()
-        _sync_cls_name_autofill_from_state()
+        _sync_recognizer_name_autofill_from_state()
 
     # Seed the selector on load
     _refresh_saved_classifiers_selector_from_engine()
-    _sync_cls_name_autofill_from_state()
+    _sync_recognizer_name_autofill_from_state()
 
     hyperparameters = pn.Card(
         pn.Column(
             pn.Row("Algorithm Parameters", pn.Spacer(), algorithm_params_help_btn, sizing_mode="stretch_width"),
             pn.Row(learning_rate, num_steps, batch_size, sizing_mode="stretch_width"),
             pn.Row("Labeled Data Parameters", pn.Spacer(), labeled_data_params_help_btn, sizing_mode="stretch_width"),
-            pn.Row(train_ratio, weak_neg_weight, weak_negs_batch, btn_auto_weak_negs, balance_dataset, sizing_mode="stretch_width"),
+            pn.Row(train_ratio, weak_neg_weight, weak_neg_batch_size, btn_auto_set_weak_negs, balance_dataset, sizing_mode="stretch_width"),
             sizing_mode="stretch_width",
         ),
         title="Hyperparameters",
@@ -427,7 +418,7 @@ def build(vm):
     return pn.Column(
         pn.Row("## Train Recognizer", pn.Spacer(), train_help_btn),
         pn.Row(
-            cls_name,
+            recognizer_name_field,
             btn_train,
             align="end",
             sizing_mode="stretch_width",

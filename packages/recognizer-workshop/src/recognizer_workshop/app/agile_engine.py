@@ -599,6 +599,7 @@ class agile_state:
 
 
     def train_classifier(self,
+                        classifier_name: str,
                         learning_rate = 1e-3,
                         weak_neg_weight = 0.05,
                         num_steps = 128,
@@ -626,9 +627,14 @@ class agile_state:
             balance_dataset=balance_dataset,
         )
 
-        # Keep a single source of truth in state: model + metrics + training_info.
         self.train_result = result
-        return training_service.training_result_to_json(result)
+        result_json = training_service.training_result_to_json(result)
+
+        version_dir = self.save_classifier_versioned(result_json, classifier_name)
+        self.refresh_saved_training_results_index()
+
+        result_json['version_dir'] = str(version_dir)
+        return result_json
 
     def has_trained_classifier(self) -> bool:
         return bool(
@@ -999,7 +1005,7 @@ class agile_state:
         except (OSError, ValueError) as exc:
             log.warning('Could not prettify classifier JSON at %s: %s', output_path, exc)
 
-    def save_classifier_versioned(self, train_result: dict) -> Path:
+    def save_classifier_versioned(self, train_result: dict, classifier_name: str) -> Path:
         """Save the trained classifier and metrics to a versioned directory.
 
         Directory structure:
@@ -1009,7 +1015,7 @@ class agile_state:
         Returns the version directory path.
         """
         from datetime import datetime as _dt
-        name = sanitize_classifier_name(self.config.classifier_name or "classifier")
+        name = sanitize_classifier_name(classifier_name or "classifier")
         models_root = Path(self.config.models_folder).resolve()
         version = _dt.now().strftime("%Y%m%d_%H%M%S")
         version_dir = (models_root / name / version).resolve()
@@ -1019,6 +1025,18 @@ class agile_state:
         version_dir.mkdir(parents=True, exist_ok=True)
 
         self.save_classifier(version_dir / "recognizer.json")
+
+        # Inject classifier_name into the saved file so it's self-describing.
+        recognizer_path = version_dir / "recognizer.json"
+        try:
+            with recognizer_path.open('r', encoding='utf-8') as f:
+                rec_json = json.load(f)
+            rec_json['classifier_name'] = name
+            with recognizer_path.open('w', encoding='utf-8') as f:
+                json.dump(rec_json, f, indent=2)
+                f.write('\n')
+        except (OSError, ValueError) as exc:
+            log.warning('Could not inject classifier_name into %s: %s', recognizer_path, exc)
 
         metrics_path = version_dir / "metrics.json"
         with metrics_path.open('w', encoding='utf-8') as f:
