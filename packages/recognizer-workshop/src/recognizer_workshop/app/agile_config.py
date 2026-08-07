@@ -37,6 +37,7 @@ class AgileConfig:
     search_dataset_name: str = 'search_set'
     max_embeddings_count: int = -1
     baw_config: Dict[str, Any] = dataclasses.field(default_factory=dict)
+    classifier_name: str = ""
 
     # list of species labels and optional call types
     target_labels: List[LabelName] = dataclasses.field(default_factory=list) 

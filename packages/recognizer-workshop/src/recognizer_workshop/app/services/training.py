@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 import math
 import logging
-from typing import Any, Sequence
+from typing import Any, Optional, Sequence
 
 import numpy as np
 from perch_hoplite.agile import classifier
@@ -26,8 +26,10 @@ class TrainClassifierParams:
 @dataclass(frozen=True)
 class TrainingResult:
     classifier_model: Any
-    eval_scores: dict[str, Any]
-    training_info: dict[str, Any]
+    eval_scores: Optional[dict[str, Any]]
+    training_info: Optional[dict[str, Any]]
+    classifier_name: Optional[str] = None
+    version_name: Optional[str] = None
 
 
 def calculate_balanced_weak_negatives_batch_size(
@@ -403,23 +405,31 @@ def training_result_to_json(result: TrainingResult) -> dict[str, Any]:
 
     def _to_json_safe(value: Any) -> Any:
         if isinstance(value, np.ndarray):
-            return value.tolist()
+            return _to_json_safe(value.tolist())
+        if isinstance(value, float):
+            return None if not math.isfinite(value) else value
         if isinstance(value, (np.floating, np.integer)):
-            return value.item()
+            scalar = value.item()
+            if isinstance(scalar, float) and not math.isfinite(scalar):
+                return None
+            return scalar
         if isinstance(value, dict):
             return {str(k): _to_json_safe(v) for k, v in value.items()}
         if isinstance(value, (list, tuple)):
             return [_to_json_safe(v) for v in value]
         return value
 
-    metrics = dict(result.eval_scores)
-    # Large raw arrays are not needed by the UI table rendering.
-    metrics.pop('eval_preds', None)
-    metrics.pop('eval_labels', None)
+    metrics = None
+    if result.eval_scores is not None:
+        metrics = dict(result.eval_scores)
+        # Large raw arrays are not needed by the UI table rendering.
+        metrics.pop('eval_preds', None)
+        metrics.pop('eval_labels', None)
+        metrics = _to_json_safe(metrics)
 
     return {
-        'metrics': _to_json_safe(metrics),
-        'info': _to_json_safe(result.training_info),
+        'metrics': metrics,
+        'info': _to_json_safe(result.training_info) if result.training_info is not None else None,
     }
 
 

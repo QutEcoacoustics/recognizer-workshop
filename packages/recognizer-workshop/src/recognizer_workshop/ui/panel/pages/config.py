@@ -10,6 +10,7 @@ from recognizer_workshop.app.agile_engine import AgileConfig
 from recognizer_workshop.app.agile_engine import agile_state
 from recognizer_workshop.app.services.app_data import get_recent_files
 from recognizer_workshop.ui.panel.utils.delayed_init import run_after_render
+from recognizer_workshop.ui.panel.utils.validation import ensure_validation_css, set_invalid, set_valid
 from baw_helpers.settings import baw_settings
 from recognizer_workshop.app.app_settings import app_settings
 
@@ -33,13 +34,14 @@ def build(vm):
             ".password-with-eye .bk-input { padding-right: 2.5rem; }"
         )
         pn.config.raw_css.append(
-            ".rw-invalid-field .bk-input { border-color: #dc2626 !important; box-shadow: 0 0 0 1px #dc2626 inset !important; }"
             ".rw-field-error { color: #dc2626; font-size: 0.85rem; }"
             ".rw-status-ok { color: #16a34a; font-size: 0.9rem; }"
             ".rw-status-error { color: #dc2626; font-size: 0.9rem; }"
             ".rw-status-neutral { color: #6b7280; font-size: 0.9rem; }"
         )
         build._password_css_added = True
+
+    ensure_validation_css()
 
     dialogs_container = pn.Column()  
 
@@ -137,7 +139,7 @@ def build(vm):
 
     def _clear_token_validation(widgets: dict):
         token_widget = widgets["token"]
-        token_widget.css_classes = [c for c in token_widget.css_classes if c != "rw-invalid-field"]
+        set_valid(token_widget)
 
     def _apply_token_validation(widgets: dict, status: dict | None):
         _clear_token_validation(widgets)
@@ -160,7 +162,7 @@ def build(vm):
             return
 
         token_widget = widgets["token"]
-        token_widget.css_classes = [*token_widget.css_classes, "rw-invalid-field"]
+        set_invalid(token_widget)
 
         return
 

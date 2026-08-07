@@ -29,6 +29,7 @@ from recognizer_workshop.app.services.db_labels.add_db_labels import add_labels_
 from recognizer_workshop.app.services.db_labels.db_labels_info import get_label_counts
 from recognizer_workshop.app.services.db_labels.dataclasses import LabelName
 from recognizer_workshop.app.services import training as training_service
+from recognizer_workshop.app.services.training_result_index import SavedTrainingResultsIndex, load_training_result_from_classifier_entry
 from recognizer_workshop.app.create_database.repair_index import repair_index
 from recognizer_workshop.app.services.database_status import (
     get_database_status,
@@ -43,6 +44,20 @@ from concurrent.futures import ProcessPoolExecutor
 
 log = logging.getLogger(__name__)
 
+
+def sanitize_classifier_name(name: str) -> str:
+    """Return a filesystem-safe, lowercase classifier name.
+
+    - Whitespace and hyphens → underscore
+    - Anything outside [0-9A-Za-z._] → removed
+    - Converted to lowercase
+    - Falls back to 'classifier' if the result is empty
+    """
+    import re
+    name = re.sub(r'[\s\-]+', '_', name)
+    name = re.sub(r'[^0-9A-Za-z._]', '', name)
+    name = name.lower().strip('._')
+    return name or 'classifier'
 
 
 class agile_state:
@@ -90,6 +105,8 @@ class agile_state:
         self.labels_commit_state = 'idle'
         self.labels_commit_message = ''
         self.labels_commit_error = None
+        self.saved_training_results_index: Optional[SavedTrainingResultsIndex] = None
+        self.train_result_load_error: Optional[str] = None
         mp_context = multiprocessing.get_context('spawn')
         self._embed_runner = ProcessPoolExecutor(
             max_workers=1,
@@ -173,6 +190,8 @@ class agile_state:
         # )
 
         self.audio_filepath_loader = self._create_audio_loader()
+
+        self.refresh_saved_training_results_index()
 
         return True
 
@@ -581,6 +600,7 @@ class agile_state:
 
 
     def train_classifier(self,
+                        classifier_name: str,
                         learning_rate = 1e-3,
                         weak_neg_weight = 0.05,
                         num_steps = 128,
@@ -608,9 +628,14 @@ class agile_state:
             balance_dataset=balance_dataset,
         )
 
-        # Keep a single source of truth in state: model + metrics + training_info.
         self.train_result = result
-        return training_service.training_result_to_json(result)
+        result_json = training_service.training_result_to_json(result)
+
+        version_dir = self.save_classifier_versioned(result_json, classifier_name)
+        self.refresh_saved_training_results_index()
+
+        result_json['version_dir'] = str(version_dir)
+        return result_json
 
     def has_trained_classifier(self) -> bool:
         return bool(
@@ -980,7 +1005,123 @@ class agile_state:
                 f.write('\n')
         except (OSError, ValueError) as exc:
             log.warning('Could not prettify classifier JSON at %s: %s', output_path, exc)
-      
+
+    def save_classifier_versioned(self, train_result: dict, classifier_name: str) -> Path:
+        """Save the trained classifier and metrics to a versioned directory.
+
+        Directory structure:
+            <models_folder>/<classifier_name>/<YYYYMMDD_HHMMSS>/recognizer.json
+            <models_folder>/<classifier_name>/<YYYYMMDD_HHMMSS>/metrics.json
+
+        Returns the version directory path.
+        """
+        from datetime import datetime as _dt
+        name = sanitize_classifier_name(classifier_name or "classifier")
+        models_root = Path(self.config.models_folder).resolve()
+        version = _dt.now().strftime("%Y%m%d_%H%M%S")
+        version_dir = (models_root / name / version).resolve()
+        # Guard: ensure we stay inside models_folder
+        if not str(version_dir).startswith(str(models_root)):
+            raise ValueError(f"Resolved path {version_dir} escapes models folder {models_root}")
+        version_dir.mkdir(parents=True, exist_ok=True)
+
+        self.save_classifier(version_dir / "recognizer.json")
+
+        # Inject classifier_name into the saved file so it's self-describing.
+        recognizer_path = version_dir / "recognizer.json"
+        try:
+            with recognizer_path.open('r', encoding='utf-8') as f:
+                rec_json = json.load(f)
+            rec_json['classifier_name'] = name
+            with recognizer_path.open('w', encoding='utf-8') as f:
+                json.dump(rec_json, f, indent=2)
+                f.write('\n')
+        except (OSError, ValueError) as exc:
+            log.warning('Could not inject classifier_name into %s: %s', recognizer_path, exc)
+
+        metrics_path = version_dir / "metrics.json"
+        with metrics_path.open('w', encoding='utf-8') as f:
+            json.dump(train_result, f, indent=2, default=str)
+
+        return version_dir
+
+    def list_saved_classifiers(self) -> list[dict]:
+        """Return one entry per classifier name (the latest version), sorted newest first.
+
+        Each entry: {classifier_name, version, created, path}
+        """
+        models_folder = Path(self.config.models_folder) if self.config.models_folder else None
+        if not models_folder or not models_folder.exists():
+            return []
+        results = []
+        for classifier_dir in sorted(models_folder.iterdir()):
+            if not classifier_dir.is_dir():
+                continue
+            versions = sorted([v for v in classifier_dir.iterdir() if v.is_dir() and (v / "recognizer.json").exists()])
+            if not versions:
+                continue
+            latest = versions[-1]
+            from datetime import datetime as _dt
+            try:
+                created = _dt.strptime(latest.name, "%Y%m%d_%H%M%S")
+            except ValueError:
+                created = _dt.fromtimestamp(latest.stat().st_mtime)
+            results.append({
+                "classifier_name": classifier_dir.name,
+                "version": latest.name,
+                "created": created,
+                "path": latest / "recognizer.json",
+            })
+        return sorted(results, key=lambda x: x["created"], reverse=True)
+
+    def delete_classifier(self, classifier_name: str) -> None:
+        """Delete all versions of a saved classifier."""
+        import shutil
+        safe_name = sanitize_classifier_name(classifier_name)
+        models_root = Path(self.config.models_folder).resolve()
+        classifier_dir = (models_root / safe_name).resolve()
+        if not str(classifier_dir).startswith(str(models_root)):
+            raise ValueError(f"Resolved path {classifier_dir} escapes models folder {models_root}")
+        if classifier_dir.exists():
+            shutil.rmtree(classifier_dir)
+
+    def refresh_saved_training_results_index(self) -> None:
+        """(Re)scans saved classifiers and loads the active saved classifier into train_result."""
+        self.saved_training_results_index = SavedTrainingResultsIndex(self.config.models_folder)
+        self.saved_training_results_index.initialize_index()
+        self._load_active_classifier_training_result()
+
+    def _load_active_classifier_training_result(self) -> None:
+        entry = self.saved_training_results_index.get_active_classifier_entry() if self.saved_training_results_index else None
+        if entry is None:
+            self.train_result = None
+            self.train_result_load_error = None
+            return
+        try:
+            self.train_result = load_training_result_from_classifier_entry(entry)
+            self.train_result_load_error = None
+        except Exception as exc:
+            log.warning('Could not load classifier %s/%s: %s', entry.classifier_name, entry.version_name, exc)
+            self.train_result = None
+            self.train_result_load_error = str(exc)
+
+    def set_active_saved_classifier(self, classifier_name: str, version_name: str) -> None:
+        """Sets the active saved classifier/version and loads it into train_result."""
+        if not self.saved_training_results_index:
+            raise ValueError("Training result index not initialized.")
+        self.saved_training_results_index.set_active_classifier(classifier_name, version_name)
+        self._load_active_classifier_training_result()
+
+    def delete_active_saved_classifier_version(self) -> None:
+        """Deletes only the currently active saved classifier version, then reselects the newest."""
+        if not self.saved_training_results_index:
+            raise ValueError("Training result index not initialized.")
+        entry = self.saved_training_results_index.get_active_classifier_entry()
+        if entry is None:
+            raise ValueError("No active saved classifier to delete.")
+        self.saved_training_results_index.delete_classifier_version(entry.classifier_name, entry.version_name)
+        self._load_active_classifier_training_result()
+
 
     def run_inference(self, output_filepath=None, threshold=0.0, labels=None, dataset=None, subset=1, exclude_labeled=False):
         """

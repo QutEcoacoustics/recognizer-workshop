@@ -21,10 +21,47 @@ def build(vm):
     target_score = pn.widgets.TextInput(name="Target score", value="max", width=180, disabled=True)
     active_label_picker = build_active_label_picker(vm)
 
-    btn_search = pn.widgets.Button(name="Search with classifier", button_type="primary")
+    btn_search = pn.widgets.Button(name="Search with recognizer", button_type="primary")
+
+    def _get_active_saved_classifier_entry():
+        if not vm.eng:
+            return None
+        index = getattr(vm.eng, "saved_training_results_index", None)
+        return index.get_active_classifier_entry() if index else None
+
+    def _build_refine_heading_text() -> str:
+        active_entry = _get_active_saved_classifier_entry()
+        if not active_entry:
+            return "## Refine Recognizer"
+        return f"## Refine Recognizer - {active_entry.classifier_name} ({active_entry.display_name})"
+
+    refine_heading = pn.pane.Markdown(_build_refine_heading_text())
 
 
     vm.ui.render(pn.pane.Markdown("_No results yet._"), "refine.results")
+
+    refine_page = pn.Column(sizing_mode="stretch_both")
+
+    def _refresh_refine_page():
+        active_entry = _get_active_saved_classifier_entry()
+        if not active_entry:
+            refine_page.objects = [pn.pane.Markdown("Train a recognizer first before refining it")]
+            return
+
+        refine_heading.object = _build_refine_heading_text()
+        refine_page.objects = [
+            pn.Row(refine_heading, pn.Spacer(), refine_help_btn),
+            pn.Row(active_label_picker, num_results, search_strategy, target_score, btn_search, sizing_mode="stretch_width"),
+            results_box,
+        ]
+
+    @pn.depends(vm.obs.ensure("engine_state").param.version, watch=True)
+    def _on_engine_state_change(_):
+        _refresh_refine_page()
+
+    @pn.depends(vm.obs.ensure("config_state").param.version, watch=True)
+    def _on_config_state_change(_):
+        _refresh_refine_page()
 
     def _on_strategy_change(event):
         strategy = event.new
@@ -72,11 +109,6 @@ def build(vm):
 
 
     btn_search.on_click(_search)
+    _refresh_refine_page()
 
-
-    return pn.Column(
-        pn.Row("## Refine Model", pn.Spacer(), refine_help_btn),
-        pn.Row(active_label_picker, num_results, search_strategy, target_score, btn_search, sizing_mode="stretch_width"),
-        results_box,
-        sizing_mode="stretch_both",
-    )
+    return refine_page
