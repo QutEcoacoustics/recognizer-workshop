@@ -4,8 +4,10 @@ import io
 import numpy as np
 import pandas as pd
 import panel as pn
+from panel_material_ui import Dialog
 
-from recognizer_workshop.app.agile_engine import sanitize_model_name
+from recognizer_workshop.app.agile_engine import sanitize_classifier_name
+from recognizer_workshop.app.services import training as training_service
 from recognizer_workshop.ui.panel.utils.patch_tqdm import patch_tqdm
 from recognizer_workshop.ui.panel.utils.validation import ensure_validation_css, set_validity
 
@@ -18,7 +20,7 @@ def build(vm):
     algorithm_params_help_btn = vm.help_system.create_help_button("help-training-algorithm-params", "Help: Algorithm Parameters")
     labeled_data_params_help_btn = vm.help_system.create_help_button("help-labeled-data-params", "Help: Labeled Data Parameters")
 
-    # --- Model name (persisted in config) ---
+    # --- Classifier name (persisted in config) ---
     def _default_classifier_name():
         if vm.eng:
             if vm.eng.config.classifier_name:
@@ -55,7 +57,7 @@ def build(vm):
     btn_auto_weak_negs = pn.widgets.Button(name="Auto Set", button_type="default", sizing_mode="fixed", width=100)
     balance_dataset = pn.widgets.Checkbox(name="Balance", value=True)
 
-    btn_train = pn.widgets.Button(name="Train classifier", button_type="success", sizing_mode="fixed", width=150)
+    btn_train = pn.widgets.Button(name="Train recognizer", button_type="success", sizing_mode="fixed", width=150)
     btn_train.height = 40
 
     progress_bar = pn.widgets.Progress(name='Training Progress', active=True, visible=False, sizing_mode="stretch_width")
@@ -82,71 +84,197 @@ def build(vm):
         sizing_mode="stretch_width",
     )
 
-    # --- Saved models table ---
-    models_table_view = pn.Column(sizing_mode="stretch_width")
+    # --- Saved classifiers selector ---
+    classifier_select = pn.widgets.Select(name="Recognizer", options=[], sizing_mode="fixed", width=220)
+    version_select = pn.widgets.Select(name="Version", options=[], sizing_mode="fixed", width=200)
+    btn_download = pn.widgets.FileDownload(
+        filename="recognizer.json",
+        button_type="primary",
+        label="Download",
+        sizing_mode="fixed",
+        width=110,
+        embed=False,
+    )
+    btn_delete = pn.widgets.Button(name="Delete", button_type="danger", sizing_mode="fixed", width=90)
+    saved_classifiers_empty_msg = pn.pane.Markdown("_No saved recognizers found._", visible=False)
+    saved_classifiers_dialogs = pn.Column()
 
-    def _refresh_models_table():
+    _selector_sync_guard = {"active": False}
+
+    def _get_training_result_index():
+        return vm.eng.training_result_index if vm.eng else None
+
+    def _download_recognizer_bytes():
+        index = _get_training_result_index()
+        active_entry = index.get_active_classifier_entry() if index else None
+        path = active_entry.recognizer_path if active_entry else None
+        if path is None or not path.exists():
+            raise ValueError("No active saved recognizer available to download.")
+        return io.BytesIO(path.read_bytes())
+
+    btn_download.callback = _download_recognizer_bytes
+
+    def _refresh_saved_classifiers_selector_from_engine():
+        """Mirrors the engine's saved-classifier index/active-selection onto the dropdowns."""
+        _selector_sync_guard["active"] = True
+        try:
+            index = _get_training_result_index()
+            classifier_names = index.get_classifier_list() if index else []
+            if not classifier_names:
+                classifier_select.options = []
+                classifier_select.value = None
+                version_select.options = []
+                version_select.value = None
+                saved_classifiers_empty_msg.visible = True
+                btn_download.disabled = True
+                btn_delete.disabled = True
+                return
+
+            saved_classifiers_empty_msg.visible = False
+            btn_download.disabled = False
+            btn_delete.disabled = False
+
+            active = index.get_active_classifier_entry() if index else None
+            active_classifier_name = active.classifier_name if active else classifier_names[0]
+
+            classifier_select.options = classifier_names
+            classifier_select.value = active_classifier_name
+
+            versions = index.get_versions_for_classifier(active_classifier_name) if index else []
+            version_select.options = {v.display_name: v.version_name for v in versions}
+            if active and active.classifier_name == active_classifier_name:
+                active_version_name = active.version_name
+            else:
+                active_version_name = versions[0].version_name if versions else None
+            version_select.value = active_version_name
+
+            if active_classifier_name and active_version_name:
+                btn_download.filename = f"{active_classifier_name}_{active_version_name}.json"
+                _render_active_saved_classifier_results()
+        finally:
+            _selector_sync_guard["active"] = False
+
+    def _render_active_saved_classifier_results():
+        index = _get_training_result_index()
+        active = index.get_active_classifier_entry() if index else None
+        if not active or not vm.eng or not vm.eng.train_result:
+            return
+
+        view_result = training_service.training_result_to_json(vm.eng.train_result)
+        scores = view_result.get('metrics')
+        info = view_result.get('info') or {}
+
+        if not scores:
+            results_view.objects = [pn.pane.Markdown(
+                f"**{active.classifier_name}** - {active.display_name}\n\n_No metrics found._"
+            )]
+            btn_toggle_balancing.visible = False
+            balancing_view.visible = False
+            balancing_view.objects = []
+            return
+
+        metrics_df = format_metrics_matrix_df(scores)
+        view_objects = [
+            pn.pane.Markdown(f"### Metrics - {active.classifier_name} ({active.display_name})"),
+            render_html_table(metrics_df, show_header=True),
+        ]
+
+        has_balancing = bool(info)
+        btn_toggle_balancing.visible = has_balancing
+        btn_toggle_balancing.value = False
+        balancing_view.visible = False
+        balancing_view.objects = []
+        if has_balancing:
+            bal_objects = []
+            info_df = format_training_info_df(info)
+            bal_objects.append(pn.pane.Markdown("### Training Setup & Balancing"))
+            bal_objects.append(render_html_table(info_df, show_header=True))
+            factors_df = format_oversample_factors_df(info)
+            if factors_df is not None:
+                bal_objects.append(pn.pane.Markdown("### Oversample Factors"))
+                bal_objects.append(render_html_table(factors_df, show_header=True))
+            balancing_view.objects = bal_objects
+
+        results_view.objects = view_objects + [btn_toggle_balancing, balancing_view]
+
+    def _on_classifier_select_change(event):
+        if _selector_sync_guard["active"] or not vm.eng or event.new is None:
+            return
+        classifier_name = event.new
+        index = _get_training_result_index()
+        versions = index.get_versions_for_classifier(classifier_name) if index else []
+        if not versions:
+            return
+        newest_version = versions[0].version_name
+        try:
+            vm.eng.set_active_saved_classifier(classifier_name, newest_version)
+        except Exception as e:
+            vm.notify(f"Could not switch active recognizer: {e}", "error")
+            return
+
+        _selector_sync_guard["active"] = True
+        try:
+            version_select.options = {v.display_name: v.version_name for v in versions}
+            version_select.value = newest_version
+            btn_download.filename = f"{classifier_name}_{newest_version}.json"
+        finally:
+            _selector_sync_guard["active"] = False
+        _render_active_saved_classifier_results()
+
+    def _on_version_select_change(event):
+        if _selector_sync_guard["active"] or not vm.eng or event.new is None:
+            return
+        classifier_name = classifier_select.value
+        version_name = event.new
+        try:
+            vm.eng.set_active_saved_classifier(classifier_name, version_name)
+            btn_download.filename = f"{classifier_name}_{version_name}.json"
+        except Exception as e:
+            vm.notify(f"Could not switch active version: {e}", "error")
+            return
+        _render_active_saved_classifier_results()
+
+    classifier_select.param.watch(_on_classifier_select_change, 'value')
+    version_select.param.watch(_on_version_select_change, 'value')
+
+    def _on_delete_click(_):
         if not vm.eng:
-            models_table_view.objects = [pn.pane.Markdown("_Initialize engine to view saved models._")]
-            return
-        models = vm.eng.list_saved_models()
-        if not models:
-            models_table_view.objects = [pn.pane.Markdown("_No saved models yet._")]
-            return
+            return vm.notify("Initialize first.", "error")
+        index = _get_training_result_index()
+        active = index.get_active_classifier_entry() if index else None
+        if not active:
+            return vm.notify("No saved recognizer selected.", "warning")
 
-        rows = []
-        for m in models:
-            dl_btn = pn.widgets.FileDownload(
-                filename=f"{m['name']}.json",
-                button_type="primary",
-                label="Download",
-                sizing_mode="fixed",
-                width=110,
-                embed=False,
-            )
-            model_path = m['path']
+        btn_cancel = pn.widgets.Button(name="Cancel", button_type="default")
+        btn_confirm = pn.widgets.Button(name="Yes, delete it", button_type="danger")
 
-            def _make_callback(p):
-                def _cb():
-                    return io.BytesIO(p.read_bytes())
-                return _cb
+        def _cancel(_evt):
+            dialog.open = False
 
-            dl_btn.callback = _make_callback(model_path)
+        def _confirm(_evt):
+            try:
+                vm.eng.delete_active_saved_classifier_version()
+                vm.notify(f"Deleted '{active.classifier_name}' ({active.display_name}).", "success")
+            except Exception as e:
+                vm.notify(f"Delete failed: {e}", "error")
+            dialog.open = False
+            _refresh_saved_classifiers_selector_from_engine()
 
-            del_btn = pn.widgets.Button(
-                name="Delete",
-                button_type="danger",
-                sizing_mode="fixed",
-                width=80,
-            )
-            model_name = m['name']
+        btn_cancel.on_click(_cancel)
+        btn_confirm.on_click(_confirm)
 
-            def _make_delete(n):
-                def _del(_):
-                    try:
-                        vm.eng.delete_model(n)
-                        vm.notify(f"Deleted model '{n}'.", "success")
-                    except Exception as e:
-                        vm.notify(f"Delete failed: {e}", "error")
-                    _refresh_models_table()
-                return _del
+        dialog = Dialog(
+            pn.Column(
+                f"Delete **{active.classifier_name}** version **{active.display_name}**? This cannot be undone.",
+                pn.Row(btn_cancel, btn_confirm),
+            ),
+            title="Delete Saved Recognizer",
+        )
+        saved_classifiers_dialogs[:] = [dialog]
+        dialog.open = True
 
-            del_btn.on_click(_make_delete(model_name))
-            rows.append(pn.Row(
-                pn.pane.Markdown(f"**{m['name']}**", width=200, sizing_mode="fixed"),
-                pn.pane.Markdown(m['created'].strftime("%Y-%m-%d %H:%M"), width=160, sizing_mode="fixed"),
-                dl_btn,
-                del_btn,
-                align="center",
-            ))
+    btn_delete.on_click(_on_delete_click)
 
-        # header = pn.Row(
-        #     pn.pane.Markdown("**Model**", width=200, sizing_mode="fixed"),
-        #     pn.pane.Markdown("**Created**", width=160, sizing_mode="fixed"),
-        #     pn.pane.Markdown("", width=110, sizing_mode="fixed"),
-        #     pn.pane.Markdown("", width=80, sizing_mode="fixed"),
-        # )
-        models_table_view.objects = rows
 
     async def _train(_):
         if not vm.eng: return vm.notify("Initialize first.", "error")
@@ -155,7 +283,7 @@ def build(vm):
             _update_cls_name_validation(raw_name)
             return
 
-        sanitized_name = sanitize_model_name(raw_name)
+        sanitized_name = sanitize_classifier_name(raw_name)
         if cls_name.value != sanitized_name:
             cls_name.value = sanitized_name
         vm.eng.config.classifier_name = sanitized_name
@@ -164,7 +292,7 @@ def build(vm):
         except ValueError:
             pass  # config_path not set yet — fine, name is held in memory
         except Exception as e:
-            vm.notify(f"Could not persist model name: {e}", "warning")
+            vm.notify(f"Could not persist recognizer name: {e}", "warning")
 
         btn_train.disabled = True
         progress_bar.visible = True
@@ -193,8 +321,9 @@ def build(vm):
             # Auto-save
             try:
                 version_dir = await asyncio.to_thread(vm.eng.save_classifier_versioned, train_result)
-                vm.notify(f"Model saved: {version_dir}", "success")
-                _refresh_models_table()
+                vm.notify(f"Recognizer saved: {version_dir}", "success")
+                await asyncio.to_thread(vm.eng.refresh_training_result_index)
+                _refresh_saved_classifiers_selector_from_engine()
             except Exception as e:
                 vm.notify(f"Auto-save failed: {e}", "warning")
 
@@ -250,14 +379,14 @@ def build(vm):
 
     @pn.depends(vm.obs.ensure("engine_state").param.version, watch=True)
     def _on_engine_state_change(_):
-        _refresh_models_table()
+        _refresh_saved_classifiers_selector_from_engine()
 
     @pn.depends(vm.obs.ensure("config_state").param.version, watch=True)
     def _on_config_state_change(_):
-        _refresh_models_table()
+        _refresh_saved_classifiers_selector_from_engine()
 
-    # Seed the models table on load
-    _refresh_models_table()
+    # Seed the selector on load
+    _refresh_saved_classifiers_selector_from_engine()
 
     hyperparameters = pn.Card(
         pn.Column(
@@ -272,7 +401,7 @@ def build(vm):
     )
 
     return pn.Column(
-        pn.Row("## Train Classifier", pn.Spacer(), train_help_btn),
+        pn.Row("## Train Recognizer", pn.Spacer(), train_help_btn),
         pn.Row(
             cls_name,
             btn_train,
@@ -282,10 +411,12 @@ def build(vm):
         hyperparameters,
         progress_bar,
         pn.layout.Divider(),
-        results_view,
+        pn.pane.Markdown("### Saved Recognizers"),
+        saved_classifiers_empty_msg,
+        pn.Row(classifier_select, version_select, btn_download, btn_delete, align="end"),
+        saved_classifiers_dialogs,
         pn.layout.Divider(),
-        pn.pane.Markdown("### Saved Models"),
-        models_table_view,
+        results_view,
         sizing_mode="stretch_both",
     )
 
