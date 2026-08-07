@@ -88,7 +88,7 @@ def build(vm):
         if not vm.eng:
             return vm.notify("Initialize on Config tab first.", "error")
 
-        if not uri.value:
+        if not uri.value.strip():
             return vm.notify("Please provide an ID, URL, or path.", "warn")
         try:
             # Normalize the query URI before passing it to the selector
@@ -98,37 +98,21 @@ def build(vm):
         except Exception as e:
             vm.notify(f"Could not load remote: {e}", "error")
 
-    async def _search(_):
-        if not vm.eng:
-            return vm.notify("Initialize first.", "error")
-        # for search, it's not very intuitive what a target score might mean. 
-        # so we just use None (best match) 
+    async def _do_search():
         ts = None
         await vm.ui.search_with_selected_window(
             vm.eng,
             num_results=int(num_results.value),
             target_score=ts,
-            on_save=_save,
         )
 
-    def _save(_=None):
+    async def _search(_):
         if not vm.eng:
             return vm.notify("Initialize first.", "error")
-        labels = list(vm.ui.harvest_labels(vm.eng, results_region="search.results"))
-        if not labels:
-            return vm.notify("No labels to save.", "warn")
-        try:
-            before, after, ok, dup = vm.eng.save_labels(labels)
-            vm.notify(f"Saved {ok} labels ({dup} duplicates skipped).", "success")
-        except Exception as e:
-            vm.notify(f"Save failed: {e}", "error")
+        await _do_search()
 
     btn_load_uri.on_click(_load_remote)
     btn_search.on_click(_search)
-
-
-
-
 
     return pn.Column(
         pn.Row("## Search (single example)", pn.Spacer(), search_help_btn),

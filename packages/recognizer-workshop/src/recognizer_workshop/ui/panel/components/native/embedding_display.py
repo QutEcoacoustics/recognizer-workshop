@@ -74,24 +74,22 @@ class PanelQuerySelector(pn.Column):
         self.uri = str(uri)
         self.window_size_s = float(window_size_s)
 
-        # UI bits
-        self.status = pn.pane.Markdown("Loading audio…", sizing_mode="stretch_width")
+        # UI bits — single header line updated in place
+        self._header = pn.pane.Markdown(f"**Source:** `{self.uri}` — Loading…", sizing_mode="stretch_width")
         self.full_pane   = pn.pane.Matplotlib(tight=True, height=260, sizing_mode="stretch_width")
         self.window_pane = pn.pane.Matplotlib(tight=True, height=200, sizing_mode="stretch_width")
         self.slider = pn.widgets.FloatSlider(name="Offset (s)", start=0.0, end=0.0, step=0.05,
                                              value=0.0, disabled=True, sizing_mode="stretch_width")
         self.audio_full = pn.pane.Audio(name="Full audio", sample_rate=32000, sizing_mode="stretch_width")
         self.audio_win  = pn.pane.Audio(name="Selected window", sample_rate=32000, sizing_mode="stretch_width")
+        self._slider_row = pn.Row(self.slider)
 
-        card = pn.Card(
-            pn.pane.Markdown(f"**Source:** `{self.uri}`"),
-            self.status,
+        card = pn.Column(
+            self._header,
             self.full_pane,
             self.window_pane,
-            pn.Row(self.slider),
+            self._slider_row,
             pn.Row(self.audio_full, self.audio_win),
-            title="# Select query window",
-            collapsible=False,
             sizing_mode="stretch_width",
         )
         super().__init__(card, sizing_mode="stretch_width", **params)
@@ -136,7 +134,7 @@ class PanelQuerySelector(pn.Column):
     def _render_all(self):
         # Safety: audio must exist
         if self.qd.audio is None:
-            self.status.object = "❌ Could not load audio."
+            self._header.object = f"**Source:** `{self.uri}` — ❌ Could not load audio."
             return
 
         # Update spectrograms for current offset
@@ -158,14 +156,20 @@ class PanelQuerySelector(pn.Column):
         end   = int(start + self.qd.window_size_s * self.qd.sample_rate_hz)
         self.audio_win.object = self.qd.audio[start:end]
 
-        self.status.object = "✅ Audio loaded. Move the slider to pick a window."
+        self._header.object = f"**Source:** `{self.uri}` — Move the slider to pick a window."
+
+    def _hide_full_audio_ui(self):
+        """Hide the full-clip spectrogram, slider, and full audio player."""
+        self.full_pane.visible = False
+        self._slider_row.visible = False
+        self.audio_full.visible = False
 
     async def _init(self):
         try:
             # Load audio (this must succeed or everything stays empty)
             self.qd.update_audio()
             if self.qd.audio is None or len(self.qd.audio) == 0:
-                self.status.object = f"❌ No audio loaded for `{self.uri}`."
+                self._header.object = f"**Source:** `{self.uri}` — ❌ No audio loaded."
                 return
 
             duration = len(self.qd.audio) / self.qd.sample_rate_hz
@@ -174,8 +178,13 @@ class PanelQuerySelector(pn.Column):
 
             # First render
             self._render_all()
+
+            # If the whole clip fits in the window, hide the full-clip UI
+            if duration <= self.window_size_s:
+                self._hide_full_audio_ui()
+                self._header.object = f"**Source:** `{self.uri}`"
         except Exception as e:
-            self.status.object = f"❌ Error loading audio: `{e}`"
+            self._header.object = f"**Source:** `{self.uri}` — ❌ Error loading audio: `{e}`"
 
 
 
@@ -201,7 +210,9 @@ class PanelEmbeddingDisplay(pn.Column):
         recording_info: Optional[dict[str, Any]] = None,
         domain: Optional[str] = None,
         arid: Optional[int] = None,
-        labels: Sequence[str] = (),  
+        labels: Sequence[str] = (),
+        initial_states: Optional[Dict[str, int]] = None,
+        on_label_change: Optional[Callable[[int, str, int], None]] = None,
         sample_rate_hz: int = 32000,
         frame_rate: int = 100,
         window_size_s: float = 5.0,
@@ -257,7 +268,15 @@ class PanelEmbeddingDisplay(pn.Column):
 
         # tri-state per label: 0=skip, 1=pos, -1=neg
         self._label_states: Dict[str, int] = {lbl: 0 for lbl in self.labels}
+        if initial_states:
+            for lbl, state in initial_states.items():
+                if lbl in self._label_states:
+                    self._label_states[lbl] = state
         self._buttons: Dict[str, pn.widgets.Button] = {}
+        # callback invoked on every label change: (embedding_id, label_name, new_state)
+        self._on_label_change: Optional[Callable[[int, str, int], None]] = on_label_change
+        # legacy no-arg callback used by group save-button logic (kept for compatibility)
+        self.on_label_change: Optional[Callable[[], None]] = None
         self._load_started = False
 
         # --- UI elements ---
@@ -364,16 +383,23 @@ class PanelEmbeddingDisplay(pn.Column):
         """
         btns = []
         for lbl in self.labels:
-            b = pn.widgets.Button(name=lbl, button_type="default")
+            initial_state = self._label_states.get(lbl, 0)
+            btn_type = "success" if initial_state == 1 else ("warning" if initial_state == -1 else "default")
+            b = pn.widgets.Button(name=lbl, button_type=btn_type)
             self._buttons[lbl] = b
 
             def _cycle(event=None, label=lbl, button=b):
+                """tri-state button: Cycle the state of a label through and update the button color."""
                 state = self._label_states[label]
                 # 0 -> 1 -> -1 -> 0
                 nxt = 1 if state == 0 else (-1 if state == 1 else 0)
                 self._label_states[label] = nxt
                 # update color
                 button.button_type = "success" if nxt == 1 else ("warning" if nxt == -1 else "default")
+                if self._on_label_change:
+                    self._on_label_change(self.embedding_id, label, nxt)
+                if self.on_label_change:
+                    self.on_label_change()
 
             b.on_click(_cycle)
             btns.append(b)
@@ -488,8 +514,6 @@ class PanelEmbeddingDisplayGroup(pn.Column):
         page_size: int = 10,
         item_width: int = 300,
         item_margin: int = 8,
-        on_save: Optional[Callable[[], None]] = None,
-        save_label: str = "Save responses",
         **kwargs,
     ):
         self._items = items
@@ -507,24 +531,11 @@ class PanelEmbeddingDisplayGroup(pn.Column):
         self._prev = pn.widgets.Button(name="Prev", button_type="default", width=60, sizing_mode="fixed")
         self._next = pn.widgets.Button(name="Next", button_type="default", width=60, sizing_mode="fixed")
         self._label = pn.pane.Markdown("", sizing_mode="stretch_width")
-        self._save_btn = None
-
-        if on_save:
-            self._save_btn = pn.widgets.Button(
-                name=save_label,
-                button_type="warning",
-                width=160,
-                sizing_mode="fixed",
-            )
-            self._save_btn.on_click(lambda _event: on_save())
 
         self._prev.on_click(lambda _: self._goto(-1))
         self._next.on_click(lambda _: self._goto(+1))
 
-        header_items = [self._prev, self._next, self._label]
-        if self._save_btn:
-            header_items.extend([pn.Spacer(), self._save_btn])
-        header = pn.Row(*header_items, sizing_mode="stretch_width")
+        header = pn.Row(self._prev, self._next, self._label, sizing_mode="stretch_width")
         super().__init__(header, self._list_box, sizing_mode="stretch_both", **kwargs)
         self._refresh()
 
@@ -545,8 +556,8 @@ class PanelEmbeddingDisplayGroup(pn.Column):
         page_size: int = 10,
         item_width: int = 300,
         item_margin: int = 8,
-        on_save: Optional[Callable[[], None]] = None,
-        save_label: str = "Save responses",
+        label_states_by_id: Optional[Dict[int, Dict[str, int]]] = None,
+        on_label_change: Optional[Callable[[int, str, int], None]] = None,
         sample_rate_hz: int = 32000,
         frame_rate: int = 100,
         window_size_s: float = 5.0,
@@ -562,9 +573,10 @@ class PanelEmbeddingDisplayGroup(pn.Column):
             if source is None:
                 raise ValueError("Search results missing metadata.source; call attach_metadata_to_search_results")
             recording_info = metadata.get("recording_info")
+            eid = int(r.embedding_id)
             items.append(
                 PanelEmbeddingDisplay(
-                    embedding_id=int(r.embedding_id),
+                    embedding_id=eid,
                     dataset_name=source.dataset_name,
                     uri=source.source_id,
                     offset_s=float(source.offsets[0]),
@@ -573,6 +585,8 @@ class PanelEmbeddingDisplayGroup(pn.Column):
                     domain=metadata.get("domain"),
                     arid=metadata.get("arid"),
                     labels=list(labels),
+                    initial_states=label_states_by_id.get(eid) if label_states_by_id else None,
+                    on_label_change=on_label_change,
                     sample_rate_hz=sample_rate_hz,
                     frame_rate=frame_rate,
                     window_size_s=window_size_s,
@@ -587,8 +601,6 @@ class PanelEmbeddingDisplayGroup(pn.Column):
             page_size=page_size,
             item_width=item_width,
             item_margin=item_margin,
-            on_save=on_save,
-            save_label=save_label,
             **kwargs,
         )
 
