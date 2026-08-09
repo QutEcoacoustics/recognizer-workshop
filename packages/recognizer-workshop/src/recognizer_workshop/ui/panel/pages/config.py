@@ -581,6 +581,9 @@ def build(vm):
 
             vm.eng = agile_state(vm.config)
 
+            # warm up the model in a separate process to speed up later embedding calls
+            vm.eng.model_warmup()
+
             vm.notify("Engine created. Initializing...", "info")
 
             # initialise the API connection

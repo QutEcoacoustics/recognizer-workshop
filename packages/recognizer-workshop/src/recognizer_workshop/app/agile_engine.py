@@ -112,8 +112,7 @@ class agile_state:
             max_workers=1,
             mp_context=mp_context
         )
-        # Start warming up TF/XLA immediately
-        self._submit_warmup()
+
 
     @staticmethod
     def count_fetched_labels(result_sets) -> int:
@@ -150,8 +149,10 @@ class agile_state:
     def initialize(self):
         self.init_db()
 
-    def _submit_warmup(self):
-        """Fire-and-forget: load TF + weights + run a dummy inference to compile XLA."""
+    def model_warmup(self):
+        """
+        Warm up the embedding model in a separate process. Later calls to embed_query will be faster.
+        """
         future = self._embed_runner.submit(embed_worker.warm_up_model, "perch_8")
 
         def _on_warmup_done(f):
