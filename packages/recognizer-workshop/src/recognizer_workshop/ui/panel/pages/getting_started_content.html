@@ -3,12 +3,12 @@
     <div style="display:flex; align-items:center; margin-bottom:0.6rem;">
         <h2 style="margin:0;">🚀 Getting Started</h2>
         <div style="display:flex; align-items:center; gap:16px; margin-left:auto;">
-            <img src="/assets/qut_logo_2.png" style="height:44px; width:auto;">
-            <img src="/assets/ardc_logo_2.png" style="height:44px; width:auto;">
-            <img src="/assets/perch_humpback2.png" style="height:44px; width:auto;">
+            <img src="/assets/qut_logo_2.png" alt="QUT logo" style="height:44px; width:auto;">
+            <img src="/assets/ardc_logo_2.png" alt="ARDC logo" style="height:44px; width:auto;">
+            <img src="/assets/perch_humpback2.png" alt="Perch logo" style="height:44px; width:auto;">
         </div>
     </div>
-    <p>Welcome to the <strong>Recognizer Workshop</strong> — a tool for training acoustic recognizers using <a href="https://www.nature.com/articles/s41598-023-49989-z" target="_blank">Perch embeddings</a> and recordings hosted on <a href="https://www.ecosounds.org/" target="_blank">Ecosounds</a>.</p>
+    <p>Welcome to the <strong>Recognizer Workshop</strong> — a tool for training acoustic recognizers using <a href="https://www.nature.com/articles/s41598-023-49989-z" target="_blank" rel="noopener noreferrer">Perch embeddings</a> and recordings hosted on <a href="https://www.ecosounds.org/" target="_blank" rel="noopener noreferrer">Ecosounds</a>.</p>
 
     <div class="gs-overview-box">
         <h3>📋 Workflow overview</h3>
@@ -27,7 +27,7 @@
     <div class="gs-section">
         <h3>🗂️ Step 1 — Configure your project</h3>
         <ol>
-            <li>Paste your Workbench API token into the token field on the Config tab. You can find your token on your profile page — for Ecosounds: <a href="https://www.ecosounds.org/my_account" target="_blank">ecosounds.org/my_account</a></li>
+            <li>Paste your Workbench API token into the token field on the Config tab. You can find your token on your profile page — for Ecosounds: <a href="https://www.ecosounds.org/my_account" target="_blank" rel="noopener noreferrer">ecosounds.org/my_account</a></li>
             <li>Enter your name</li>
             <li>Enter the name of the species you are searching for</li>
             <li>Save the configuration</li>
@@ -36,7 +36,7 @@
 
     <div class="gs-section">
         <h3>🗄️ Step 2 — Load a database</h3>
-        <p>On the <strong>Database</strong> tab, build a database of perch-embeddings, downloaded from ecosounds (<code>.sqlite</code> + <code>.usearch</code> files). .</p>
+        <p>On the <strong>Database</strong> tab, build a database of perch-embeddings, downloaded from ecosounds (<code>.sqlite</code> + <code>.usearch</code> files).</p>
         <p>If you are doing this workflow as part of a conference workshop, this step will probably be already done for you</p>
     </div>
 
@@ -59,8 +59,9 @@
     </div>
 
     <div class="gs-section">
-        <h3>📤 Step 7 — Run inference and upload</h3>
-        <p>When you're happy with the classifier, go to the <strong>Inference</strong> tab to score all embeddings in the database. Results can be uploaded back to the Workbench as a new annotation set for review.</p>
+        <h3>📤 Step 6 — Run inference and upload</h3>
+        <p>When you're happy with the recognizer, go to the <strong>Inference</strong> tab to score all embeddings in the database. Results can be uploaded back to the Ecosounds to be verified in the rapid verification interface.</p>
+        <p>Download the recognizer to run it over Ecosounds audio that is not part of your recognizer-workshop database. Contact the Ecosounds team to arrange this.</p>
     </div>
 
     <div class="gs-tips">

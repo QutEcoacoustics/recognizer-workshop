@@ -1,6 +1,9 @@
 import logging
-import panel as pn
 from collections import deque
+from pathlib import Path
+import panel as pn
+
+from recognizer_workshop.ui.panel.utils.file_download import make_file_download_button
 
 log = logging.getLogger(__name__)
 
@@ -14,7 +17,15 @@ def build(vm):
     
     # Controls
     btn_clear = pn.widgets.Button(name="Clear Logs", button_type="warning", icon="trash")
-    btn_download = pn.widgets.Button(name="Download Logs", button_type="primary", icon="download")
+
+    _log_file = Path.home() / ".recognizer-workshop" / "logs" / "app.log"
+    btn_download = make_file_download_button(
+        get_path=lambda: _log_file,
+        filename="app.log",
+        label="Download logs",
+        button_type="primary",
+        width=150,
+    )
     
     level_selector = pn.widgets.Select(
         name="Minimum Log Level",
@@ -51,26 +62,6 @@ def build(vm):
             log.info("Logs cleared by user")
             _update_info()
     
-    def _on_download(_):
-        """Download logs as text file."""
-        if handler and handler.log_buffer:
-            content = "\n".join(handler.log_buffer)
-            # Create a downloadable file
-            from datetime import datetime
-            filename = f"logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-            
-            # Use Panel's FileDownload widget
-            file_download = pn.widgets.FileDownload(
-                callback=lambda: content.encode('utf-8'),
-                filename=filename,
-                button_type="success",
-                auto=True  # Auto-trigger download
-            )
-            # Trigger it
-            vm.notify(f"Downloading {filename}", "success")
-        else:
-            vm.notify("No logs to download", "warn")
-    
     def _on_level_change(event):
         """Change the log level."""
         level_name = event.new
@@ -96,7 +87,6 @@ def build(vm):
     
     # Wire up callbacks
     btn_clear.on_click(_on_clear)
-    btn_download.on_click(_on_download)
     level_selector.param.watch(_on_level_change, 'value')
     max_lines_input.param.watch(_on_max_lines_change, 'value')
     
@@ -118,11 +108,6 @@ def build(vm):
     # }
     
     return pn.Column(
-        pn.pane.Alert(
-            "This page shows real-time logs from the application. "
-            "Logs are limited to the most recent entries to prevent performance issues.",
-            alert_type="info"
-        ),
         
         # Controls row
         pn.Card(

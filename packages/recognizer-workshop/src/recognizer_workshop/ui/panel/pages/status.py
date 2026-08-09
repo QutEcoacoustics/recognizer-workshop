@@ -141,19 +141,6 @@ def build(vm: ViewModel):
         align='end'
     )
 
-    notify_input = pn.widgets.TextInput(
-        placeholder="Type a message and press Enter…",
-        sizing_mode="fixed",
-        width=260,
-    )
-
-    def _on_notify_input(event):
-        if event.new.strip():
-            vm.notify(event.new.strip(), "info")
-            notify_input.value = ""
-
-    notify_input.param.watch(_on_notify_input, "value")
-    
     content_pane = pn.Column(_build_status_view(vm))
 
     def refresh_view(_event):
@@ -162,7 +149,23 @@ def build(vm: ViewModel):
 
     refresh_button.on_click(refresh_view)
 
+    toolbar = pn.Row(refresh_button, align="end")
+    if vm.debug_mode:
+        notify_input = pn.widgets.TextInput(
+            placeholder="Notify test — type a message and press Enter…",
+            sizing_mode="fixed",
+            width=300,
+        )
+
+        def _on_notify_input(event):
+            if event.new.strip():
+                vm.notify(event.new.strip(), "info")
+                notify_input.value = ""
+
+        notify_input.param.watch(_on_notify_input, "value")
+        toolbar = pn.Row(refresh_button, notify_input, align="end")
+
     return pn.Column(
-        pn.Row(refresh_button, notify_input, align="end"),
+        toolbar,
         content_pane
     )

@@ -63,6 +63,7 @@ class ViewModel(SimpleNamespace):
 
     def __init__(self):
         super().__init__(eng=None, ui=None)
+        self.debug_mode: bool = False  # set to True by build_app when ?debug=true in URL
         self._notifier = StatusNotifier()
         self.status = self._notifier.widget
         self.log_pane = pn.pane.HTML(
@@ -98,6 +99,11 @@ class ViewModel(SimpleNamespace):
         Note: we configure the global loggers to be at INFO level, but we set
         different levels on the handlers to control what gets shown in the UI.
         So that we don't block useful log messages from other handlers.
+
+        recognizer_workshop/baw_helpers loggers are process-wide singletons, not
+        per-session — each new ViewModel (new browser tab/session) must replace
+        any PanelLogHandler left by a previous session, otherwise only the first
+        session ever created gets live logs and all others stay blank.
         """
         
         # Create a single shared handler for both loggers
@@ -111,15 +117,17 @@ class ViewModel(SimpleNamespace):
         app_logger = logging.getLogger('recognizer_workshop')
         app_logger.setLevel(logging.DEBUG)
         
-        if not any(isinstance(h, PanelLogHandler) for h in app_logger.handlers):
-            app_logger.addHandler(shared_panel_handler)
+        for old_handler in [h for h in app_logger.handlers if isinstance(h, PanelLogHandler)]:
+            app_logger.removeHandler(old_handler)
+        app_logger.addHandler(shared_panel_handler)
 
         # Setup baw_helpers logger with the same handler
         baw_logger = logging.getLogger('baw_helpers')
         baw_logger.setLevel(logging.INFO)
         
-        if not any(isinstance(h, PanelLogHandler) for h in baw_logger.handlers):
-            baw_logger.addHandler(shared_panel_handler)
+        for old_handler in [h for h in baw_logger.handlers if isinstance(h, PanelLogHandler)]:
+            baw_logger.removeHandler(old_handler)
+        baw_logger.addHandler(shared_panel_handler)
 
 
 

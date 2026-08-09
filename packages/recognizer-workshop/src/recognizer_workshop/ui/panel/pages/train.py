@@ -1,5 +1,4 @@
 import asyncio
-import io
 
 import numpy as np
 import pandas as pd
@@ -8,6 +7,7 @@ from panel_material_ui import Dialog
 
 from recognizer_workshop.app.agile_engine import sanitize_classifier_name
 from recognizer_workshop.app.services import training as training_service
+from recognizer_workshop.ui.panel.utils.file_download import make_file_download_button
 from recognizer_workshop.ui.panel.utils.patch_tqdm import patch_tqdm
 from recognizer_workshop.ui.panel.utils.validation import ensure_validation_css, set_validity
 
@@ -109,14 +109,6 @@ def build(vm):
     # --- Saved classifiers selector ---
     classifier_select = pn.widgets.Select(name="Recognizer", options=[], sizing_mode="fixed", width=290)
     version_select = pn.widgets.Select(name="Version", options=[], sizing_mode="fixed", width=200)
-    btn_download = pn.widgets.FileDownload(
-        filename="recognizer.json",
-        button_type="primary",
-        label="Download",
-        sizing_mode="fixed",
-        width=110,
-        embed=False,
-    )
     btn_delete = pn.widgets.Button(name="Delete", button_type="danger", sizing_mode="fixed", width=90)
     saved_classifiers_empty_msg = pn.pane.Markdown("_No saved recognizers found._", visible=False)
     saved_classifiers_dialogs = pn.Column()
@@ -126,15 +118,18 @@ def build(vm):
     def _get_saved_training_results_index():
         return vm.eng.saved_training_results_index if vm.eng else None
 
-    def _download_recognizer_bytes():
+    def _get_recognizer_path():
         index = _get_saved_training_results_index()
         selected_item = index.get_active_classifier_entry() if index else None
-        path = selected_item.recognizer_path if selected_item else None
-        if path is None or not path.exists():
-            raise ValueError("No active saved recognizer available to download.")
-        return io.BytesIO(path.read_bytes())
+        return selected_item.recognizer_path if selected_item else None
 
-    btn_download.callback = _download_recognizer_bytes
+    btn_download = make_file_download_button(
+        get_path=_get_recognizer_path,
+        filename="recognizer.json",
+        label="Download",
+        button_type="primary",
+        width=110,
+    )
 
     def _refresh_saved_classifiers_selector_from_engine():
         """Mirrors the engine's saved-classifier index/active-selection onto the dropdowns."""

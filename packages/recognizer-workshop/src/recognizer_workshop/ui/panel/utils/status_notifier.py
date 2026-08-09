@@ -32,15 +32,17 @@ class StatusNotifier:
 
     def notify(self, msg: str, icon: str) -> None:
         self._queue.append((icon, msg))
-        if not self._draining:
-            try:
-                asyncio.get_running_loop().create_task(self._drain())
-            except RuntimeError:
-                # fallback when called outside an async context
-                self.widget.object = f"{icon} {msg}"
+        if self._draining:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self.widget.object = f"{icon} {msg}"
+            return
+        self._draining = True
+        loop.create_task(self._drain())
 
     async def _drain(self) -> None:
-        self._draining = True
         try:
             while True:
                 # Show all queued messages, each held for MIN_DISPLAY seconds.

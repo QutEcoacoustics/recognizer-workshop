@@ -68,50 +68,31 @@ def build_app(vm):
     """Builds the main application layout using a Panel template."""
 
     vm.ui = PanelUI(vm)
-
     vm.setup_help_system()
+    vm.debug_mode = pn.state.session_args.get('debug', [b'false'])[0].decode() == 'true'
 
     template = pn.template.FastListTemplate(
         title="Recognizer Workshop",
         header_background="#79bdd1",
         sidebar_width=400,
-        sidebar=[vm.help_system, vm.help_system.content]  # Pass components directly
+        sidebar=[vm.help_system, vm.help_system.content]
     )
 
-    # Check for dev mode via query string parameter or environment variable
-    # URL would be: http://localhost:5006/?dev=true
-    dev_mode = pn.state.session_args.get('dev', [b'false'])[0].decode() == 'true' or \
-               os.environ.get('RECOGNIZER_DEV_MODE', '').lower() == 'true'
-    
-    # Create a toggle for dev mode (hidden by default)
-    dev_toggle = pn.widgets.Checkbox(
-        name="🔧 Developer Mode", 
-        value=dev_mode,
-        visible=False  # Hidden by default
-    )
-    
-    # Add keyboard shortcut to show dev toggle: Ctrl+Shift+D
-    dev_toggle_button = pn.pane.HTML(f"""
-    <script>
-    document.addEventListener('keydown', function(e) {{
-        if (e.ctrlKey && e.shiftKey && e.key === 'D') {{
-            e.preventDefault();
-            // Toggle visibility of dev mode checkbox
-            var devToggle = document.querySelector('.dev-toggle-container');
-            if (devToggle) {{
-                devToggle.style.display = devToggle.style.display === 'none' ? 'block' : 'none';
-            }}
-        }}
-    }});
-    </script>
-    <div class="dev-toggle-container" style="display: {'block' if dev_mode else 'none'}; 
-         padding: 10px; 
-         background: #f0f0f0; 
-         border-radius: 4px; 
-         margin: 10px 0;">
-        <small>💡 Press <kbd>Ctrl+Shift+D</kbd> to toggle dev mode panel</small>
-    </div>
-    """)
+    # Tab label → URL slug mapping (order must match the pn.Tabs definition below).
+    _TAB_SLUGS = [
+        "getting-started",
+        "config",
+        "database",
+        "labelled-examples",
+        "search",
+        "explore",
+        "train",
+        "refine",
+        "inference",
+        "status",
+        "logs",
+    ]
+    _slug_to_index = {slug: i for i, slug in enumerate(_TAB_SLUGS)}
 
     tabs = pn.Tabs(
         ("Getting started", getting_started.build(vm)),
@@ -131,6 +112,21 @@ def build_app(vm):
         dynamic=True,
     )
 
+    # Restore active tab from URL on load.
+    initial_slug = pn.state.session_args.get('tab', [b''])[0].decode()
+    if initial_slug in _slug_to_index:
+        tabs.active = _slug_to_index[initial_slug]
+
+    # Push the active tab slug into the URL (replaceState — no extra browser history entries).
+    slugs_js = str(_TAB_SLUGS)
+    tabs.jscallback(active=f"""
+        const slugs = {slugs_js};
+        const slug = slugs[cb_obj.active] || String(cb_obj.active);
+        const url = new URL(window.location.href);
+        url.searchParams.set('tab', slug);
+        window.history.replaceState({{}}, '', url.toString());
+    """)
+
     # Tab indices that require a loaded database (0-indexed):
     # 0=Getting started, 1=Config, 2=Database, 3=Labelled examples,
     # 4=Search, 5=Explore, 6=Train, 7=Refine, 8=Inference
@@ -140,15 +136,10 @@ def build_app(vm):
     def _update_disabled_tabs(_=None):
         tabs.disabled_tabs = [] if (vm.eng and vm.eng.is_db_loaded) else _DB_REQUIRED_TABS
 
-    _update_disabled_tabs()  # Apply initial state
-
-
+    _update_disabled_tabs()
 
     template.header.append(vm.status)
-    template.header.append(dev_toggle_button)
     template.main.append(tabs)
-    # template.sidebar.append(vm.help_system) # append the js custom component for sidebar control
-    # template.sidebar.append(vm.help_system.content) # append the actual help content
     return template
 
 

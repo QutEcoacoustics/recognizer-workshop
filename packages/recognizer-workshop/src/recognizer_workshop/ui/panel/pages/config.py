@@ -170,7 +170,7 @@ def build(vm):
         api_domain = str(workbench_info["api"])
         website_domain = str(workbench_info["website"])
         website_with_scheme = website_domain if website_domain.startswith(("http://", "https://")) else f"https://{website_domain}"
-        heading = f"**{workbench_name.upper()}** (<a href='{website_with_scheme}/my_account' target='_blank'>{website_with_scheme}</a>)"
+        heading = f"**{workbench_name.upper()}** (<a href='{website_with_scheme}/my_account' target='_blank' rel='noopener noreferrer'>{website_with_scheme}</a>)"
 
         anon_checkbox = pn.widgets.Checkbox(name="Anonymous", value=False)
         token_input = pn.widgets.PasswordInput(
