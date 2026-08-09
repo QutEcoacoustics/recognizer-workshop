@@ -17,7 +17,9 @@ def make_file_download_button(
 
     def _callback():
         path = get_path()
-        if path is None or not path.exists():
+        if path is None:
+            raise ValueError("No file is currently available to download.")
+        if not path.exists():
             raise FileNotFoundError(f"File not found: {path}")
         return io.BytesIO(path.read_bytes())
 

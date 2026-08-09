@@ -345,7 +345,7 @@ class PanelEmbeddingDisplay(pn.Column):
             "</div>"
         )
         title_text = (
-            f'<a href="{self.listen_link}" target="_blank" rel="noopener noreferrer" rel="noopener noreferrer">{title_label}</a>'
+            f'<a href="{self.listen_link}" target="_blank" rel="noopener noreferrer">{title_label}</a>'
             if self.listen_link
             else title_label
         )

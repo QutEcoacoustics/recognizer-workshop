@@ -112,6 +112,8 @@ class agile_state:
             max_workers=1,
             mp_context=mp_context
         )
+        # Start warming up TF/XLA immediately
+        self._submit_warmup()
 
     @staticmethod
     def count_fetched_labels(result_sets) -> int:
@@ -147,12 +149,20 @@ class agile_state:
 
     def initialize(self):
         self.init_db()
-        # Fire-and-forget: start the worker process and load TF/model in the background.
+
+    def _submit_warmup(self):
+        """Fire-and-forget: load TF + weights + run a dummy inference to compile XLA."""
         future = self._embed_runner.submit(embed_worker.warm_up_model, "perch_8")
-        future.add_done_callback(
-            lambda f: log.warning("Embed model warmup failed: %s", f.exception())
-            if f.exception() else None
-        )
+
+        def _on_warmup_done(f):
+            try:
+                exc = f.exception()
+            except Exception:
+                exc = None
+            if exc:
+                log.warning("Embed model warmup failed: %s", exc)
+
+        future.add_done_callback(_on_warmup_done)
 
     def init_db(self):
         log.info('Initializing DB...')

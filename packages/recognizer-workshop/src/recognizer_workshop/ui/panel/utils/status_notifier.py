@@ -37,6 +37,8 @@ class StatusNotifier:
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
+            # No event loop — show immediately and discard queue so nothing replays later.
+            self._queue.clear()
             self.widget.object = f"{icon} {msg}"
             return
         self._draining = True
