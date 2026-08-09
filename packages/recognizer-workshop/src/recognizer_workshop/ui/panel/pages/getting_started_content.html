@@ -1,0 +1,140 @@
+<div class="gs-container">
+
+    <div style="display:flex; align-items:center; margin-bottom:0.6rem;">
+        <h2 style="margin:0;">🚀 Getting Started</h2>
+        <div style="display:flex; align-items:center; gap:16px; margin-left:auto;">
+            <img src="/assets/qut_logo_2.png" alt="QUT logo" style="height:44px; width:auto;">
+            <img src="/assets/ardc_logo_2.png" alt="ARDC logo" style="height:44px; width:auto;">
+            <img src="/assets/perch_humpback2.png" alt="Perch logo" style="height:44px; width:auto;">
+        </div>
+    </div>
+    <p>Welcome to the <strong>Recognizer Workshop</strong> — a tool for training acoustic recognizers using <a href="https://www.nature.com/articles/s41598-023-49989-z" target="_blank" rel="noopener noreferrer">Perch embeddings</a> and recordings hosted on <a href="https://www.ecosounds.org/" target="_blank" rel="noopener noreferrer">Ecosounds</a>.</p>
+
+    <div class="gs-overview-box">
+        <h3>📋 Workflow overview</h3>
+        <ol>
+            <li><strong>Config</strong> — Set up your project file, API token, and folder paths, then start the engine.</li>
+            <li><strong>Database</strong> — Select and load a pre-built Perch embedding database for your site.</li>
+            <li><strong>Labelled examples</strong> — Pull confirmed annotations from the Workbench into the database.</li>
+            <li><strong>Search</strong> — Find more candidate examples using similarity search (query by example or by classifier).</li>
+            <li><strong>Train</strong> — Train a linear classifier on your labelled embeddings.</li>
+            <li><strong>Refine</strong> — Review classifier predictions and add corrections, then re-train.</li>
+            <li><strong>Inference</strong> — Run the trained classifier across the full database and upload results.</li>
+        </ol>
+        <div>These steps appear as tabs you can find at the top of this page</div>
+    </div>
+
+    <div class="gs-section">
+        <h3>🗂️ Step 1 — Configure your project</h3>
+        <ol>
+            <li>Paste your Workbench API token into the token field on the Config tab. You can find your token on your profile page — for Ecosounds: <a href="https://www.ecosounds.org/my_account" target="_blank" rel="noopener noreferrer">ecosounds.org/my_account</a></li>
+            <li>Enter your name</li>
+            <li>Enter the name of the species you are searching for</li>
+            <li>Save the configuration</li>
+        </ol>
+    </div>
+
+    <div class="gs-section">
+        <h3>🗄️ Step 2 — Load a database</h3>
+        <p>On the <strong>Database</strong> tab, build a database of perch-embeddings, downloaded from ecosounds (<code>.sqlite</code> + <code>.usearch</code> files).</p>
+        <p>If you are doing this workflow as part of a conference workshop, this step will probably be already done for you</p>
+    </div>
+
+    <div class="gs-section">
+        <h3>🏷️ Step 3 — Fetch labelled examples</h3>
+        <p>Go to <strong>Labelled examples</strong> and click <strong>Fetch labels</strong>. This pulls confirmed annotations (events tagged on the Workbench) into the database so they can be used for training.</p>
+        <p>If your project doesn't have any yet, no worries, you can also manually label examples found via Search.</p>
+    </div>
+
+    <div class="gs-section">
+        <h3>🔍 Step 4 — Search for more examples</h3>
+        <p>On the <strong>Search</strong> tab, select a short audio clip containing your target sound. The app embeds it and finds the most acoustically similar clips in the database. Check the results and label anything that contains your target call as positive, and other sounds as negative.</p>
+    </div>
+
+    <div class="gs-section">
+        <h3>🧠 Step 5 — Train and refine your recognizer</h3>
+        <p>Once you have at least some positive examples, go to the <strong>Train</strong> tab. Enter a name for your recognizer and click <strong>Train recognizer</strong>.</p>
+        <p>Refine: hop over to the <strong>Refine</strong> tab, run the recognizer over unlabelled examples, label those results.</p>
+        <p>Iterate: go back to the <strong>Train</strong> tab, update your recognizer, and repeat the refine process. Adding useful labeled examples improves the recognizer with each iteration</p>
+    </div>
+
+    <div class="gs-section">
+        <h3>📤 Step 6 — Run inference and upload</h3>
+        <p>When you're happy with the recognizer, go to the <strong>Inference</strong> tab to score all embeddings in the database. Results can be uploaded back to the Ecosounds to be verified in the rapid verification interface.</p>
+        <p>Download the recognizer to run it over Ecosounds audio that is not part of your recognizer-workshop database. Contact the Ecosounds team to arrange this.</p>
+    </div>
+
+    <div class="gs-tips">
+        <h3>💡 Tips</h3>
+        <ul>
+            <li>The <strong>Help</strong> button (?) on each tab opens contextual guidance for that specific page.</li>
+            <li>The <strong>Status</strong> tab shows a full snapshot of the engine, database, and label counts at any time.</li>
+            <li>If something goes wrong, check the <strong>Logs</strong> tab for detailed error messages.</li>
+        </ul>
+    </div>
+
+</div>
+
+<style>
+.gs-container {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 16px 24px;
+    font-family: inherit;
+    line-height: 1.6;
+    /* inherit color from Panel's body so both themes work */
+}
+.gs-container h2 {
+    font-size: 1.6rem;
+    margin-bottom: 0.4rem;
+}
+.gs-container h3 {
+    font-size: 1.1rem;
+    margin: 0 0 0.5rem 0;
+    /* no hardcoded color — inherits Panel theme */
+}
+.gs-overview-box {
+    background: rgba(14, 165, 233, 0.12);
+    border-left: 4px solid #0ea5e9;
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin: 18px 0;
+}
+.gs-overview-box ol {
+    margin: 8px 0 0 0;
+    padding-left: 1.4rem;
+}
+.gs-overview-box li {
+    margin-bottom: 4px;
+}
+.gs-section {
+    background: rgba(128, 128, 128, 0.08);
+    border: 1px solid rgba(128, 128, 128, 0.2);
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin: 12px 0;
+}
+.gs-tips {
+    background: rgba(245, 158, 11, 0.12);
+    border-left: 4px solid #f59e0b;
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin: 18px 0;
+}
+.gs-tips ul {
+    margin: 8px 0 0 0;
+    padding-left: 1.4rem;
+}
+.gs-tips li {
+    margin-bottom: 4px;
+}
+.gs-container a {
+    color: #3b82f6;
+}
+.gs-container code {
+    background: rgba(128, 128, 128, 0.15);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 0.9em;
+}
+</style>

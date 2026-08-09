@@ -400,7 +400,12 @@ class PanelUI(param.Parameterized):
             return
 
         # embed & search
+        import time as _time
+        _t0 = _time.perf_counter()
         await eng.embed_query_async(audio_window)
+        _t_embed = _time.perf_counter()
+        log.debug("[TIMING] embed_query_async: %.3fs", _t_embed - _t0)
+
         active_label = eng.active_label
         if not active_label:
             self.render(pn.pane.Alert("Pick target label(s) on the Config tab.", alert_type="warning"), results_region)
@@ -411,6 +416,9 @@ class PanelUI(param.Parameterized):
 
         log.info(f'Starting search for label {active_label}...')
         eng.search_with_query(num_results=num_results, sample_size=None, target_score=target_score, target_label=active_label)
+        _t_search = _time.perf_counter()
+        log.debug("[TIMING] search_with_query: %.3fs", _t_search - _t_embed)
+        log.debug("[TIMING] total _do_search: %.3fs", _t_search - _t0)
         log.info(f'Search completed for label {active_label}, showing results.')
         self.show_results(eng, active_label, results_region=results_region)
         log.info(f'Results rendered for label {active_label}.')

@@ -39,6 +39,29 @@ def debug_timer(pid):
         sys.stderr.flush()
 
 
+def warm_up_model(model_name: str) -> bool:
+    """
+    Runs in the worker process. Loads the model AND runs a dummy inference to
+    trigger XLA JIT compilation so the first real embed is fast.
+    """
+    import numpy as np
+    import tensorflow as tf  # noqa: F401 — import triggers TF initialisation
+    from perch_hoplite.zoo import model_configs
+
+    global _WORKER_MODEL_CACHE
+    if model_name not in _WORKER_MODEL_CACHE:
+        print(f">>> [Worker warmup] Loading model '{model_name}'...")
+        _WORKER_MODEL_CACHE[model_name] = model_configs.load_model_by_name(model_name)
+
+    model = _WORKER_MODEL_CACHE[model_name]
+    # Run a dummy embed to trigger XLA compilation — this is the actual bottleneck.
+    dummy_audio = np.zeros(160_000, dtype=np.float32)  # 5s at 32 kHz
+    print(">>> [Worker warmup] Running dummy inference to compile XLA kernels...")
+    model.embed(dummy_audio)
+    print(f">>> [Worker warmup] Model '{model_name}' warmed up.")
+    return True
+
+
 def run_embed_task(model_name: str, audio_window):
     """
     Runs in the separate process.

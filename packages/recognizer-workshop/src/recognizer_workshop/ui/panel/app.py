@@ -1,5 +1,4 @@
 
-import base64
 import logging
 import os
 import sys
@@ -13,6 +12,7 @@ import panel as pn
 
 from recognizer_workshop.ui.panel.view_model import ViewModel
 from recognizer_workshop.ui.panel.adaptors import PanelUI
+from recognizer_workshop.ui.panel.utils.sidebar import build_sidebar_header_component
 
 os.environ.setdefault("MPLBACKEND", "module://matplotlib_inline.backend_inline")
 
@@ -52,6 +52,7 @@ def _import_page(name: str):
 
 
 config = _import_page("config")
+getting_started = _import_page("getting_started")
 create_database = _import_page("create_database")
 labeled_examples = _import_page("labeled_examples")
 search = _import_page("search")
@@ -63,92 +64,39 @@ status = _import_page("status")
 log = _import_page("log")
 print(f"[startup] pages imported {time.time():.3f}")
 
-_LOGO_CACHE: dict[Path, str] = {}
-
-
-def encode_png_to_base64(path: Path) -> str:
-    """Reads a PNG file and returns a base64 encoded data URI."""
-    with open(path, "rb") as f:
-        binary_data = f.read()
-    encoded_data = base64.b64encode(binary_data).decode("utf-8")
-    return f"data:image/png;base64,{encoded_data}"
-
-
-def _get_cached_logo(path: Path) -> str:
-    cached = _LOGO_CACHE.get(path)
-    if cached:
-        return cached
-    encoded = encode_png_to_base64(path)
-    _LOGO_CACHE[path] = encoded
-    return encoded
-
 
 def build_app(vm):
     """Builds the main application layout using a Panel template."""
 
     vm.ui = PanelUI(vm)
-
     vm.setup_help_system()
+    vm.debug_mode = pn.state.session_args.get('debug', [b'false'])[0].decode() == 'true'
 
     template = pn.template.FastListTemplate(
         title="Recognizer Workshop",
+        header_background="#79bdd1",
         sidebar_width=400,
-        sidebar=[vm.help_system, vm.help_system.content]  # Pass components directly
+        sidebar=[vm.help_system, vm.help_system.content]
     )
 
-    # Check for dev mode via query string parameter or environment variable
-    # URL would be: http://localhost:5006/?dev=true
-    dev_mode = pn.state.session_args.get('dev', [b'false'])[0].decode() == 'true' or \
-               os.environ.get('RECOGNIZER_DEV_MODE', '').lower() == 'true'
-    
-    # Create a toggle for dev mode (hidden by default)
-    dev_toggle = pn.widgets.Checkbox(
-        name="🔧 Developer Mode", 
-        value=dev_mode,
-        visible=False  # Hidden by default
-    )
-    
-    # Add keyboard shortcut to show dev toggle: Ctrl+Shift+D
-    dev_toggle_button = pn.pane.HTML(f"""
-    <script>
-    document.addEventListener('keydown', function(e) {{
-        if (e.ctrlKey && e.shiftKey && e.key === 'D') {{
-            e.preventDefault();
-            // Toggle visibility of dev mode checkbox
-            var devToggle = document.querySelector('.dev-toggle-container');
-            if (devToggle) {{
-                devToggle.style.display = devToggle.style.display === 'none' ? 'block' : 'none';
-            }}
-        }}
-    }});
-    </script>
-    <div class="dev-toggle-container" style="display: {'block' if dev_mode else 'none'}; 
-         padding: 10px; 
-         background: #f0f0f0; 
-         border-radius: 4px; 
-         margin: 10px 0;">
-        <small>💡 Press <kbd>Ctrl+Shift+D</kbd> to toggle dev mode panel</small>
-    </div>
-    """)
+    # Tab label → URL slug mapping (order must match the pn.Tabs definition below).
+    _TAB_SLUGS = [
+        "getting-started",
+        "config",
+        "database",
+        "labelled-examples",
+        "search",
+        "explore",
+        "train",
+        "refine",
+        "inference",
+        "status",
+        "logs",
+    ]
+    _slug_to_index = {slug: i for i, slug in enumerate(_TAB_SLUGS)}
 
-    # seems to be problematic to do a relative src to the image files in the html
-    app_dir = Path(__file__).parent
-    qut_logo_path = app_dir / "assets" / "qut_logo_2.png"
-    ardc_logo_path = app_dir / "assets" / "ardc_logo_2.png"
-    perch_logo_path = app_dir / "assets" / "perch_humpback2.png"
-    qut_logo_base64 = _get_cached_logo(qut_logo_path)
-    ardc_logo_base64 = _get_cached_logo(ardc_logo_path)
-    perch_logo_base64 = _get_cached_logo(perch_logo_path)
-
-    header_logos = pn.pane.HTML(f"""
-    <div style="display: flex; align-items: center;  justify-content: space-between; width: 290px; gap: 20px; background: white; padding: 5px 10px; border-radius: 2px;">
-        <img src="{qut_logo_base64}" style="height: 40px; width: auto;">
-        <img src="{ardc_logo_base64}" style="height: 40px; width: auto;">
-        <img src="{perch_logo_base64}" style="height: 40px; width: auto;">
-    </div>
-    """)
-    
     tabs = pn.Tabs(
+        ("Getting started", getting_started.build(vm)),
         ("Config", config.build(vm)),
         ("Database", create_database.build(vm)),
         ("Labelled examples", labeled_examples.build(vm)),
@@ -165,24 +113,35 @@ def build_app(vm):
         dynamic=True,
     )
 
+    # Restore active tab from URL on load.
+    initial_slug = pn.state.session_args.get('tab', [b''])[0].decode()
+    if initial_slug in _slug_to_index:
+        tabs.active = _slug_to_index[initial_slug]
+
+    # Push the active tab slug into the URL (replaceState — no extra browser history entries).
+    slugs_js = str(_TAB_SLUGS)
+    tabs.jscallback(active=f"""
+        const slugs = {slugs_js};
+        const slug = slugs[cb_obj.active] || String(cb_obj.active);
+        const url = new URL(window.location.href);
+        url.searchParams.set('tab', slug);
+        window.history.replaceState({{}}, '', url.toString());
+    """)
+
     # Tab indices that require a loaded database (0-indexed):
-    # 2=Labelled examples, 3=Search, 4=Explore, 5=Train, 6=Refine, 7=Inference
-    _DB_REQUIRED_TABS = [2, 3, 4, 5, 6, 7]
+    # 0=Getting started, 1=Config, 2=Database, 3=Labelled examples,
+    # 4=Search, 5=Explore, 6=Train, 7=Refine, 8=Inference
+    _DB_REQUIRED_TABS = [3, 4, 5, 6, 7, 8]
 
     @pn.depends(vm.obs.ensure("engine_state").param.version, watch=True)
     def _update_disabled_tabs(_=None):
         tabs.disabled_tabs = [] if (vm.eng and vm.eng.is_db_loaded) else _DB_REQUIRED_TABS
 
-    _update_disabled_tabs()  # Apply initial state
+    _update_disabled_tabs()
 
-
-
-    template.header.append(header_logos)
-    template.header.append(dev_toggle_button)
-    template.main.append(vm.status)
+    template.header.append(vm.status)
+    template.header.append(build_sidebar_header_component())
     template.main.append(tabs)
-    # template.sidebar.append(vm.help_system) # append the js custom component for sidebar control
-    # template.sidebar.append(vm.help_system.content) # append the actual help content
     return template
 
 

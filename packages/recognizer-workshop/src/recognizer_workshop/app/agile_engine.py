@@ -113,6 +113,7 @@ class agile_state:
             mp_context=mp_context
         )
 
+
     @staticmethod
     def count_fetched_labels(result_sets) -> int:
         """Count actual labeled segments across fetched result sets."""
@@ -148,6 +149,21 @@ class agile_state:
     def initialize(self):
         self.init_db()
 
+    def model_warmup(self):
+        """
+        Warm up the embedding model in a separate process. Later calls to embed_query will be faster.
+        """
+        future = self._embed_runner.submit(embed_worker.warm_up_model, "perch_8")
+
+        def _on_warmup_done(f):
+            try:
+                exc = f.exception()
+            except Exception:
+                exc = None
+            if exc:
+                log.warning("Embed model warmup failed: %s", exc)
+
+        future.add_done_callback(_on_warmup_done)
 
     def init_db(self):
         log.info('Initializing DB...')

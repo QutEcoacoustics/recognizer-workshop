@@ -135,12 +135,12 @@ def build(vm: ViewModel):
     
     # A button to manually trigger a refresh of the status information
     refresh_button = pn.widgets.Button(
-        name="🔄 Refresh", 
-        button_type="primary", 
-        width=120, 
+        name="🔄 Refresh",
+        button_type="primary",
+        width=120,
         align='end'
     )
-    
+
     content_pane = pn.Column(_build_status_view(vm))
 
     def refresh_view(_event):
@@ -149,7 +149,23 @@ def build(vm: ViewModel):
 
     refresh_button.on_click(refresh_view)
 
+    toolbar = pn.Row(refresh_button, align="end")
+    if vm.debug_mode:
+        notify_input = pn.widgets.TextInput(
+            placeholder="Notify test — type a message and press Enter…",
+            sizing_mode="fixed",
+            width=300,
+        )
+
+        def _on_notify_input(event):
+            if event.new.strip():
+                vm.notify(event.new.strip(), "info")
+                notify_input.value = ""
+
+        notify_input.param.watch(_on_notify_input, "value")
+        toolbar = pn.Row(refresh_button, notify_input, align="end")
+
     return pn.Column(
-        refresh_button,
+        toolbar,
         content_pane
     )

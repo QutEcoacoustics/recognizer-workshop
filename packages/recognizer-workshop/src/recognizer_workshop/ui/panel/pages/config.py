@@ -170,7 +170,7 @@ def build(vm):
         api_domain = str(workbench_info["api"])
         website_domain = str(workbench_info["website"])
         website_with_scheme = website_domain if website_domain.startswith(("http://", "https://")) else f"https://{website_domain}"
-        heading = f"**{workbench_name.upper()}** ([{website_with_scheme}]({website_with_scheme}))"
+        heading = f"**{workbench_name.upper()}** (<a href='{website_with_scheme}/my_account' target='_blank' rel='noopener noreferrer'>{website_with_scheme}</a>)"
 
         anon_checkbox = pn.widgets.Checkbox(name="Anonymous", value=False)
         token_input = pn.widgets.PasswordInput(
@@ -580,6 +580,9 @@ def build(vm):
         try:
 
             vm.eng = agile_state(vm.config)
+
+            # warm up the model in a separate process to speed up later embedding calls
+            vm.eng.model_warmup()
 
             vm.notify("Engine created. Initializing...", "info")
 
