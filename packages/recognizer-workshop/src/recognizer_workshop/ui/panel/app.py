@@ -12,6 +12,7 @@ import panel as pn
 
 from recognizer_workshop.ui.panel.view_model import ViewModel
 from recognizer_workshop.ui.panel.adaptors import PanelUI
+from recognizer_workshop.ui.panel.utils.sidebar import build_sidebar_header_component
 
 os.environ.setdefault("MPLBACKEND", "module://matplotlib_inline.backend_inline")
 
@@ -139,6 +140,7 @@ def build_app(vm):
     _update_disabled_tabs()
 
     template.header.append(vm.status)
+    template.header.append(build_sidebar_header_component())
     template.main.append(tabs)
     return template
 

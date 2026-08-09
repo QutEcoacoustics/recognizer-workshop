@@ -1,0 +1,17 @@
+/* Hide the original left-side hamburger — replaced by the injected right-side ? button */
+#sidebar-button { display: none !important; }
+
+/* Style for the injected help button inserted before .pn-toggle-theme */
+#rw-help-btn {
+    font-size: 22px;
+    font-weight: 700;
+    cursor: pointer;
+    margin: 0 10px;
+    opacity: 0.9;
+    line-height: 1;
+    user-select: none;
+}
+
+/* Hide sidebar until JS has restored saved open/closed state (prevents flash on reload) */
+html:not(.rw-sidebar-ready) #sidebar,
+html:not(.rw-sidebar-ready) #sidebar-bg { visibility: hidden !important; transition: none !important; }
