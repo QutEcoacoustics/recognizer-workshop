@@ -54,9 +54,9 @@ def run_inference(classifier,
             return ['end_offset', 'audio_recording_id', 'link', 'site_id', 'site_name']
         baw_domain, arid  = baw_utils.extract_arid_and_domain(row[2])
         link = baw_utils.make_baw_listen_link_from_arid(arid, row[3], 5.0, baw_domain)
-        site_info = site_lookup.get(int(arid), '')
+        site_info = site_lookup.get(int(arid), {}) if arid is not None else {}
         end_offset = row[3] + 5.0  # assuming the window size is 5 seconds
-        return [end_offset, arid, link, site_info['site_id'], site_info['site_name']]
+        return [end_offset, arid, link, site_info.get('site_id', ''), site_info.get('site_name', '')]
         
     classifier_mod.write_inference_csv(classifier,
                                     db,

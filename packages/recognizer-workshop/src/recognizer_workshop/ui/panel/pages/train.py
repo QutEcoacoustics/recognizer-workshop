@@ -118,6 +118,9 @@ def build(vm):
     def _get_saved_training_results_index():
         return vm.eng.saved_training_results_index if vm.eng else None
 
+    def _notify_active_classifier_changed():
+        vm.obs.bump("engine_state")
+
     def _get_recognizer_path():
         index = _get_saved_training_results_index()
         selected_item = index.get_active_classifier_entry() if index else None
@@ -255,6 +258,7 @@ def build(vm):
             btn_download.filename = f"{classifier_name}_{newest_version}.json"
         finally:
             _selector_sync_guard["active"] = False
+        _notify_active_classifier_changed()
         _render_active_saved_classifier_results()
 
     def _on_version_select_change(event):
@@ -268,6 +272,7 @@ def build(vm):
         except Exception as e:
             vm.notify(f"Could not switch active version: {e}", "error")
             return
+        _notify_active_classifier_changed()
         _render_active_saved_classifier_results()
 
     classifier_select.param.watch(_on_classifier_select_change, 'value')
@@ -295,6 +300,7 @@ def build(vm):
                 vm.notify(f"Delete failed: {e}", "error")
             dialog.open = False
             _refresh_saved_classifiers_selector_from_engine()
+            _notify_active_classifier_changed()
 
         btn_cancel.on_click(_cancel)
         btn_confirm.on_click(_confirm)
@@ -348,6 +354,7 @@ def build(vm):
 
             vm.notify(f"Recognizer saved: {train_result.get('version_dir')}", "success")
             _refresh_saved_classifiers_selector_from_engine()
+            _notify_active_classifier_changed()
 
             scores = train_result.get('metrics', train_result)
             info = train_result.get('info', {}) if isinstance(train_result, dict) else {}

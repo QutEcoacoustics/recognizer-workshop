@@ -1,4 +1,5 @@
 from pathlib import Path
+import random
 
 import pandas as pd
 import panel as pn
@@ -24,9 +25,37 @@ def build(vm):
 
     out_filename = pn.widgets.TextInput(name="Output filename", value="output.csv")
     threshold    = pn.widgets.FloatInput(name="Threshold", value=0.0, step=0.1)
-    subset       = pn.widgets.FloatInput(name="Subset proportion (0..1)", value=0.001, step=0.001)
-    labels_txt   = pn.widgets.TextInput(name="Labels (comma-sep) or empty for all", value="")
-    btn_run      = pn.widgets.Button(name="Run inference", button_type="primary")
+    subset       = pn.widgets.FloatInput(
+        name="Subset proportion (0..1)", value=0.001, start=0.001, end=1.0, step=0.001
+    )
+    target_label_selector = pn.widgets.CheckBoxGroup(
+        name="Labels",
+        options=[],
+        value=[],
+        inline=False,
+        sizing_mode="stretch_width",
+    )
+    btn_run = pn.widgets.Button(
+        name="Run inference",
+        button_type="primary",
+        sizing_mode="fixed",
+        width=180,
+    )
+
+    step1_left_column = pn.Column(
+        pn.Row(out_filename, threshold, subset, sizing_mode="stretch_width"),
+        sizing_mode="stretch_width",
+        styles={"flex": "1 1 100%"},
+    )
+    step1_right_column = pn.Column(
+        target_label_selector,
+        sizing_mode="stretch_width",
+        styles={"flex": "0 0 25%"},
+    )
+    step1_columns = pn.Row(
+        step1_left_column,
+        sizing_mode="stretch_width",
+    )
 
     # Subset creation controls
     subset_limit = pn.widgets.IntInput(name="Subset limit per label", value=80, start=1, step=10)
@@ -40,14 +69,66 @@ def build(vm):
     section2 = pn.Column()
     section3 = pn.Column()
 
+    def _get_active_saved_classifier_entry():
+        if not vm.eng:
+            return None
+        index = getattr(vm.eng, "saved_training_results_index", None)
+        return index.get_active_classifier_entry() if index else None
+
+    def _build_inference_heading_text() -> str:
+        active_entry = _get_active_saved_classifier_entry()
+        if not active_entry:
+            return "## Run Inference"
+        return f"## Run Inference - {active_entry.classifier_name} ({active_entry.display_name})"
+
+    inference_heading = pn.pane.Markdown(_build_inference_heading_text())
+
+    def _get_active_classifier_labels() -> list[str]:
+        if not vm.eng or not vm.eng.has_trained_classifier():
+            return []
+        classifier = vm.eng.get_trained_classifier()
+        return [str(label) for label in getattr(classifier, "classes", ())]
+
+    def _sync_target_label_selector() -> None:
+        labels = _get_active_classifier_labels()
+        has_multiple_labels = len(labels) > 1
+        target_label_selector.options = labels
+        target_label_selector.value = labels
+        target_label_selector.visible = has_multiple_labels
+        step1_left_column.styles = {
+            "flex": "0 0 75%" if has_multiple_labels else "1 1 100%"
+        }
+        step1_columns.objects = (
+            [step1_left_column, step1_right_column]
+            if has_multiple_labels
+            else [step1_left_column]
+        )
+
+
     def _get_csv_info(csv_path):
         """Get information about a CSV file including row count and preview"""
         try:
-            # First, get row count efficiently
-            row_count = sum(1 for _ in open(csv_path)) - 1  # -1 for header
-            
-            # Read a small sample for preview (first 100 rows for performance)
-            df_preview = pd.read_csv(csv_path, nrows=100)
+            preview_limit = 1000
+            reservoir = []
+            columns = None
+            row_count = 0
+            rng = random.Random()
+
+            # Reservoir sampling keeps a uniform random sample without retaining
+            # the complete inference CSV in memory.
+            for chunk in pd.read_csv(csv_path, chunksize=10_000):
+                if columns is None:
+                    columns = list(chunk.columns)
+                for row in chunk.itertuples(index=False, name=None):
+                    row_count += 1
+                    if len(reservoir) < preview_limit:
+                        reservoir.append(row)
+                    else:
+                        replacement_index = rng.randrange(row_count)
+                        if replacement_index < preview_limit:
+                            reservoir[replacement_index] = row
+
+            df_preview = pd.DataFrame(reservoir, columns=columns)
             
             # Get unique labels if 'label' column exists
             label_info = ""
@@ -57,14 +138,12 @@ def build(vm):
                     unique_labels = df_preview['label'].unique()
                     label_info = f"**Labels in preview:** {', '.join(unique_labels)} (may not include all labels in full file)"
                 else:
-                    # For smaller files, read all to get accurate label counts
-                    df_full = pd.read_csv(csv_path)
-                    label_counts = df_full['label'].value_counts()
+                    label_counts = df_preview['label'].value_counts()
                     label_info = "**Label counts:** " + ", ".join([f"{label}: {count}" for label, count in label_counts.items()])
             
             return {
                 'row_count': row_count,
-                'columns': list(df_preview.columns),
+                'columns': columns or [],
                 'preview_df': df_preview,
                 'label_info': label_info
             }
@@ -83,14 +162,14 @@ def build(vm):
 
 📊 **Rows:** {info['row_count']:,}  
 📋 **Columns:** {', '.join(info['columns'])}  
+_Preview: showing {len(info['preview_df']):,} randomly selected rows of {info['row_count']:,}._  
 {info['label_info']}"""
         
-        # Create tabulator widget for preview
-        # Use pagination to handle large datasets efficiently
+        # Keep the preview bounded so large inference files do not overload the browser.
         _ensure_tabulator()
         tabulator_widget = pn.widgets.Tabulator(
             info['preview_df'],
-            pagination='remote',  # This enables server-side pagination
+            pagination='local',
             page_size=25,         # Show 25 rows per page
             sizing_mode='stretch_width',
             height=400,
@@ -156,27 +235,21 @@ def build(vm):
         try:
             out = (vm.eng.config.predictions_folder / out_filename.value).absolute()
             
-            # # Check if file exists and ask for confirmation
-            # if out.exists():
-            #     # Since Panel doesn't have built-in confirmation dialogs, we'll use a simple approach
-            #     # You might want to implement a proper modal dialog in the future
-            #     log.info(f"⚠️ **File exists!**\n\nThe file `{out.name}` already exists. Click 'Run inference' again to overwrite it."
-            #     # Set a flag to indicate next click should proceed
-            #     if not hasattr(_run, 'confirmed'):
-            #         _run.confirmed = True
-            #         return
-            #     else:
-            #         # Reset the flag
-            #         delattr(_run, 'confirmed')
-
-
+            # Check if file exists and ask for confirmation
+            if out.exists() and btn_run.name != "Confirm Overwrite":
+                vm.notify(f"File '{out.name}' already exists. Click again to overwrite.", "warn")
+                btn_run.name = "Confirm Overwrite"
+                btn_run.button_type = "danger"
+                return
+            
+            # Reset button state after confirmation
+            btn_run.name = "Run inference"
+            btn_run.button_type = "primary"
             
             out.parent.mkdir(parents=True, exist_ok=True)
-            labels_arg = None
-            if labels_txt.value.strip():
-                labels_arg = [x.strip() for x in labels_txt.value.split(",") if x.strip()]
+            labels_arg = list(target_label_selector.value) or None
             
-            log.info("Running inference... this may take a while.")
+            vm.notify("Running inference... this may take a while.", "info")
             
             vm.eng.run_inference(
                 output_filepath=out,
@@ -186,14 +259,12 @@ def build(vm):
                 subset=float(subset.value),
                 exclude_labeled=True,
             )
-            log.info(f"✅ **Inference complete!**\n\nSaved detections to: `{out}`")
-            vm.notify("Inference complete.", "success")
+            vm.notify(f"Inference complete! Saved to: {out}", "success")
             
             # Update section visibility
             _check_file_availability()
             
         except Exception as e:
-            log.error(f"❌ **Error during inference:**\n```\n{e}\n```")
             vm.notify(f"Inference failed: {e}", "error")
 
     def _create_subset(_):
@@ -206,15 +277,13 @@ def build(vm):
             
             subset_csv = original_csv.with_suffix(f'.{subset_limit.value}.csv')
             
-            log.info(f"Creating subset with {subset_limit.value} examples per label...")
+            vm.notify(f"Creating subset with {subset_limit.value} examples per label...", "info")
             
             make_inference_subset(
                 inference_csv=original_csv,
                 subset_csv=subset_csv,
                 limit=subset_limit.value
             )
-            
-            log.info(f"✅ **Subset created!**\n\nSaved subset to: `{subset_csv}`")
             vm.notify("Subset created.", "success")
             
             # Update section visibility
@@ -240,25 +309,19 @@ def build(vm):
             
             pid = int(project_id.value) if int(project_id.value) > 0 else None
             
-            log.info(f"Uploading detections from: `{upload_file.name}`...")
+            vm.notify(f"Uploading detections from: {upload_file.name}...", "info")
             
             # Get the success status and verification link
             success_status, verification_link = vm.eng.upload_detections(upload_file, project_id=pid)
             
             if success_status and verification_link:
-                log.info(f"✅ **Upload successful!**")
-                log.info(f"Uploaded file: `{upload_file.name}`")
-                log.info(f"Verification link: {verification_link}")
-
+                vm.notify(f"Upload successful! View at: {verification_link}", "success")
             elif success_status:
-                log.info(f"✅ **Upload successful!**\n\nUploaded file: `{upload_file.name}`\n\nVerification link not available.")
                 vm.notify("Upload successful, but no verification link available.", "success")
             else:
-                log.info(f"❌ **Upload failed!**\n\nFile: `{upload_file.name}`")
                 vm.notify("Upload failed. Check logs for details.", "error")
             
         except Exception as e:
-            log.info(f"❌ **Error during upload:**\n```\n{e}\n```")
             vm.notify(f"Upload failed: {e}", "error")
 
     # Set up event handlers
@@ -269,6 +332,12 @@ def build(vm):
     # Watch for changes in filename to update section visibility
     def _on_filename_change(event):
         _check_file_availability()
+        # Reset overwrite confirmation button if filename changes
+        if btn_run.name == "Confirm Overwrite":
+            btn_run.name = "Run inference"
+            btn_run.button_type = "primary"
+
+
     
     def _on_subset_limit_change(event):
         _check_file_availability()
@@ -276,25 +345,32 @@ def build(vm):
     out_filename.param.watch(_on_filename_change, 'value')
     subset_limit.param.watch(_on_subset_limit_change, 'value')
     
+    @pn.depends(vm.obs.ensure("engine_state").param.version, watch=True)
+    def _on_engine_state_change(_):
+        """Update heading when the active recognizer changes."""
+        inference_heading.object = _build_inference_heading_text()
+        _sync_target_label_selector()
+
+    @pn.depends(vm.obs.ensure("config_state").param.version, watch=True)
+    def _on_config_state_change(_):
+        _sync_target_label_selector()
+
     # Initial check for file availability
+    _sync_target_label_selector()
     _check_file_availability()
 
     return pn.Column(
-        #pn.Row("## Inference", pn.Spacer(), inference_help_btn),
-        pn.Row("## Run Inference", pn.Spacer(), batch_inference_help_btn),
+        pn.Row(inference_heading, pn.Spacer(), batch_inference_help_btn),
         pn.pane.Markdown(
             "Run the trained classifier on the database embeddings to generate predictions. "
             "This will create a CSV file with detections above the specified threshold."
         ),
-        pn.Row(out_filename, threshold, subset, sizing_mode="stretch_width"),
-        pn.Row(labels_txt, sizing_mode="stretch_width"),
+        step1_columns,
         pn.Row(btn_run, sizing_mode="stretch_width"),
         
-        # # Dynamic sections that appear when files exist
-        # pn.Row("### 2. Create Subset (Optional)", pn.Spacer(), result_review_help_btn) if section2.objects else None,
-        # section2,
-        # pn.Row("### 3. Upload Detections", pn.Spacer(), export_results_help_btn) if section3.objects else None,
-        # section3,
-        
+        # Dynamic sections that appear when files exist
+        section2,
+        # Upload controls are retained above for future reactivation, but the
+        # upload section is intentionally disabled for now.
         sizing_mode="stretch_both",
     )
