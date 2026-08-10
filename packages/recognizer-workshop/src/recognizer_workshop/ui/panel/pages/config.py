@@ -637,6 +637,7 @@ def build(vm):
             update_engine_button()
 
         except Exception as e:
+            log.exception("Engine startup failed")
             vm.notify(_friendly_engine_error(e), "error")
 
 

@@ -1,5 +1,7 @@
 from pathlib import Path
+import io
 import random
+import tempfile
 
 import pandas as pd
 import panel as pn
@@ -23,27 +25,35 @@ def build(vm):
     result_review_help_btn = vm.help_system.create_help_button("help-result-review", "Help: Result Review")
     export_results_help_btn = vm.help_system.create_help_button("help-export-results", "Help: Export Results")
 
-    out_filename = pn.widgets.TextInput(name="Output filename", value="output.csv")
-    threshold    = pn.widgets.FloatInput(name="Threshold", value=0.0, step=0.1)
-    subset       = pn.widgets.FloatInput(
+    # --- Widgets ---
+    threshold = pn.widgets.FloatInput(name="Threshold", value=0.0, step=0.1)
+    subset = pn.widgets.FloatInput(
         name="Subset proportion (0..1)", value=0.001, start=0.001, end=1.0, step=0.001
     )
     target_label_selector = pn.widgets.CheckBoxGroup(
-        name="Labels",
-        options=[],
-        value=[],
-        inline=False,
-        sizing_mode="stretch_width",
+        name="Labels", options=[], value=[], inline=False, sizing_mode="stretch_width"
     )
     btn_run = pn.widgets.Button(
-        name="Run inference",
+        name="Run inference", button_type="primary", sizing_mode="fixed", width=180
+    )
+
+    # Results viewer and uploader widgets
+    inference_results_selector = pn.widgets.Select(name="Inference Run", options=[], sizing_mode="stretch_width")
+    subset_limit = pn.widgets.IntInput(name="Subset limit per label", value=80, start=1, step=10)
+    btn_subset = pn.widgets.FileDownload(
+        filename="inference_results_subset.csv",
+        label="Download results",
         button_type="primary",
         sizing_mode="fixed",
         width=180,
+        embed=False,
     )
+    project_id = pn.widgets.IntInput(name="Project ID (optional)", value=0, start=0)
+    btn_upload = pn.widgets.Button(name="Upload detections", button_type="success")
+
 
     step1_left_column = pn.Column(
-        pn.Row(out_filename, threshold, subset, sizing_mode="stretch_width"),
+        pn.Row(threshold, subset),
         sizing_mode="stretch_width",
         styles={"flex": "1 1 100%"},
     )
@@ -57,14 +67,6 @@ def build(vm):
         sizing_mode="stretch_width",
     )
 
-    # Subset creation controls
-    subset_limit = pn.widgets.IntInput(name="Subset limit per label", value=80, start=1, step=10)
-    btn_subset   = pn.widgets.Button(name="Create subset CSV", button_type="default")
-
-    # Upload controls
-    project_id   = pn.widgets.IntInput(name="Project ID (optional)", value=0, start=0)
-    btn_upload   = pn.widgets.Button(name="Upload detections", button_type="success")
-    
     # Sections that depend on file existence
     section2 = pn.Column()
     section3 = pn.Column()
@@ -104,31 +106,23 @@ def build(vm):
             else [step1_left_column]
         )
 
+    def _get_csv_preview(csv_path):
+        preview_limit = 1000
+        # 1. Count total rows efficiently (doesn't load the file into memory)
+        with open(csv_path) as f:
+            total_rows = sum(1 for _ in f) - 1
+        keep_indices = set(random.sample(range(1, total_rows + 1), min(preview_limit, total_rows)))
+        df_preview = pd.read_csv(csv_path, skiprows=lambda x: x > 0 and x not in keep_indices)
+        return df_preview, total_rows
+
 
     def _get_csv_info(csv_path):
         """Get information about a CSV file including row count and preview"""
         try:
-            preview_limit = 1000
-            reservoir = []
-            columns = None
-            row_count = 0
-            rng = random.Random()
+            
 
-            # Reservoir sampling keeps a uniform random sample without retaining
-            # the complete inference CSV in memory.
-            for chunk in pd.read_csv(csv_path, chunksize=10_000):
-                if columns is None:
-                    columns = list(chunk.columns)
-                for row in chunk.itertuples(index=False, name=None):
-                    row_count += 1
-                    if len(reservoir) < preview_limit:
-                        reservoir.append(row)
-                    else:
-                        replacement_index = rng.randrange(row_count)
-                        if replacement_index < preview_limit:
-                            reservoir[replacement_index] = row
-
-            df_preview = pd.DataFrame(reservoir, columns=columns)
+            df_preview, row_count = _get_csv_preview(csv_path)
+            columns = df_preview.columns.tolist()
             
             # Get unique labels if 'label' column exists
             label_info = ""
@@ -150,20 +144,17 @@ def build(vm):
         except Exception as e:
             return {'error': str(e)}
 
-    def _create_csv_display(csv_path, title):
+    def _create_csv_display(csv_path):
         """Create a display widget for CSV information"""
         info = _get_csv_info(csv_path)
         
         if 'error' in info:
-            return pn.pane.Markdown(f"**{title}**\n\nError reading file: {info['error']}")
-        
-        # Create info text
-        info_text = f"""**{title}**
+            return pn.pane.Markdown(f"Error reading file: {info['error']}")
 
-📊 **Rows:** {info['row_count']:,}  
-📋 **Columns:** {', '.join(info['columns'])}  
-_Preview: showing {len(info['preview_df']):,} randomly selected rows of {info['row_count']:,}._  
-{info['label_info']}"""
+        info_text = f"**Rows:** {info['row_count']:,}"
+        if len(info['preview_df']) < info['row_count']:
+            info_text += f" -\n_Preview: showing {len(info['preview_df']):,} randomly selected rows of {info['row_count']:,}._  \n{info['label_info']}"
+        info_text += f"\n{info['label_info']}"
         
         # Keep the preview bounded so large inference files do not overload the browser.
         _ensure_tabulator()
@@ -183,49 +174,91 @@ _Preview: showing {len(info['preview_df']):,} randomly selected rows of {info['r
             sizing_mode='stretch_width'
         )
 
-    def _check_file_availability():
-        """Check if output files exist and update section visibility"""
+    def _subset_filename_for_download(output_path: Path) -> str:
+        return f"{output_path.stem}.subset.{int(subset_limit.value)}.csv"
+
+    def _prepare_subset_download():
         if not vm.eng:
-            section2.objects = []
+            raise ValueError("Initialize first.")
+
+        selected_csv_path = inference_results_selector.value
+        if not selected_csv_path:
+            raise ValueError("Select an inference result first.")
+
+        original_csv = Path(selected_csv_path)
+        if not original_csv.exists():
+            raise FileNotFoundError("Selected inference result no longer exists.")
+
+        btn_subset.filename = _subset_filename_for_download(original_csv)
+        with tempfile.NamedTemporaryFile(suffix=".csv") as temp_file:
+            make_inference_subset(
+                inference_csv=original_csv,
+                subset_csv=temp_file.name,
+                limit=int(subset_limit.value),
+            )
+            temp_file.flush()
+            return io.BytesIO(Path(temp_file.name).read_bytes())
+
+    btn_subset.callback = _prepare_subset_download
+
+    def _refresh_inference_selector(select_newest: bool = False):
+        """Fetches inference results and populates the selector."""
+        if not vm.eng:
+            inference_results_selector.options = []
+            return
+
+        results = vm.eng.list_inference_results()
+        if not results:
+            inference_results_selector.options = []
+            inference_results_selector.value = None
+            return
+
+        # Format options for the dropdown
+        options = {item.display_name: item.csv_path for item in results}
+        inference_results_selector.options = options
+
+        if select_newest:
+            inference_results_selector.value = results[0].csv_path
+        elif not inference_results_selector.value or inference_results_selector.value not in options.values():
+            if results:
+                inference_results_selector.value = results[0].csv_path
+            else:
+                inference_results_selector.value = None
+
+    def _update_results_view(selected_csv_path: Path | str | None):
+        """Updates the results preview section based on the selected CSV."""
+        if not selected_csv_path:
+            section2.objects = [pn.pane.Markdown(
+                "_No inference result selected._"
+            )]
             section3.objects = []
             return
-            
-        output_path = (vm.eng.config.predictions_folder / out_filename.value).absolute()
-        subset_path = output_path.with_suffix(f'.{subset_limit.value}.csv')
-        
-        # Section 2: Show if main inference file exists
-        if output_path.exists():
-            section2_content = [
-                "### 2. Create Subset (Optional)",
-                pn.pane.Markdown(
-                    "Create a smaller subset of the inference results for verification. "
-                    "This uses smart sampling to select representative examples for each label."
-                ),
-                pn.Row(subset_limit, btn_subset, sizing_mode="stretch_width"),
-                _create_csv_display(output_path, "📊 Inference Results")
-            ]
-            
-            # Add subset file info if it exists
-            if subset_path.exists():
-                section2_content.append(_create_csv_display(subset_path, "📋 Subset Results"))
-            
-            section2.objects = section2_content
-            
-            # Section 3: Show if either file exists
-            if output_path.exists() or subset_path.exists():
-                section3.objects = [
-                    "### 3. Upload Detections",
-                    pn.pane.Markdown(
-                        "Upload the detection results to Ecosounds for verification. "
-                        "If a subset CSV exists, it will be uploaded; otherwise the full inference CSV will be used."
-                    ),
-                    pn.Row(project_id, btn_upload, sizing_mode="stretch_width"),
-                ]
-            else:
-                section3.objects = []
-        else:
-            section2.objects = []
-            section3.objects = []
+
+        csv_path = Path(selected_csv_path)
+        subset_path = csv_path.with_suffix(f'.{subset_limit.value}.csv')
+
+        section2_content = [
+            _create_csv_display(csv_path)
+        ]
+
+        section2_content.append(
+            pn.Row(subset_limit, btn_subset, sizing_mode="stretch_width")
+        )
+
+        if subset_path.exists():
+            section2_content.append(_create_csv_display(subset_path))
+
+        section2.objects = section2_content
+
+        # Section 3: Upload Detections
+        section3.objects = [
+            pn.Row("### 3. Upload Detections", pn.Spacer(), export_results_help_btn, sizing_mode="stretch_width"),
+            pn.pane.Markdown(
+                "Upload the detection results to Ecosounds for verification. "
+                "If a subset CSV exists for the selected run, it will be uploaded; otherwise the full inference CSV will be used."
+            ),
+            pn.Row(project_id, btn_upload, sizing_mode="stretch_width"),
+        ]
 
     def _run(_):
         if not vm.eng: return vm.notify("Initialize first.", "error")
@@ -233,26 +266,11 @@ _Preview: showing {len(info['preview_df']):,} randomly selected rows of {info['r
             return vm.notify("No classifier available. Train a classifier first.", "error")
         
         try:
-            out = (vm.eng.config.predictions_folder / out_filename.value).absolute()
-            
-            # Check if file exists and ask for confirmation
-            if out.exists() and btn_run.name != "Confirm Overwrite":
-                vm.notify(f"File '{out.name}' already exists. Click again to overwrite.", "warn")
-                btn_run.name = "Confirm Overwrite"
-                btn_run.button_type = "danger"
-                return
-            
-            # Reset button state after confirmation
-            btn_run.name = "Run inference"
-            btn_run.button_type = "primary"
-            
-            out.parent.mkdir(parents=True, exist_ok=True)
             labels_arg = list(target_label_selector.value) or None
             
             vm.notify("Running inference... this may take a while.", "info")
             
-            vm.eng.run_inference(
-                output_filepath=out,
+            out = vm.eng.run_inference(
                 threshold=float(threshold.value),
                 labels=labels_arg,
                 dataset=vm.eng.config.search_dataset_name,
@@ -260,48 +278,23 @@ _Preview: showing {len(info['preview_df']):,} randomly selected rows of {info['r
                 exclude_labeled=True,
             )
             vm.notify(f"Inference complete! Saved to: {out}", "success")
-            
-            # Update section visibility
-            _check_file_availability()
+
+            # Refresh the selector, which will show the new result
+            _refresh_inference_selector(select_newest=True)
             
         except Exception as e:
             vm.notify(f"Inference failed: {e}", "error")
-
-    def _create_subset(_):
-        if not vm.eng: return vm.notify("Initialize first.", "error")
-        
-        try:
-            original_csv = (vm.eng.config.predictions_folder / out_filename.value).absolute()
-            if not original_csv.exists():
-                return vm.notify("Run inference first to create the CSV file.", "error")
-            
-            subset_csv = original_csv.with_suffix(f'.{subset_limit.value}.csv')
-            
-            vm.notify(f"Creating subset with {subset_limit.value} examples per label...", "info")
-            
-            make_inference_subset(
-                inference_csv=original_csv,
-                subset_csv=subset_csv,
-                limit=subset_limit.value
-            )
-            vm.notify("Subset created.", "success")
-            
-            # Update section visibility
-            _check_file_availability()
-            
-        except Exception as e:
-            log.error(f"❌ **Error creating subset:**\n```\n{e}\n```")
-            vm.notify(f"Subset creation failed: {e}", "error")
 
     def _upload(_):
         if not vm.eng: return vm.notify("Initialize first.", "error")
         
         try:
-            # Check if we should upload the subset or the full file
-            original_csv = (vm.eng.config.predictions_folder / out_filename.value).absolute()
+            original_csv_path = inference_results_selector.value
+            if not original_csv_path or not Path(original_csv_path).exists():
+                return vm.notify("No inference result selected to upload.", "error")
+
+            original_csv = Path(original_csv_path)
             subset_csv = original_csv.with_suffix(f'.{subset_limit.value}.csv')
-            
-            # If subset exists, upload that; otherwise upload the original
             upload_file = subset_csv if subset_csv.exists() else original_csv
             
             if not upload_file.exists():
@@ -326,38 +319,29 @@ _Preview: showing {len(info['preview_df']):,} randomly selected rows of {info['r
 
     # Set up event handlers
     btn_run.on_click(_run)
-    btn_subset.on_click(_create_subset)
     btn_upload.on_click(_upload)
     
-    # Watch for changes in filename to update section visibility
-    def _on_filename_change(event):
-        _check_file_availability()
-        # Reset overwrite confirmation button if filename changes
-        if btn_run.name == "Confirm Overwrite":
-            btn_run.name = "Run inference"
-            btn_run.button_type = "primary"
+    # Watch for changes in selection to update the preview
+    @pn.depends(inference_results_selector.param.value, watch=True)
+    def _on_result_selection_change(selected_path):
+        _update_results_view(selected_path)
 
-
-    
-    def _on_subset_limit_change(event):
-        _check_file_availability()
-    
-    out_filename.param.watch(_on_filename_change, 'value')
-    subset_limit.param.watch(_on_subset_limit_change, 'value')
-    
     @pn.depends(vm.obs.ensure("engine_state").param.version, watch=True)
     def _on_engine_state_change(_):
         """Update heading when the active recognizer changes."""
         inference_heading.object = _build_inference_heading_text()
         _sync_target_label_selector()
+        _refresh_inference_selector()
 
     @pn.depends(vm.obs.ensure("config_state").param.version, watch=True)
     def _on_config_state_change(_):
         _sync_target_label_selector()
+        _refresh_inference_selector()
 
     # Initial check for file availability
     _sync_target_label_selector()
-    _check_file_availability()
+    _refresh_inference_selector()
+    _update_results_view(inference_results_selector.value)
 
     return pn.Column(
         pn.Row(inference_heading, pn.Spacer(), batch_inference_help_btn),
@@ -368,9 +352,17 @@ _Preview: showing {len(info['preview_df']):,} randomly selected rows of {info['r
         step1_columns,
         pn.Row(btn_run, sizing_mode="stretch_width"),
         
-        # Dynamic sections that appear when files exist
+        pn.layout.Divider(),
+        pn.Row(
+            pn.pane.Markdown("Preview and download results for:", width=220, margin=(8, 0, 0, 0)),
+            inference_results_selector,
+            pn.Spacer(),
+            result_review_help_btn,
+            sizing_mode="stretch_width",
+        ),
+
         section2,
-        # Upload controls are retained above for future reactivation, but the
-        # upload section is intentionally disabled for now.
+        # Upload controls are retained above for future reactivation, but are
+        # intentionally not rendered yet.
         sizing_mode="stretch_both",
     )
