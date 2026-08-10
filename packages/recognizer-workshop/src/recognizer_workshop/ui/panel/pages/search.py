@@ -22,7 +22,7 @@ def build(vm):
 
     # text field to input the query (XC id or URL) and a button to load it
     uri = pn.widgets.TextInput(name="Query (XC id / URL )", placeholder="e.g. XC979796 or https://...")
-    btn_load_uri = pn.widgets.Button(name="Load the remote query", button_type="primary", sizing_mode="fixed")
+    btn_load_uri = pn.widgets.Button(name="Load the remote query", button_type="primary")
 
     # file input widget to upload and save local audio file
     file_input = pn.widgets.FileInput(accept="audio/*", multiple=False)

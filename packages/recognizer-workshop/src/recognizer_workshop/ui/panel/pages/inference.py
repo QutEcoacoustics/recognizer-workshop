@@ -34,18 +34,20 @@ def build(vm):
         name="Labels", options=[], value=[], inline=False, sizing_mode="stretch_width"
     )
     btn_run = pn.widgets.Button(
-        name="Run inference", button_type="primary", sizing_mode="fixed", width=180
+        name="Run inference", button_type="primary", sizing_mode="fixed", width=180, height=40
     )
 
     # Results viewer and uploader widgets
     inference_results_selector = pn.widgets.Select(name="Inference Run", options=[], sizing_mode="stretch_width")
-    subset_limit = pn.widgets.IntInput(name="Subset limit per label", value=80, start=1, step=10)
+    download_subset = pn.widgets.Checkbox(name="Download subset", value=False)
+    subset_limit = pn.widgets.IntInput(name="Subset limit per label", value=80, start=1, step=10, visible=False)
     btn_subset = pn.widgets.FileDownload(
         filename="inference_results_subset.csv",
         label="Download results",
         button_type="primary",
         sizing_mode="fixed",
         width=180,
+        height=40,
         embed=False,
     )
     project_id = pn.widgets.IntInput(name="Project ID (optional)", value=0, start=0)
@@ -153,7 +155,7 @@ def build(vm):
 
         info_text = f"**Rows:** {info['row_count']:,}"
         if len(info['preview_df']) < info['row_count']:
-            info_text += f" -\n_Preview: showing {len(info['preview_df']):,} randomly selected rows of {info['row_count']:,}._  \n{info['label_info']}"
+            info_text += f" -\n_Preview: showing {len(info['preview_df']):,} randomly selected rows of {info['row_count']:,}._"
         info_text += f"\n{info['label_info']}"
         
         # Keep the preview bounded so large inference files do not overload the browser.
@@ -188,6 +190,10 @@ def build(vm):
         original_csv = Path(selected_csv_path)
         if not original_csv.exists():
             raise FileNotFoundError("Selected inference result no longer exists.")
+
+        if not download_subset.value:
+            btn_subset.filename = original_csv.name
+            return io.BytesIO(original_csv.read_bytes())
 
         btn_subset.filename = _subset_filename_for_download(original_csv)
         with tempfile.NamedTemporaryFile(suffix=".csv") as temp_file:
@@ -242,8 +248,10 @@ def build(vm):
         ]
 
         section2_content.append(
-            pn.Row(subset_limit, btn_subset, sizing_mode="stretch_width")
+            pn.Row(download_subset, subset_limit, btn_subset, sizing_mode="stretch_width")
         )
+
+        subset_limit.visible = download_subset.value
 
         if subset_path.exists():
             section2_content.append(_create_csv_display(subset_path))
@@ -326,6 +334,11 @@ def build(vm):
     def _on_result_selection_change(selected_path):
         _update_results_view(selected_path)
 
+    def _on_download_subset_change(event):
+        subset_limit.visible = event.new
+
+    download_subset.param.watch(_on_download_subset_change, "value")
+
     @pn.depends(vm.obs.ensure("engine_state").param.version, watch=True)
     def _on_engine_state_change(_):
         """Update heading when the active recognizer changes."""
@@ -356,7 +369,6 @@ def build(vm):
         pn.Row(
             pn.pane.Markdown("Preview and download results for:", width=220, margin=(8, 0, 0, 0)),
             inference_results_selector,
-            pn.Spacer(),
             result_review_help_btn,
             sizing_mode="stretch_width",
         ),
