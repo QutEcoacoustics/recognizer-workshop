@@ -29,6 +29,7 @@ from recognizer_workshop.app.services.db_labels.add_db_labels import add_labels_
 from recognizer_workshop.app.services.db_labels.db_labels_info import get_label_counts
 from recognizer_workshop.app.services.db_labels.dataclasses import LabelName
 from recognizer_workshop.app.services import training as training_service
+from recognizer_workshop.app.inference.inference_result import InferenceResultIndex, InferenceResultItem
 from recognizer_workshop.app.services.training_result_index import SavedTrainingResultsIndex, load_training_result_from_classifier_entry
 from recognizer_workshop.app.create_database.repair_index import repair_index
 from recognizer_workshop.app.services.database_status import (
@@ -1139,26 +1140,59 @@ class agile_state:
         self._load_active_classifier_training_result()
 
 
-    def run_inference(self, output_filepath=None, threshold=0.0, labels=None, dataset=None, subset=1, exclude_labeled=False):
+    def run_inference(self, threshold=0.0, labels=None, dataset=None, subset=1, exclude_labeled=False) -> Path:
         """
-        Calls the classifier.write_inference_csv() function to write the inference results to a csv file
-        injecting the site_id and link columns via a row_func that uses baw_utils and 
-        """
+        Runs inference and saves the results to a versioned folder.
 
+        This creates a directory named after the recognizer in the predictions folder,
+        and inside it, saves `<recognizer_name>.csv` and `<recognizer_name>.metadata.json`.
+
+        Returns:
+            The path to the created CSV file.
+        """
+        from datetime import datetime as _dt
         classifier = self.get_trained_classifier()
-        if output_filepath is None:
-            output_filepath = Path(self.config.predictions_folder) / 'inference.csv'
-        Path(output_filepath).parent.mkdir(parents=True, exist_ok=True)
-        # not self.run_inference
+        active_entry = self.saved_training_results_index.get_active_classifier_entry()
+
+        if not active_entry:
+            raise ValueError("Cannot run inference without an active saved recognizer.")
+
+        base_name = active_entry.classifier_name
+        classifier_labels = [str(label) for label in classifier.classes]
+        if labels is None:
+            included_labels = classifier_labels
+        else:
+            requested_labels = {str(label) for label in labels}
+            included_labels = [label for label in classifier_labels if label in requested_labels]
+
+        output_dir = Path(self.config.predictions_folder) / base_name
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        output_csv_path = output_dir / f"{base_name}.csv"
+        output_metadata_path = output_dir / f"{base_name}.metadata.json"
+
+        # Save metadata alongside the CSV
+        metadata = {
+            "recognizer-name": active_entry.classifier_name,
+            "recognizer-date": active_entry.display_name,
+            "inference-date": _dt.now().isoformat(),
+            "threshold": threshold,
+            "subset-proportion": subset,
+            "included-labels": included_labels,
+        }
+        with output_metadata_path.open('w', encoding='utf-8') as f:
+            json.dump(metadata, f, indent=2)
+
         inference_service_run_inference(classifier,
                         self.db,
-                        output_filepath,
+                        output_csv_path,
                         self.active_client,
                         threshold=threshold,
                         labels=labels,
                         subset=subset,
                         exclude_labeled=exclude_labeled)
-        log.info(f'Inference results written to {output_filepath}')
+        log.info(f'Inference results written to {output_csv_path}')
+        return output_csv_path
     
 
     
@@ -1180,6 +1214,11 @@ class agile_state:
                           project_id=project_id, limit=limit, baw_api=self.active_client)
         return success_status, link
         
+
+    def list_inference_results(self) -> list[InferenceResultItem]:
+        """Return a sorted list of all found inference results."""
+        index = InferenceResultIndex(self.config.predictions_folder)
+        return index.scan_results()
 
     def set_active_client_by_domain(self, domain):
         """
@@ -1325,12 +1364,3 @@ class agile_state:
 
         return '; '.join(descriptions)
     
-
-
-
-
-
-
-
-
-

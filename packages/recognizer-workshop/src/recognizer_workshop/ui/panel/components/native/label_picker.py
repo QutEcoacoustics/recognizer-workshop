@@ -17,7 +17,7 @@ def build_active_label_picker(vm) -> pn.Row:
         value=None,        # LabelName or None
         disabled=True,
         sizing_mode="stretch_width",
-        width=280,
+        min_width=280,
     )
     
     def _rebuild():

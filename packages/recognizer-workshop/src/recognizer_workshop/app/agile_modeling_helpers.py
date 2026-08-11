@@ -228,7 +228,7 @@ def make_inference_subset(inference_csv, subset_csv, limit=100):
         # subset of the dataframe with that label
         label_df = df[df['label'] == label]
         sampled_indices, _, _, _ = sample_for_verification.sample_for_validation(
-            label_df['logits'].values,
+            label_df['score'].values,
             pos_target_y=0.05,
             neg_target_y=0.05,
             sample_size=limit
