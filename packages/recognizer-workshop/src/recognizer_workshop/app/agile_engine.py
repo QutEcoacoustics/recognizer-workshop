@@ -1,4 +1,5 @@
 import json
+import copy
 import functools
 from pathlib import Path
 import numpy as np
@@ -25,7 +26,7 @@ from recognizer_workshop.app.agile_config import AgileConfig
 from recognizer_workshop.app.app_settings import app_settings  # noqa: F401 — triggers baw_settings override
 from recognizer_workshop.app.services.events.upload_detections import upload_detections
 from recognizer_workshop.app.services.db_labels.fetch_baw_labels import labels_from_event_taggings
-from recognizer_workshop.app.services.db_labels.add_db_labels import add_labels_to_db
+from recognizer_workshop.app.services.db_labels.add_db_labels import add_labels_to_db, cap_fetched_label_examples
 from recognizer_workshop.app.services.db_labels.db_labels_info import get_label_counts
 from recognizer_workshop.app.services.db_labels.dataclasses import LabelName
 from recognizer_workshop.app.services import training as training_service
@@ -44,7 +45,6 @@ from recognizer_workshop.app.services.embed import embed_worker
 from concurrent.futures import ProcessPoolExecutor
 
 log = logging.getLogger(__name__)
-
 
 def sanitize_classifier_name(name: str) -> str:
     """Return a filesystem-safe, lowercase classifier name.
@@ -906,7 +906,12 @@ class agile_state:
             if not self.has_fetched_labels_ready:
                 raise ValueError("No fetched labels are ready to commit.")
 
-            outcomes = self.commit_labels(self.fetched_label_result_sets, progress_callback=progress_callback)
+            max_examples = app_settings.max_fetched_label_examples_per_type
+            if isinstance(max_examples, int) and not isinstance(max_examples, bool) and max_examples > 0:
+                capped_result_sets = cap_fetched_label_examples(self.fetched_label_result_sets, max_examples)
+            else:
+                capped_result_sets = self.fetched_label_result_sets
+            outcomes = self.commit_labels(capped_result_sets, progress_callback=progress_callback)
             self.fetched_label_outcomes = outcomes
 
             added_count = sum(

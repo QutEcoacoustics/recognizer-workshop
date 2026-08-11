@@ -3,6 +3,7 @@ import threading
 import pandas as pd
 import panel as pn
 
+from recognizer_workshop.app.app_settings import app_settings
 from recognizer_workshop.app.services.baw_filters import format_filter_params_for_display
 from recognizer_workshop.ui.panel.components.native.filter_editor import FilterEditor
 
@@ -23,6 +24,8 @@ def build(vm):
     details_placeholder = pn.pane.Markdown("_No outcome details yet._")
 
     summary_container = pn.Column(summary_placeholder, sizing_mode="stretch_width")
+    cap_note = pn.pane.Markdown("", visible=False)
+    summary_actions = pn.Column(btn_add, cap_note, sizing_mode="stretch_width")
     outcomes_container = pn.Column(outcomes_placeholder, sizing_mode="stretch_width")
     details_title = pn.pane.Markdown("")
     details_container = pn.Column(details_title, details_placeholder, sizing_mode="stretch_width")
@@ -55,6 +58,22 @@ def build(vm):
         )
         btn_fetch.disabled = is_busy
         btn_add.disabled = is_busy or not _has_ready_labels()
+
+    def _sync_cap_note():
+        max_examples = app_settings.max_fetched_label_examples_per_type
+        needs_cap = False
+        if vm.eng and isinstance(max_examples, int) and not isinstance(max_examples, bool) and max_examples > 0:
+            needs_cap = any(
+                count > max_examples
+                for result_set in (vm.eng.fetched_label_result_sets or [])
+                for label_counts in result_set.get("counts", {}).values()
+                for count in label_counts.values()
+            )
+        cap_note.object = (
+            f"_Note: only a maximum of {max_examples} will be added per label._"
+            if needs_cap else ""
+        )
+        cap_note.visible = needs_cap
 
     engine_warning = pn.pane.Alert(
         "Initialize the engine on the 'Config' tab to set up filters.",
@@ -114,7 +133,7 @@ def build(vm):
             show_index=False,
             disabled=True,
         )
-        summary_container.objects = [summary_table]
+        summary_container.objects = [summary_actions, summary_table]
         outcomes_container.objects = [outcomes_table]
         details_container.objects = [details_title, details_table]
 
@@ -331,6 +350,7 @@ def build(vm):
                     total_labels = vm.eng.fetched_labels_count if vm.eng else 0
                     _sync_status_from_engine()
                     _sync_add_button_state()
+                    _sync_cap_note()
                     if total_labels > 0:
                         vm.notify("Fetch successful. Ready to add to DB.", "success")
                     else:
@@ -345,6 +365,7 @@ def build(vm):
                     _ensure_tables()
                     summary_table.value = pd.DataFrame()
                     _sync_add_button_state()
+                    _sync_cap_note()
                     vm.notify(f"Fetch failed: {error_message}", "error")
 
                 _schedule(_apply_error)
@@ -439,12 +460,14 @@ def build(vm):
     _update_filter_section()
     _sync_status_from_engine()
     _sync_add_button_state()
+    _sync_cap_note()
 
     @pn.depends(vm.obs.ensure("engine_state").param.version, watch=True)
     def _on_engine_state_change(_):
         _update_filter_section()
         _sync_status_from_engine()
         _sync_add_button_state()
+        _sync_cap_note()
 
     return pn.Column(
         pn.Row("## Labelled examples", pn.Spacer(), labeled_examples_help_btn),
@@ -463,7 +486,6 @@ def build(vm):
             pn.Column(
                 pn.pane.Markdown("### Actions"),
                 btn_fetch,
-                btn_add,
                 sizing_mode="stretch_width",
             ),
             sizing_mode="stretch_width",

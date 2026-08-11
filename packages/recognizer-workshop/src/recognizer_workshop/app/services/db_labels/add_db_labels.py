@@ -17,6 +17,8 @@ from recognizer_workshop.app.agile_modeling_helpers import get_embeddings_by_sou
 from recognizer_workshop.app.create_database.create_database import add_parquet_to_db
 from recognizer_workshop.app.services.baw_insertions import record_embeddings_added
 
+import random
+
 log = logging.getLogger(__name__)
 
 
@@ -266,6 +268,44 @@ def add_labels_to_db(db, config, items, api_client=None, filter_dict=None, progr
 
 
 
+def cap_fetched_label_examples(result_sets: list[dict] | None, max_examples: int) -> list[dict] | None:
+    """Randomly cap fetched examples per label/type across all result sets."""
+
+    if result_sets is None:
+        return None
+
+    if max_examples < 1:
+        raise ValueError("max_examples must be at least 1.")
+
+    candidates: dict[tuple[str, str], set[tuple[str, object]]] = {}
+    for result_set in result_sets:
+        for source_id, labels_data in result_set.get("labels", {}).items():
+            for label_name, type_data in labels_data.items():
+                for label_type in ("pos", "neg"):
+                    key = (str(label_name), label_type)
+                    examples = candidates.setdefault(key, set())
+                    examples.update((str(source_id), offset) for offset in type_data.get(label_type, []))
+
+    selected: dict[tuple[str, str], set[tuple[str, object]]] = {}
+    for key, examples in candidates.items():
+        examples_list = list(examples)
+        selected[key] = set(
+            random.sample(examples_list, min(max_examples, len(examples_list)))
+        )
+
+    capped_result_sets = copy.deepcopy(result_sets)
+    for result_set in capped_result_sets:
+        for source_id, labels_data in result_set.get("labels", {}).items():
+            for label_name, type_data in labels_data.items():
+                for label_type in ("pos", "neg"):
+                    key = (str(label_name), label_type)
+                    allowed = selected.get(key, set())
+                    type_data[label_type] = [
+                        offset for offset in type_data.get(label_type, [])
+                        if (str(source_id), offset) in allowed
+                    ]
+
+    return capped_result_sets
 
 
 
