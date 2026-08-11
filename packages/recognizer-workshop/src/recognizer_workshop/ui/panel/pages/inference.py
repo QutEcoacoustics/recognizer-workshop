@@ -1,7 +1,5 @@
 from pathlib import Path
-import csv
 import io
-import random
 import tempfile
 
 import pandas as pd
@@ -52,7 +50,6 @@ def build(vm):
     )
     project_id = pn.widgets.IntInput(name="Project ID (optional)", value=0, start=0)
     btn_upload = pn.widgets.Button(name="Upload detections", button_type="success")
-
 
     step1_left_column = pn.Column(
         pn.Row(threshold, subset),
@@ -228,7 +225,7 @@ def build(vm):
 
         # Section 3: Upload Detections
         section3.objects = [
-            pn.Row("### 3. Upload Detections", pn.Spacer(), export_results_help_btn, sizing_mode="stretch_width"),
+            "### 3. Upload Detections",
             pn.pane.Markdown(
                 "Upload the detection results to Ecosounds for verification. "
                 "If a subset CSV exists for the selected run, it will be uploaded; otherwise the full inference CSV will be used."
@@ -327,7 +324,7 @@ def build(vm):
     _update_results_view(inference_results_selector.value)
 
     return pn.Column(
-        pn.Row(inference_heading, pn.Spacer(), inference_help_btn, batch_inference_help_btn),
+        pn.Row(inference_heading, pn.Spacer(), inference_help_btn),
         pn.pane.Markdown(
             "Run the trained classifier on the database embeddings to generate predictions. "
             "This will create a CSV file with detections above the specified threshold."
@@ -339,7 +336,6 @@ def build(vm):
         pn.Row(
             pn.pane.Markdown("Preview and download results for:", width=220, margin=(8, 0, 0, 0)),
             inference_results_selector,
-            result_review_help_btn,
             sizing_mode="stretch_width",
         ),
 
