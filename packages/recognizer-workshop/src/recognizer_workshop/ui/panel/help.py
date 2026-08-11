@@ -13,61 +13,9 @@ class HelpSystem(pn.custom.JSComponent):
     sidebar_bump = param.Integer(default=0, doc="Bump to trigger sidebar open/close.")
         
 
-    _esm = """
-    export function render({ model }) {
-        console.log('HelpSystem JSComponent initialized');
-        model.on('sidebar_bump', () => {
-            // Always open the sidebar when bumped
-            openNav();
-        });
-
-        model.on('scroll_to', () => {
-            console.log('scroll_to changed to:', model.scroll_to);
-            if (model.scroll_to) {
-                // Wait a bit for the sidebar to finish opening
-                setTimeout(() => {
-                    // First try normal document
-                    let element = document.getElementById(model.scroll_to);
-                    console.log('Found in main document:', element);
-                    
-                    // If not found, look in shadow roots
-                    if (!element) {
-                        console.log('Looking in shadow roots...');
-                        const htmlElements = document.querySelectorAll('.bk-panel-models-markup-HTML');
-                        
-                        for (const htmlEl of htmlElements) {
-                            if (htmlEl.shadowRoot) {
-                                console.log('Checking shadow root:', htmlEl.shadowRoot);
-                                element = htmlEl.shadowRoot.getElementById(model.scroll_to);
-                                if (element) {
-                                    console.log('Found in shadow root:', element);
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    
-                    if (element) {
-                        element.scrollIntoView({ 
-                            behavior: 'smooth', 
-                            block: 'start',
-                            inline: 'nearest'
-                        });
-                        
-                        // Optional: highlight the section briefly
-                        element.style.transition = 'background-color 0.5s';
-                        element.style.backgroundColor = '#fff3cd';
-                        setTimeout(() => { 
-                            element.style.backgroundColor = ''; 
-                        }, 2000);
-                    } else {
-                        console.log('Element not found anywhere with ID:', model.scroll_to);
-                    }
-                }, 300);
-            }
-        });
-    }
-    """
+    _esm = (Path(__file__).parent / "assets" / "js" / "help_system.js").read_text(
+        encoding="utf-8"
+    )
 
     
     def __init__(self, **params):

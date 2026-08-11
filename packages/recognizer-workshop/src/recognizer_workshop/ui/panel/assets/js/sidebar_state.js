@@ -38,9 +38,13 @@
 
     function restoreState() {
         var saved = localStorage.getItem(KEY);
-        if (saved === null) { reveal(); return; }
         var state = currentState();
         if (state === null) { setTimeout(restoreState, 200); return; }
+        if (saved === null) {
+            if (state === 'open') document.getElementById('sidebar-button').click();
+            reveal();
+            return;
+        }
         if (saved === '1' && state === 'closed') document.getElementById('sidebar-button').click();
         if (saved === '0' && state === 'open')   document.getElementById('sidebar-button').click();
         reveal();
