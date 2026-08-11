@@ -1,4 +1,5 @@
 from pathlib import Path
+import csv
 import io
 import random
 import tempfile
@@ -9,6 +10,8 @@ import panel as pn
 from recognizer_workshop.app.agile_modeling_helpers import make_inference_subset
 
 import logging
+
+from recognizer_workshop.app.inference.inference_result import InferenceResultItem
 
 log = logging.getLogger(__name__)
 
@@ -21,14 +24,11 @@ def build(vm):
 
     # Create help buttons
     inference_help_btn = vm.help_system.create_help_button("help-inference-overview", "Help: Inference")
-    batch_inference_help_btn = vm.help_system.create_help_button("help-batch-inference", "Help: Batch Processing")
-    result_review_help_btn = vm.help_system.create_help_button("help-result-review", "Help: Result Review")
-    export_results_help_btn = vm.help_system.create_help_button("help-export-results", "Help: Export Results")
 
     # --- Widgets ---
     threshold = pn.widgets.FloatInput(name="Threshold", value=0.0, step=0.1)
     subset = pn.widgets.FloatInput(
-        name="Subset proportion (0..1)", value=0.001, start=0.001, end=1.0, step=0.001
+        name="Subset proportion (0..1)", value=0.001, start=0.001, end=1.0, step=0.05
     )
     target_label_selector = pn.widgets.CheckBoxGroup(
         name="Labels", options=[], value=[], inline=False, sizing_mode="stretch_width"
@@ -108,55 +108,25 @@ def build(vm):
             else [step1_left_column]
         )
 
-    def _get_csv_preview(csv_path):
-        preview_limit = 1000
-        # 1. Count total rows efficiently (doesn't load the file into memory)
-        with open(csv_path) as f:
-            total_rows = sum(1 for _ in f) - 1
-        keep_indices = set(random.sample(range(1, total_rows + 1), min(preview_limit, total_rows)))
-        df_preview = pd.read_csv(csv_path, skiprows=lambda x: x > 0 and x not in keep_indices)
-        return df_preview, total_rows
 
-
-    def _get_csv_info(csv_path):
-        """Get information about a CSV file including row count and preview"""
-        try:
-            
-
-            df_preview, row_count = _get_csv_preview(csv_path)
-            columns = df_preview.columns.tolist()
-            
-            # Get unique labels if 'label' column exists
-            label_info = ""
-            if 'label' in df_preview.columns:
-                # For large files, we'll estimate label counts from the preview
-                if row_count > 1000:
-                    unique_labels = df_preview['label'].unique()
-                    label_info = f"**Labels in preview:** {', '.join(unique_labels)} (may not include all labels in full file)"
-                else:
-                    label_counts = df_preview['label'].value_counts()
-                    label_info = "**Label counts:** " + ", ".join([f"{label}: {count}" for label, count in label_counts.items()])
-            
-            return {
-                'row_count': row_count,
-                'columns': columns or [],
-                'preview_df': df_preview,
-                'label_info': label_info
-            }
-        except Exception as e:
-            return {'error': str(e)}
-
-    def _create_csv_display(csv_path):
+    def _create_csv_display(inference_result_item: InferenceResultItem):
         """Create a display widget for CSV information"""
-        info = _get_csv_info(csv_path)
+        info = inference_result_item.get_info()
         
         if 'error' in info:
             return pn.pane.Markdown(f"Error reading file: {info['error']}")
 
-        info_text = f"**Rows:** {info['row_count']:,}"
-        if len(info['preview_df']) < info['row_count']:
-            info_text += f" -\n_Preview: showing {len(info['preview_df']):,} randomly selected rows of {info['row_count']:,}._"
-        info_text += f"\n{info['label_info']}"
+        preview_row_count = len(info['preview_df'])
+
+        info_text = f"**Rows:** {info['total_row_count']:,} "
+        if preview_row_count < info['total_row_count']:
+            info_text += f" -\n_Preview: showing {preview_row_count:,} randomly selected rows of {info['total_row_count']:,}._"
+            if len(info['unique_labels']) > 0:
+                labels = ", ".join(map(str, info['unique_labels']))
+                info_text += f"\n**Labels in preview:** {labels} (may not include all labels in full file)"
+        elif 'label' in info['preview_df'].columns:
+            label_counts = info['preview_df']['label'].value_counts()
+            info_text += "**Label counts:** " + ", ".join([f"{label}: {count}" for label, count in label_counts.items()])
         
         # Keep the preview bounded so large inference files do not overload the browser.
         _ensure_tabulator()
@@ -176,34 +146,38 @@ def build(vm):
             sizing_mode='stretch_width'
         )
 
-    def _subset_filename_for_download(output_path: Path) -> str:
-        return f"{output_path.stem}.subset.{int(subset_limit.value)}.csv"
+    def _subset_filename_for_download(output_path: Path, total_rows: int) -> str:
+        limit = int(subset_limit.value)
+        if limit >= total_rows:
+            return output_path.name
+        return f"{output_path.stem}.subset.{limit}.csv"
 
     def _prepare_subset_download():
         if not vm.eng:
             raise ValueError("Initialize first.")
 
-        selected_csv_path = inference_results_selector.value
-        if not selected_csv_path:
+        selected_item = inference_results_selector.value
+        if not selected_item:
             raise ValueError("Select an inference result first.")
 
-        original_csv = Path(selected_csv_path)
+        original_csv = selected_item.csv_path
         if not original_csv.exists():
             raise FileNotFoundError("Selected inference result no longer exists.")
 
-        if not download_subset.value:
+        total_rows = selected_item.get_num_rows()
+        if not download_subset.value or int(subset_limit.value) >= total_rows:
             btn_subset.filename = original_csv.name
             return io.BytesIO(original_csv.read_bytes())
 
-        btn_subset.filename = _subset_filename_for_download(original_csv)
-        with tempfile.NamedTemporaryFile(suffix=".csv") as temp_file:
+        btn_subset.filename = _subset_filename_for_download(original_csv, total_rows)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir) / "subset.csv"
             make_inference_subset(
                 inference_csv=original_csv,
-                subset_csv=temp_file.name,
+                subset_csv=temp_path,
                 limit=int(subset_limit.value),
             )
-            temp_file.flush()
-            return io.BytesIO(Path(temp_file.name).read_bytes())
+            return io.BytesIO(temp_path.read_bytes())
 
     btn_subset.callback = _prepare_subset_download
 
@@ -220,31 +194,28 @@ def build(vm):
             return
 
         # Format options for the dropdown
-        options = {item.display_name: item.csv_path for item in results}
+        options = {item.display_name: item for item in results}
         inference_results_selector.options = options
 
         if select_newest:
-            inference_results_selector.value = results[0].csv_path
+            inference_results_selector.value = results[0]
         elif not inference_results_selector.value or inference_results_selector.value not in options.values():
             if results:
-                inference_results_selector.value = results[0].csv_path
+                inference_results_selector.value = results[0]
             else:
                 inference_results_selector.value = None
 
-    def _update_results_view(selected_csv_path: Path | str | None):
+    def _update_results_view(selected_inference_results_item: InferenceResultItem | None):
         """Updates the results preview section based on the selected CSV."""
-        if not selected_csv_path:
+        if not selected_inference_results_item:
             section2.objects = [pn.pane.Markdown(
                 "_No inference result selected._"
             )]
             section3.objects = []
             return
 
-        csv_path = Path(selected_csv_path)
-        subset_path = csv_path.with_suffix(f'.{subset_limit.value}.csv')
-
         section2_content = [
-            _create_csv_display(csv_path)
+            _create_csv_display(selected_inference_results_item)
         ]
 
         section2_content.append(
@@ -252,9 +223,6 @@ def build(vm):
         )
 
         subset_limit.visible = download_subset.value
-
-        if subset_path.exists():
-            section2_content.append(_create_csv_display(subset_path))
 
         section2.objects = section2_content
 
@@ -291,17 +259,18 @@ def build(vm):
             _refresh_inference_selector(select_newest=True)
             
         except Exception as e:
+            log.exception("Inference run failed")
             vm.notify(f"Inference failed: {e}", "error")
 
     def _upload(_):
         if not vm.eng: return vm.notify("Initialize first.", "error")
         
         try:
-            original_csv_path = inference_results_selector.value
-            if not original_csv_path or not Path(original_csv_path).exists():
+            selected_item = inference_results_selector.value
+            if not selected_item or not selected_item.csv_path.exists():
                 return vm.notify("No inference result selected to upload.", "error")
 
-            original_csv = Path(original_csv_path)
+            original_csv = selected_item.csv_path
             subset_csv = original_csv.with_suffix(f'.{subset_limit.value}.csv')
             upload_file = subset_csv if subset_csv.exists() else original_csv
             
@@ -323,6 +292,7 @@ def build(vm):
                 vm.notify("Upload failed. Check logs for details.", "error")
             
         except Exception as e:
+            log.exception("Inference upload failed")
             vm.notify(f"Upload failed: {e}", "error")
 
     # Set up event handlers
@@ -357,7 +327,7 @@ def build(vm):
     _update_results_view(inference_results_selector.value)
 
     return pn.Column(
-        pn.Row(inference_heading, pn.Spacer(), batch_inference_help_btn),
+        pn.Row(inference_heading, pn.Spacer(), inference_help_btn, batch_inference_help_btn),
         pn.pane.Markdown(
             "Run the trained classifier on the database embeddings to generate predictions. "
             "This will create a CSV file with detections above the specified threshold."

@@ -29,7 +29,7 @@ from recognizer_workshop.app.services.db_labels.add_db_labels import add_labels_
 from recognizer_workshop.app.services.db_labels.db_labels_info import get_label_counts
 from recognizer_workshop.app.services.db_labels.dataclasses import LabelName
 from recognizer_workshop.app.services import training as training_service
-from recognizer_workshop.app.inference.filename import InferenceResultIndex, InferenceResultItem
+from recognizer_workshop.app.inference.inference_result import InferenceResultIndex, InferenceResultItem
 from recognizer_workshop.app.services.training_result_index import SavedTrainingResultsIndex, load_training_result_from_classifier_entry
 from recognizer_workshop.app.create_database.repair_index import repair_index
 from recognizer_workshop.app.services.database_status import (
@@ -1158,6 +1158,13 @@ class agile_state:
             raise ValueError("Cannot run inference without an active saved recognizer.")
 
         base_name = active_entry.classifier_name
+        classifier_labels = [str(label) for label in classifier.classes]
+        if labels is None:
+            included_labels = classifier_labels
+        else:
+            requested_labels = {str(label) for label in labels}
+            included_labels = [label for label in classifier_labels if label in requested_labels]
+
         output_dir = Path(self.config.predictions_folder) / base_name
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1169,6 +1176,9 @@ class agile_state:
             "recognizer-name": active_entry.classifier_name,
             "recognizer-date": active_entry.display_name,
             "inference-date": _dt.now().isoformat(),
+            "threshold": threshold,
+            "subset-proportion": subset,
+            "included-labels": included_labels,
         }
         with output_metadata_path.open('w', encoding='utf-8') as f:
             json.dump(metadata, f, indent=2)
