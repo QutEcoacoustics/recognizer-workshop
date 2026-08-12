@@ -4,7 +4,7 @@ import logging
 from typing import Any, Optional, Sequence
 
 import numpy as np
-from perch_hoplite.agile import classifier
+from recognizer_workshop.perch_hoplite_custom_modifications import classifier
 from perch_hoplite.agile import classifier_data
 from perch_hoplite.db import interface as hoplite_interface
 
@@ -21,6 +21,9 @@ class TrainClassifierParams:
     weak_negatives_batch_size: int = 128
     seed: int = 5
     f1_threshold: float = 0.0
+    l1_strength: float = 0.0
+    l2_strength: float = 0.0
+    regularize_bias: bool = False
 
 
 @dataclass(frozen=True)
@@ -327,11 +330,21 @@ def train_classifier(
             oversampling_applied = True
             oversampled_used_count = int(len(oversampled_train_ids))
 
+    train_kwargs = {
+        'data_manager': data_manager,
+        'learning_rate': params.learning_rate,
+        'weak_neg_weight': params.weak_neg_weight,
+        'num_train_steps': params.num_steps,
+    }
+    if params.l1_strength or params.l2_strength or params.regularize_bias:
+        train_kwargs.update({
+            'l1_strength': params.l1_strength,
+            'l2_strength': params.l2_strength,
+            'regularize_bias': params.regularize_bias,
+        })
+
     linear_classifier, eval_scores = classifier.train_linear_classifier(
-        data_manager=data_manager,
-        learning_rate=params.learning_rate,
-        weak_neg_weight=params.weak_neg_weight,
-        num_train_steps=params.num_steps,
+        **train_kwargs,
     )
 
     confusion_metrics = calculate_confusion_and_prf_metrics(
@@ -374,6 +387,9 @@ def train_classifier(
         'excluded_eval_from_oversampled_count': 0, # Metric preserved for UI compatibility, but structurally eliminated
         'original_train_ids_count': int(len(original_train_ids)),
         'eval_ids_count': int(len(original_eval_ids)),
+        'l1_strength': params.l1_strength,
+        'l2_strength': params.l2_strength,
+        'regularize_bias': params.regularize_bias,
     }
     
     if auto_oversample_factors is not None:

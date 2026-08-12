@@ -624,6 +624,9 @@ class agile_state:
                         train_ratio = 0.9,
                         batch_size = 128,
                         weak_negatives_batch_size = 128,
+                        l1_strength: float = 0.0,
+                        l2_strength: float = 0.0,
+                        regularize_bias: bool = False,
                         balance_dataset: bool = True):
         target_labels = self.get_target_labels()
         resolved_weak_negatives_batch_size = max(int(weak_negatives_batch_size), 0)
@@ -635,6 +638,9 @@ class agile_state:
             train_ratio=train_ratio,
             batch_size=batch_size,
             weak_negatives_batch_size=resolved_weak_negatives_batch_size,
+            l1_strength=l1_strength,
+            l2_strength=l2_strength,
+            regularize_bias=regularize_bias,
         )
         log.info('Training for target labels: %s', target_labels)
 
