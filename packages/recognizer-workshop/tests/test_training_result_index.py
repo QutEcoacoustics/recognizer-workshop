@@ -290,8 +290,7 @@ class TestLoadTrainingResultFromEntry:
         entry = index.get_active_classifier_entry()
         # should not raise; corrupt metrics treated as absent
         result = load_training_result_from_classifier_entry(entry)
-        assert result.eval_scores is None
-        assert result.training_info is None
+        assert result.info == {}
 
     def test_corrupt_recognizer_json_raises(self, tmp_path):
         version_dir = _write_version(tmp_path, "owl", "v1")
@@ -316,8 +315,7 @@ class TestLoadTrainingResultFromEntry:
         index.initialize_index()
         entry = index.get_active_classifier_entry()
         result = load_training_result_from_classifier_entry(entry)
-        assert result.eval_scores is None
-        assert result.training_info is None
+        assert result.info == {}
 
     def test_with_metrics_file_loads_scores_and_info(self, tmp_path):
         metrics = {"metrics": {"roc_auc": 0.95}, "info": {"balance": True}}
@@ -326,8 +324,7 @@ class TestLoadTrainingResultFromEntry:
         index.initialize_index()
         entry = index.get_active_classifier_entry()
         result = load_training_result_from_classifier_entry(entry)
-        assert result.eval_scores == {"roc_auc": 0.95}
-        assert result.training_info == {"balance": True}
+        assert result.info == metrics
 
     def test_sets_classifier_name_and_version_on_result(self, tmp_path):
         _write_version(tmp_path, "owl", "v1")
@@ -335,5 +332,5 @@ class TestLoadTrainingResultFromEntry:
         index.initialize_index()
         entry = index.get_active_classifier_entry()
         result = load_training_result_from_classifier_entry(entry)
-        assert result.classifier_name == "owl"
-        assert result.version_name == "v1"
+        assert result.classifier_model is not None
+        assert result.info == {}

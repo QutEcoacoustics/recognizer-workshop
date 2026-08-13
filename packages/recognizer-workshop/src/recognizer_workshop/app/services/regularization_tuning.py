@@ -20,13 +20,13 @@ log = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class RegularizationTuningResult:
     best_params: training.TrainClassifierParams
-    best_metrics: training.EvalMetrics
+    best_cross_validation_result: training.CrossValidationResult
     trial_history: tuple[dict[str, Any], ...]
 
     def to_dict(self) -> dict[str, Any]:
         return {
             'best_params': asdict(self.best_params),
-            'best_metrics': self.best_metrics.to_dict(),
+            'best_cross_validation_result': self.best_cross_validation_result.to_dict(),
             'trial_history': list(self.trial_history),
         }
 
@@ -35,7 +35,6 @@ def state_key(
     classifier_name: str | None,
     target_labels,
     params: training.TrainClassifierParams,
-    balance_dataset: bool,
 ) -> str:
     return json.dumps(
         {
@@ -50,7 +49,7 @@ def state_key(
                 "weak_negatives_batch_size": params.weak_negatives_batch_size,
                 "seed": params.seed,
                 "regularize_bias": params.regularize_bias,
-                "balance_dataset": bool(balance_dataset),
+                "balance_dataset": bool(params.balance_dataset),
             },
         },
         sort_keys=True,
@@ -78,7 +77,6 @@ def delete_tuning_state(
     classifier_name: str | None,
     target_labels,
     params: training.TrainClassifierParams,
-    balance_dataset: bool,
 ) -> bool:
     """Delete only the tuning entry matching one stable training recipe."""
     state_path = Path(path) if path else None
@@ -86,7 +84,7 @@ def delete_tuning_state(
         return False
 
     state = _load_state(state_path)
-    key = state_key(classifier_name, target_labels, params, balance_dataset)
+    key = state_key(classifier_name, target_labels, params)
     if key not in state:
         return False
 
@@ -124,26 +122,26 @@ def tune_regularization(
     """
     state_file = Path(state_path) if state_path else None
     state = _load_state(state_file)
-    balance_dataset = bool(
-        fold_splits
-        and fold_splits[0].training_info.get('balance_dataset_enabled', False)
-    )
-    key = state_key(classifier_name, target_labels, params, balance_dataset)
+    key = state_key(classifier_name, target_labels, params)
     previous = state.get(key, {})
     base_params = replace(params, auto_tune_regularization=False)
     trial_history = []
     trial_results = {}
 
     def record_trial(trial_number, trial_params, cross_validation):
-        metrics = cross_validation.metrics
+        metrics = cross_validation.average_metrics
         trial_history.append({
             'trial': trial_number,
             'loss': float(metrics.validation_loss),
             'params': asdict(trial_params),
             'metrics': metrics.to_dict(),
+            'data_counts': cross_validation.average_data_counts,
         })
         if trial_number != 'baseline':
-            trial_results[trial_number] = (trial_params, metrics)
+            trial_results[trial_number] = (
+                trial_params,
+                cross_validation,
+            )
         return float(metrics.validation_loss)
 
     def _bounds(previous_value):
@@ -196,7 +194,8 @@ def tune_regularization(
     study.optimize(objective, n_trials=trial_count)
 
     best_trial = study.best_trial
-    best_params, best_metrics = trial_results[best_trial.number]
+    best_params, best_cross_validation_result = trial_results[best_trial.number]
+    best_metrics = best_cross_validation_result.average_metrics
     log.info(
         "Regularization baseline validation loss: %.6f (l1=0, l2=0)",
         baseline_loss,
@@ -214,7 +213,8 @@ def tune_regularization(
             baseline_loss,
             best_metrics.validation_loss,
         )
-        best_params, best_metrics = baseline_params, baseline_cv.metrics
+        best_params = baseline_params
+        best_cross_validation_result = baseline_cv
     else:
         log.info(
             "Regularization selection: Optuna trial %s wins (%.6f < %.6f); using l1=%.8g, l2=%.8g",
@@ -227,7 +227,7 @@ def tune_regularization(
 
     result = RegularizationTuningResult(
         best_params=best_params,
-        best_metrics=best_metrics,
+        best_cross_validation_result=best_cross_validation_result,
         trial_history=tuple(trial_history),
     )
     state[key] = {

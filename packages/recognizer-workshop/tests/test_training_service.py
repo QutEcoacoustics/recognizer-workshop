@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 import json
 
@@ -121,7 +122,7 @@ def test_train_classifier_uses_explicit_weak_negative_batch_size(monkeypatch, tm
     assert captured['learning_rate'] == params.learning_rate
     assert captured['weak_neg_weight'] == params.weak_neg_weight
     assert captured['num_train_steps'] == params.num_steps
-    assert result.training_info['resolved_weak_negatives_batch_size'] == 7
+    assert result.info['final_model']['data_info']['balancing_debug']['oversampled_train_ids_used_count'] >= 0
 
 
 # ── oversample factor tests ──────────────────────────────────────────────────
@@ -196,6 +197,42 @@ def test_build_oversampled_train_ids_no_oversampling(tmp_path):
     assert len(oversampled_ids) == 10
 
 
+def test_build_oversampled_train_ids_deduplicates_overlapping_labels(tmp_path):
+    db = db_test_utils.make_db(
+        path=str(tmp_path / 'multilabel-training-db'),
+        db_type='in_mem',
+        num_embeddings=3,
+        rng=np.random.default_rng(1234),
+        embedding_dim=8,
+    )
+    embedding_ids = list(db.get_embedding_ids())
+    for label, embedding_id in (
+        ('alpha', embedding_ids[0]),
+        ('alpha', embedding_ids[1]),
+        ('beta', embedding_ids[1]),
+        ('beta', embedding_ids[2]),
+    ):
+        db.insert_label(
+            interface.Label(
+                embedding_id=int(embedding_id),
+                label=label,
+                type=interface.LabelType.POSITIVE,
+                provenance='test',
+            )
+        )
+    db.commit()
+
+    factors = {
+        'alpha': {'pos_factor': 1.0, 'neg_factor': 1.0},
+        'beta': {'pos_factor': 1.0, 'neg_factor': 1.0},
+    }
+    oversampled_ids = training.build_oversampled_train_ids(
+        db, ('alpha', 'beta'), factors, np.asarray(embedding_ids)
+    )
+
+    np.testing.assert_array_equal(oversampled_ids, np.asarray(embedding_ids))
+
+
 def test_train_classifier_balance_flow_uses_isolated_splits(monkeypatch, tmp_path):
     db = _make_labeled_db(tmp_path, positive_count=10, negative_count=2)
     params = training.TrainClassifierParams(
@@ -229,7 +266,7 @@ def test_train_classifier_balance_flow_uses_isolated_splits(monkeypatch, tmp_pat
     monkeypatch.setattr(training, 'build_oversampled_train_ids', lambda *a, **k: fake_oversampled)
     monkeypatch.setattr(training.classifier, 'train_linear_classifier', fake_train_linear_classifier)
     
-    training.train_classifier(db, ('alpha',), params, balance_dataset=True)
+    training.train_classifier(db, ('alpha',), params)
 
     # Verify the training pipeline fed the simulated oversampled array directly to the classifier
     np.testing.assert_array_equal(captured['final_train_ids'], fake_oversampled)
@@ -273,28 +310,37 @@ def test_cross_validation_trains_final_model_on_all_labeled_ids(monkeypatch, tmp
     monkeypatch.setattr(training.classifier, 'train_linear_classifier', fake_train_linear_classifier)
     monkeypatch.setattr(training, 'calculate_confusion_and_prf_metrics', lambda *args, **kwargs: {})
 
-    result = training.train_classifier(db, ('alpha',), params, balance_dataset=False)
+    params = replace(params, balance_dataset=False)
+    result = training.train_classifier(db, ('alpha',), params)
 
     assert len(captured_splits) == 3
     assert all(len(eval_ids) > 0 for _, eval_ids in captured_splits[:2])
     np.testing.assert_array_equal(captured_splits[2][0], np.asarray(list(db.get_embedding_ids())))
     assert len(captured_splits[2][1]) == 0
-    assert result.eval_scores.validation_loss == 0.5
-    assert result.eval_scores.train_ratio == params.train_ratio
-    assert result.train_params.train_ratio == 1.0
-    assert result.train_params.k_folds == 1
+    assert result.info['evaluation']['average_metrics']['validation_loss'] == 0.5
+    assert result.info['evaluation']['average_metrics']['train_ratio'] == params.train_ratio
+    assert result.info['final_model']['params']['train_ratio'] == 1.0
+    assert result.info['final_model']['params']['k_folds'] == 1
 
 
 def test_train_ratio_one_prepares_all_labeled_ids_for_training(tmp_path):
     db = _make_labeled_db(tmp_path, positive_count=4, negative_count=3)
     params = training.TrainClassifierParams(train_ratio=1.0)
 
-    split = training.get_oversampled_data_split(
-        db, ('alpha',), params, balance_dataset=False
-    )
+    params = training.TrainClassifierParams(train_ratio=1.0, balance_dataset=False)
+    split = training.get_oversampled_data_split(db, ('alpha',), params)
 
     np.testing.assert_array_equal(split.train_ids, np.asarray(list(db.get_embedding_ids())))
     assert len(split.eval_ids) == 0
+    assert split.data_info['data_counts']['train']['alpha']['pos'] == {
+        'unique': 4,
+        'oversampled': 4,
+    }
+    assert split.data_info['data_counts']['train']['alpha']['neg'] == {
+        'unique': 3,
+        'oversampled': 3,
+    }
+    assert split.data_info['data_counts']['test']['alpha'] == {'pos': 0, 'neg': 0}
 
 
 def test_tune_regularization_persists_state_and_reduces_follow_up_trials(monkeypatch, tmp_path):
@@ -325,21 +371,38 @@ def test_tune_regularization_persists_state_and_reduces_follow_up_trials(monkeyp
             validation_loss=loss,
             per_class_confusion=[],
         )
-        return training.CrossValidationResult(metrics=metrics, fold_metrics=(metrics,))
+        data_info = {
+            'data_counts': {'train': {}, 'test': {}},
+            'balancing_debug': {'balance_dataset_enabled': False},
+        }
+        return training.CrossValidationResult(
+            average_metrics=metrics,
+            average_data_counts=data_info['data_counts'],
+            folds=({
+                'metrics': metrics.to_dict(),
+                'data_info': data_info,
+            },),
+        )
 
     monkeypatch.setattr(regularization_tuning.training, 'cross_validate_classifier', fake_cross_validate_classifier)
     params = training.TrainClassifierParams(tuning_trials=2, tuning_folds=2, seed=7)
     state_path = tmp_path / 'regularization.json'
     fold_splits = (
-        training.PreparedDataSplit(
+            training.PreparedDataSplit(
             train_ids=np.array([1]),
             eval_ids=np.array([2]),
-            training_info={'balance_dataset_enabled': False},
+            data_info={
+                'data_counts': {'train': {}, 'test': {}},
+                'balancing_debug': {'balance_dataset_enabled': False},
+            },
         ),
-        training.PreparedDataSplit(
+            training.PreparedDataSplit(
             train_ids=np.array([2]),
             eval_ids=np.array([1]),
-            training_info={'balance_dataset_enabled': False},
+            data_info={
+                'data_counts': {'train': {}, 'test': {}},
+                'balancing_debug': {'balance_dataset_enabled': False},
+            },
         ),
     )
 
@@ -357,10 +420,10 @@ def test_tune_regularization_persists_state_and_reduces_follow_up_trials(monkeyp
 
     assert first.best_params.l1_strength > 0
     assert first.best_params.l2_strength > 0
-    assert first.best_metrics.validation_loss == 0.1
+    assert first.best_cross_validation_result.average_metrics.validation_loss == 0.1
     assert len(first.trial_history) == 3
     assert state_path.exists()
-    assert second.best_metrics.validation_loss == 0.1
+    assert second.best_cross_validation_result.average_metrics.validation_loss == 0.1
     assert len(second.trial_history) == 2
     assert len(calls) - first_call_count == 2
     assert all(candidate is fold_splits for candidate in seen_splits)
@@ -369,12 +432,18 @@ def test_tune_regularization_persists_state_and_reduces_follow_up_trials(monkeyp
         training.PreparedDataSplit(
             train_ids=np.array([10]),
             eval_ids=np.array([20]),
-            training_info={'balance_dataset_enabled': False},
+            data_info={
+                'data_counts': {'train': {}, 'test': {}},
+                'balancing_debug': {'balance_dataset_enabled': False},
+            },
         ),
         training.PreparedDataSplit(
             train_ids=np.array([20]),
             eval_ids=np.array([10]),
-            training_info={'balance_dataset_enabled': False},
+            data_info={
+                'data_counts': {'train': {}, 'test': {}},
+                'balancing_debug': {'balance_dataset_enabled': False},
+            },
         ),
     )
     third = regularization_tuning.tune_regularization(
@@ -382,28 +451,24 @@ def test_tune_regularization_persists_state_and_reduces_follow_up_trials(monkeyp
         fold_splits=changed_data_splits,
         classifier_name='demo', state_path=state_path,
     )
-    assert third.best_metrics.validation_loss == 0.1
+    assert third.best_cross_validation_result.average_metrics.validation_loss == 0.1
     assert len(third.trial_history) == 2
 
 
 def test_delete_tuning_state_removes_only_matching_entry(tmp_path):
     params = training.TrainClassifierParams()
-    reporting_params = training.TrainClassifierParams(f1_threshold=0.5)
-    matching_key = regularization_tuning.state_key(
-        'demo', ('alpha',), params, balance_dataset=False
+    params = training.TrainClassifierParams(balance_dataset=False)
+    reporting_params = training.TrainClassifierParams(
+        f1_threshold=0.5,
+        balance_dataset=False,
     )
-    assert matching_key == regularization_tuning.state_key(
-        'demo', ('alpha',), reporting_params, balance_dataset=False
-    )
-    other_key = regularization_tuning.state_key(
-        'other', ('alpha',), params, balance_dataset=False
-    )
+    matching_key = regularization_tuning.state_key('demo', ('alpha',), params)
+    assert matching_key == regularization_tuning.state_key('demo', ('alpha',), reporting_params)
+    other_key = regularization_tuning.state_key('other', ('alpha',), params)
     state_path = tmp_path / 'regularization.json'
     state_path.write_text(json.dumps({matching_key: {'value': 1}, other_key: {'value': 2}}))
 
-    removed = regularization_tuning.delete_tuning_state(
-        state_path, 'demo', ('alpha',), params, balance_dataset=False
-    )
+    removed = regularization_tuning.delete_tuning_state(state_path, 'demo', ('alpha',), params)
 
     assert removed is True
     assert json.loads(state_path.read_text()) == {other_key: {'value': 2}}

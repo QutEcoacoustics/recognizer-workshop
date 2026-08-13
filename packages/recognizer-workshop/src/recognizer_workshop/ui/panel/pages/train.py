@@ -71,11 +71,11 @@ def build(vm):
     recognizer_name_field.param.watch(_on_recognizer_name_input_change, 'value_input')
 
     learning_rate = pn.widgets.FloatInput(name="Learning Rate", value=1e-3, step=1e-4, sizing_mode="fixed", width=100)
-    l1_strength = pn.widgets.FloatInput(name="L1 Regularization", value=0.0, start=0.0, step=1e-4, sizing_mode="fixed", width=140)
-    l2_strength = pn.widgets.FloatInput(name="L2 Regularization", value=0.0, start=0.0, step=1e-4, sizing_mode="fixed", width=140)
+    l1_strength = pn.widgets.FloatInput(name="L1 Regularization", value=0.001, start=0.0, step=1e-4, sizing_mode="fixed", width=140)
+    l2_strength = pn.widgets.FloatInput(name="L2 Regularization", value=0.001, start=0.0, step=1e-4, sizing_mode="fixed", width=140)
     auto_tune_regularization = pn.widgets.Checkbox(
         name="Auto tune L1/L2",
-        value=True,
+        value=False,
         sizing_mode="fixed",
         width=130,
     )
@@ -229,8 +229,14 @@ def build(vm):
             return
 
         view_result = training_service.training_result_to_json(vm.eng.train_result)
-        scores = view_result.get('metrics')
-        info = view_result.get('info') or {}
+        evaluation = view_result.get('evaluation')
+        if evaluation:
+            scores = evaluation.get('average_metrics')
+            final_data_info = view_result.get('final_model', {}).get('data_info') or {}
+            info = final_data_info.get('balancing_debug') or {}
+        else:
+            scores = view_result.get('metrics')
+            info = view_result.get('info') or {}
 
         if not scores:
             results_view.objects = [pn.pane.Markdown(
@@ -395,8 +401,10 @@ def build(vm):
             _refresh_saved_classifiers_selector_from_engine()
             _notify_active_classifier_changed()
 
-            scores = train_result.get('metrics', train_result)
-            info = train_result.get('info', {}) if isinstance(train_result, dict) else {}
+            evaluation = train_result.get('evaluation', {}) if isinstance(train_result, dict) else {}
+            scores = evaluation.get('average_metrics', train_result)
+            final_data_info = train_result.get('final_model', {}).get('data_info', {}) if isinstance(train_result, dict) else {}
+            info = final_data_info.get('balancing_debug', {})
 
             metrics_df = format_metrics_matrix_df(scores)
             view_objects = [
@@ -457,11 +465,11 @@ def build(vm):
                 train_ratio=float(train_ratio.value),
                 batch_size=int(batch_size.value),
                 weak_negatives_batch_size=int(weak_neg_batch_size.value),
+                balance_dataset=bool(balance_dataset.value),
             )
             removed = vm.eng.reset_regularization_tuning(
                 classifier_name=sanitize_classifier_name(recognizer_name_field.value or "classifier"),
                 params=reset_params,
-                balance_dataset=balance_dataset.value,
             )
             message = (
                 "Saved regularization tuning state cleared."

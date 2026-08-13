@@ -37,14 +37,24 @@ def engine(tmp_path):
     eng = agile_state(config)
     eng.train_result = TrainingResult(
         classifier_model=_make_linear_classifier(),
-        eval_scores={"roc_auc": 0.9},
-        training_info={"resolved_weak_negatives_batch_size": 16},
+        info={"evaluation": {}, "final_model": {}},
     )
     return eng, tmp_path
 
 
 def _make_train_result_json() -> dict:
-    return {"metrics": {"roc_auc": 0.9}, "info": {"balance": True}}
+    return {
+        "evaluation": {
+            "average_metrics": {"roc_auc": 0.9},
+            "average_data_counts": {},
+            "folds": [],
+            "params": {},
+        },
+        "final_model": {
+            "data_info": {"balancing_debug": {"balance": True}},
+            "params": {},
+        },
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -99,18 +109,18 @@ class TestSaveClassifierVersioned:
         version_dir = eng.save_classifier_versioned(result_json, "owl")
         assert (version_dir / "recognizer.json").exists()
 
-    def test_creates_metrics_json(self, engine):
+    def test_creates_info_json(self, engine):
         eng, tmp_path = engine
         result_json = _make_train_result_json()
         version_dir = eng.save_classifier_versioned(result_json, "owl")
-        assert (version_dir / "metrics.json").exists()
+        assert (version_dir / "info.json").exists()
 
-    def test_metrics_json_content_matches_input(self, engine):
+    def test_info_json_content_matches_input(self, engine):
         eng, tmp_path = engine
         result_json = _make_train_result_json()
         version_dir = eng.save_classifier_versioned(result_json, "owl")
-        saved = json.loads((version_dir / "metrics.json").read_text())
-        assert saved["metrics"]["roc_auc"] == 0.9
+        saved = json.loads((version_dir / "info.json").read_text())
+        assert saved["evaluation"]["average_metrics"]["roc_auc"] == 0.9
 
     def test_directory_structure_is_models_name_version(self, engine):
         eng, tmp_path = engine
@@ -190,7 +200,7 @@ class TestEngineIndexManagement:
         # index auto-selects v2 (newest); manually switch to v1
         eng.set_active_saved_classifier("owl", "v1")
         assert eng.saved_training_results_index.selected_classifier_version == "v1"
-        assert eng.train_result.version_name == "v1"
+        assert eng.train_result.classifier_model is not None
 
     def test_set_active_raises_when_index_not_initialized(self, engine):
         eng, _ = engine

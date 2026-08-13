@@ -1,7 +1,7 @@
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 import math
 import logging
-from typing import TYPE_CHECKING, Any, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Sequence
 
 import numpy as np
 from recognizer_workshop.perch_hoplite_custom_modifications import classifier
@@ -32,6 +32,7 @@ class TrainClassifierParams:
     auto_tune_regularization: bool = False
     tuning_trials: int = 10
     tuning_folds: int = 4
+    balance_dataset: bool = True
 
 
 @dataclass(frozen=True)
@@ -138,31 +139,52 @@ class EvalMetrics:
 
 @dataclass(frozen=True)
 class CrossValidationResult:
-    metrics: EvalMetrics
-    fold_metrics: tuple[EvalMetrics, ...]
+    average_metrics: EvalMetrics
+    average_data_counts: dict[str, Any] = field(default_factory=dict)
+    folds: tuple[dict[str, Any], ...] = ()
+    params: TrainClassifierParams | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            'metrics': self.metrics.to_dict(),
-            'fold_metrics': [metrics.to_dict() for metrics in self.fold_metrics],
+            'average_metrics': self.average_metrics.to_dict(),
+            'average_data_counts': self.average_data_counts,
+            'folds': list(self.folds),
+            'params': asdict(self.params) if self.params is not None else None,
         }
+
+
+def _average_data_counts(data_counts: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    """Average numeric leaves in the nested train/test count structure."""
+    if not data_counts:
+        return {}
+
+    keys = set().union(*(counts.keys() for counts in data_counts))
+    averaged = {}
+    for key in keys:
+        values = [counts[key] for counts in data_counts if key in counts]
+        if all(isinstance(value, dict) for value in values):
+            averaged[key] = _average_data_counts(values)
+        else:
+            averaged[key] = float(np.mean([float(value) for value in values]))
+    return averaged
 
 
 @dataclass(frozen=True)
 class TrainingResult:
     classifier_model: Any
-    eval_scores: Optional[EvalMetrics | dict[str, Any]]
-    training_info: Optional[dict[str, Any]]
-    classifier_name: Optional[str] = None
-    version_name: Optional[str] = None
-    train_params: Optional[TrainClassifierParams] = None
+    info: dict[str, Any]
 
 
 @dataclass(frozen=True)
 class PreparedDataSplit:
     train_ids: np.ndarray
     eval_ids: np.ndarray
-    training_info: dict[str, Any]
+    data_info: dict[str, Any]
+
+    @property
+    def training_info(self) -> dict[str, Any]:
+        """Compatibility view of the split's balancing debug information."""
+        return self.data_info.get('balancing_debug', {})
 
 
 def calculate_balanced_weak_negatives_batch_size(
@@ -353,10 +375,11 @@ def build_oversampled_train_ids(
     train_ids: np.ndarray,
     seed: int = 0,
 ) -> np.ndarray:
-    """Build a training ID array oversampling strictly from the train split."""
-    oversampled_embedding_id_chunks: list[np.ndarray] = []
+    """Build a training ID array with repetition applied per embedding ID."""
     rng = np.random.default_rng(seed)
-    train_set = set(train_ids.tolist())
+    unique_train_ids = np.unique(np.asarray(train_ids, dtype=np.int64))
+    train_set = set(unique_train_ids.tolist())
+    repeat_factors_by_id = {int(embedding_id): 1.0 for embedding_id in unique_train_ids}
 
     def _repeat_ids_with_fraction(ids: np.ndarray, repeat_factor: float) -> np.ndarray:
         if len(ids) == 0:
@@ -384,38 +407,73 @@ def build_oversampled_train_ids(
 
     for label in target_labels:
         label_factors = oversample_factors.get(label, {'pos_factor': 1.0, 'neg_factor': 1.0})
-        
-        all_pos_ids = db.get_embeddings_by_label(label, hoplite_interface.LabelType.POSITIVE, None)
-        all_neg_ids = db.get_embeddings_by_label(label, hoplite_interface.LabelType.NEGATIVE, None)
 
-        # Filter down to the train split before any duplication
-        train_pos_ids = np.array([x for x in all_pos_ids if x in train_set], dtype=np.int64)
-        train_neg_ids = np.array([x for x in all_neg_ids if x in train_set], dtype=np.int64)
+        for label_type, factor_key in (
+            (hoplite_interface.LabelType.POSITIVE, 'pos_factor'),
+            (hoplite_interface.LabelType.NEGATIVE, 'neg_factor'),
+        ):
+            repeat_factor = max(float(label_factors[factor_key]), 1.0)
+            labeled_ids = db.get_embeddings_by_label(label, label_type, None)
+            for embedding_id in labeled_ids:
+                embedding_id = int(embedding_id)
+                if embedding_id in train_set:
+                    repeat_factors_by_id[embedding_id] = max(
+                        repeat_factors_by_id[embedding_id], repeat_factor
+                    )
 
-        pos_repeat_factor = max(label_factors['pos_factor'], 1.0)
-        neg_repeat_factor = max(label_factors['neg_factor'], 1.0)
+    ids_by_repeat_factor: dict[float, list[int]] = {}
+    for embedding_id in unique_train_ids:
+        repeat_factor = repeat_factors_by_id[int(embedding_id)]
+        ids_by_repeat_factor.setdefault(repeat_factor, []).append(int(embedding_id))
 
-        if len(train_pos_ids) > 0:
-            oversampled_embedding_id_chunks.append(
-                _repeat_ids_with_fraction(train_pos_ids, pos_repeat_factor)
-            )
-        if len(train_neg_ids) > 0:
-            oversampled_embedding_id_chunks.append(
-                _repeat_ids_with_fraction(train_neg_ids, neg_repeat_factor)
-            )
-
+    oversampled_embedding_id_chunks = [
+        _repeat_ids_with_fraction(np.asarray(ids, dtype=np.int64), repeat_factor)
+        for repeat_factor, ids in ids_by_repeat_factor.items()
+    ]
     if not oversampled_embedding_id_chunks:
         return np.array([], dtype=np.int64)
 
     return np.concatenate(oversampled_embedding_id_chunks)
 
 
+def _count_labeled_ids(
+    db,
+    target_labels: Sequence[str],
+    train_ids: np.ndarray,
+    unique_train_ids: np.ndarray,
+    eval_ids: np.ndarray,
+) -> dict[str, Any]:
+    """Count labeled train occurrences and unique train/eval examples."""
+    train_id_set = set(np.asarray(unique_train_ids).tolist())
+    eval_id_set = set(np.asarray(eval_ids).tolist())
+    counts = {'train': {}, 'test': {}}
+
+    for label in target_labels:
+        label_counts = {'train': {}, 'test': {}}
+        for key, label_type in (
+            ('pos', hoplite_interface.LabelType.POSITIVE),
+            ('neg', hoplite_interface.LabelType.NEGATIVE),
+        ):
+            labeled_ids = set(
+                db.get_embeddings_by_label(label, label_type, None).tolist()
+            )
+            label_counts['train'][key] = {
+                'oversampled': int(sum(embedding_id in labeled_ids for embedding_id in train_ids)),
+                'unique': int(sum(embedding_id in labeled_ids for embedding_id in train_id_set)),
+            }
+            label_counts['test'][key] = int(
+                sum(embedding_id in labeled_ids for embedding_id in eval_id_set)
+            )
+        counts['train'][label] = label_counts['train']
+        counts['test'][label] = label_counts['test']
+
+    return counts
+
 
 def get_oversampled_data_split(
     db,
     target_labels: Sequence[str],
     params: TrainClassifierParams,
-    balance_dataset: bool = True,
 ) -> PreparedDataSplit:
     """Prepare one train/eval split, including optional oversampling."""
     data_manager = classifier_data.AgileDataManager(
@@ -441,7 +499,7 @@ def get_oversampled_data_split(
     auto_oversample_factors = None
     prepared_train_ids = original_train_ids
 
-    if balance_dataset:
+    if params.balance_dataset:
         auto_oversample_factors = calculate_oversample_factors(
             db=db,
             target_labels=target_labels,
@@ -460,8 +518,15 @@ def get_oversampled_data_split(
             oversampling_applied = True
             oversampled_used_count = int(len(oversampled_train_ids))
 
-    training_info = {
-        'balance_dataset_enabled': bool(balance_dataset),
+    data_counts = _count_labeled_ids(
+        db=db,
+        target_labels=target_labels,
+        train_ids=prepared_train_ids,
+        unique_train_ids=original_train_ids,
+        eval_ids=original_eval_ids,
+    )
+    balancing_debug = {
+        'balance_dataset_enabled': bool(params.balance_dataset),
         'oversampling_applied': oversampling_applied,
         'oversampled_train_ids_requested_count': oversampled_used_count,
         'oversampled_train_ids_used_count': oversampled_used_count,
@@ -470,9 +535,9 @@ def get_oversampled_data_split(
         'eval_ids_count': int(len(original_eval_ids)),
     }
     if auto_oversample_factors is not None:
-        training_info['oversample_factors'] = auto_oversample_factors
+        balancing_debug['oversample_factors'] = auto_oversample_factors
         train_set = set(original_train_ids.tolist())
-        training_info['per_label_oversample_breakdown'] = {
+        balancing_debug['per_label_oversample_breakdown'] = {
             label: {
                 'train_pos_count': sum(
                     1 for embedding_id in db.get_embeddings_by_label(
@@ -493,7 +558,10 @@ def get_oversampled_data_split(
     return PreparedDataSplit(
         train_ids=prepared_train_ids,
         eval_ids=original_eval_ids,
-        training_info=training_info,
+        data_info={
+            'data_counts': data_counts,
+            'balancing_debug': balancing_debug,
+        },
     )
 
 
@@ -503,7 +571,7 @@ def _train_single_model(
     params: TrainClassifierParams,
     split: PreparedDataSplit,
     evaluate: bool,
-) -> TrainingResult:
+) -> tuple[Any, EvalMetrics | None]:
     """Train once using an already prepared split."""
     data_manager = classifier_data.AgileDataManager(
         target_labels=tuple(target_labels),
@@ -564,27 +632,13 @@ def _train_single_model(
         params.weak_negatives_batch_size,
     )
 
-    training_info = {
-        'resolved_weak_negatives_batch_size': params.weak_negatives_batch_size,
-        **split.training_info,
-        'l1_strength': params.l1_strength,
-        'l2_strength': params.l2_strength,
-        'regularize_bias': params.regularize_bias,
-    }
-
-    return TrainingResult(
-        classifier_model=linear_classifier,
-        eval_scores=metrics,
-        training_info=training_info,
-        train_params=params,
-    )
+    return linear_classifier, metrics
 
 
 def train_classifier(
     db,
     target_labels: Sequence[str],
     params: TrainClassifierParams,
-    balance_dataset: bool = True,
     classifier_name: str | None = None,
     regularization_state_path=None,
 ) -> TrainingResult:
@@ -599,7 +653,6 @@ def train_classifier(
             db=db,
             target_labels=target_labels,
             params=replace(params, seed=params.seed + fold_index),
-            balance_dataset=balance_dataset,
         )
         for fold_index in range(fold_count)
     )
@@ -616,12 +669,9 @@ def train_classifier(
             state_path=regularization_state_path,
         )
         selected_params = tuning.best_params
-        metrics = tuning.best_metrics
-        evaluation_info = {
-            'cross_validation_folds': len(fold_splits),
-            'cross_validation_metrics': tuning.best_metrics.to_dict(),
-            'regularization_tuning': tuning.to_dict(),
-        }
+        best_cross_validation = tuning.best_cross_validation_result
+        evaluation_info = best_cross_validation.to_dict()
+        evaluation_info['regularization_tuning'] = tuning.to_dict()
     else:
         cross_validation = cross_validate_classifier(
             db=db,
@@ -630,15 +680,7 @@ def train_classifier(
             fold_splits=fold_splits,
         )
         selected_params = params
-        metrics = cross_validation.metrics
-        evaluation_info = {
-            'cross_validation_folds': len(fold_splits),
-            'cross_validation_metrics': cross_validation.metrics.to_dict(),
-            'cross_validation_fold_metrics': [
-                fold_metrics.to_dict()
-                for fold_metrics in cross_validation.fold_metrics
-            ],
-        }
+        evaluation_info = cross_validation.to_dict()
 
     final_params = replace(
         selected_params,
@@ -650,22 +692,24 @@ def train_classifier(
         db=db,
         target_labels=target_labels,
         params=final_params,
-        balance_dataset=balance_dataset,
     )
-    final_result = _train_single_model(
+    final_classifier, _ = _train_single_model(
         db=db,
         target_labels=target_labels,
         params=final_params,
         split=final_split,
         evaluate=False,
     )
-    training_info = dict(final_result.training_info or {})
-    training_info.update(evaluation_info)
+    info = {
+        'evaluation': evaluation_info,
+        'final_model': {
+            'data_info': final_split.data_info,
+            'params': asdict(final_params),
+        },
+    }
     return TrainingResult(
-        classifier_model=final_result.classifier_model,
-        eval_scores=metrics,
-        training_info=training_info,
-        train_params=final_result.train_params,
+        classifier_model=final_classifier,
+        info=info,
     )
 
 
@@ -689,45 +733,43 @@ def cross_validate_classifier(
     if not fold_splits:
         raise ValueError('At least one fold split is required.')
 
-    fold_metrics = []
+    fold_records = []
     for split in fold_splits:
-        result = _train_single_model(
+        _, metrics = _train_single_model(
             db=db,
             target_labels=target_labels,
             params=replace(params, k_folds=1, auto_tune_regularization=False),
             split=split,
             evaluate=True,
         )
-        fold_metrics.append(result.eval_scores)
+        fold_records.append({
+            'metrics': metrics.to_dict() if metrics is not None else {},
+            'data_info': split.data_info,
+        })
 
     return CrossValidationResult(
-        metrics=EvalMetrics.average(fold_metrics),
-        fold_metrics=tuple(fold_metrics),
+        average_metrics=EvalMetrics.average([
+            EvalMetrics.from_dict(fold['metrics']) for fold in fold_records
+        ]),
+        average_data_counts=_average_data_counts([
+            fold['data_info']['data_counts'] for fold in fold_records
+        ]),
+        folds=tuple(fold_records),
+        params=params,
     )
 
 
 def training_result_to_json(result: TrainingResult) -> dict[str, Any]:
-    """Create a JSON-safe dict for UI consumption from TrainingResult."""
-
-    metrics = None
-    if result.eval_scores is not None:
-        metrics = (
-            result.eval_scores.to_dict()
-            if isinstance(result.eval_scores, EvalMetrics)
-            else dict(result.eval_scores)
-        )
-        # Large raw arrays are not needed by the UI table rendering.
-        metrics.pop('eval_preds', None)
-        metrics.pop('eval_labels', None)
-        metrics = to_json_safe(metrics)
-
-    result_json = {
-        'metrics': metrics,
-        'info': to_json_safe(result.training_info) if result.training_info is not None else None,
-    }
-    if result.train_params is not None:
-        result_json['params'] = to_json_safe(asdict(result.train_params))
-    return result_json
+    """Create a JSON-safe persisted result from TrainingResult."""
+    info = result.info
+    if 'evaluation' not in info:
+        legacy_metrics = info.get('metrics')
+        if isinstance(legacy_metrics, dict):
+            legacy_metrics = dict(legacy_metrics)
+            legacy_metrics.pop('eval_preds', None)
+            legacy_metrics.pop('eval_labels', None)
+            info = {**info, 'metrics': legacy_metrics}
+    return to_json_safe(info)
 
 
 def _require_metric(scores: dict[str, Any], key: str) -> float:

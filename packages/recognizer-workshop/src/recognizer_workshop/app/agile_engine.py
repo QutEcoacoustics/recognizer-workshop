@@ -620,7 +620,6 @@ class agile_state:
         self,
         classifier_name: str,
         params: training_service.TrainClassifierParams,
-        balance_dataset: bool,
     ) -> bool:
         """Remove tuning state for one classifier and training recipe."""
         if not self.config or not self.config.models_folder:
@@ -633,7 +632,6 @@ class agile_state:
             classifier_name=classifier_name,
             target_labels=self.get_target_labels(),
             params=params,
-            balance_dataset=balance_dataset,
         )
 
     def train_classifier(self,
@@ -667,6 +665,7 @@ class agile_state:
             k_folds=k_folds,
             auto_tune_regularization=auto_tune_regularization,
             tuning_trials=tuning_trials,
+            balance_dataset=balance_dataset,
         )
         log.info('Training for target labels: %s', target_labels)
 
@@ -674,7 +673,6 @@ class agile_state:
             db=self.db,
             target_labels=target_labels,
             params=params,
-            balance_dataset=balance_dataset,
             classifier_name=classifier_name,
             regularization_state_path=(
                 Path(self.config.models_folder) / ".regularization_tuning.json"
@@ -1071,7 +1069,7 @@ class agile_state:
 
         Directory structure:
             <models_folder>/<classifier_name>/<YYYYMMDD_HHMMSS>/recognizer.json
-            <models_folder>/<classifier_name>/<YYYYMMDD_HHMMSS>/metrics.json
+            <models_folder>/<classifier_name>/<YYYYMMDD_HHMMSS>/info.json
 
         Returns the version directory path.
         """
@@ -1099,8 +1097,8 @@ class agile_state:
         except (OSError, ValueError) as exc:
             log.warning('Could not inject classifier_name into %s: %s', recognizer_path, exc)
 
-        metrics_path = version_dir / "metrics.json"
-        with metrics_path.open('w', encoding='utf-8') as f:
+        info_path = version_dir / "info.json"
+        with info_path.open('w', encoding='utf-8') as f:
             json.dump(train_result, f, indent=2, default=str)
 
         return version_dir
