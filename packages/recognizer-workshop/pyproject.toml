@@ -55,6 +55,8 @@ dependencies = [
   # used for umap generation and caching
   "joblib",
 
+  "optuna",
+
   # utility for reconstructing nested dataclasses from JSON
   # Used for loading agile config
   "dacite",

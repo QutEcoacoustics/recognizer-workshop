@@ -2,11 +2,17 @@
 training_result_to_json in this branch."""
 
 import math
+import json
 
 import numpy as np
 import pytest
 
-from recognizer_workshop.app.services.training import TrainingResult, training_result_to_json
+from recognizer_workshop.app.services.training import (
+    TrainClassifierParams,
+    TrainingResult,
+    training_result_to_json,
+)
+from recognizer_workshop.app.services.json_utils import to_json_safe
 from ml_collections import config_dict
 from perch_hoplite.agile.classifier import LinearClassifier
 
@@ -117,3 +123,35 @@ class TestNonFiniteNormalisation:
         # Should not raise
         serialised = json.dumps(out)
         assert serialised is not None
+
+
+def test_to_json_safe_handles_nested_numpy_values_and_non_finite_numbers():
+    value = {
+        'array': np.array([0.5, np.nan]),
+        'numpy_float': np.float64(np.inf),
+        'tuple': (np.int64(3), float('-inf')),
+    }
+
+    result = to_json_safe(value)
+
+    assert result == {
+        'array': [0.5, None],
+        'numpy_float': None,
+        'tuple': [3, None],
+    }
+    json.dumps(result, allow_nan=False)
+
+
+def test_training_params_are_serialized_when_present():
+    result = _make_result()
+    result = TrainingResult(
+        classifier_model=result.classifier_model,
+        eval_scores=None,
+        training_info=None,
+        train_params=TrainClassifierParams(train_ratio=1.0, k_folds=1),
+    )
+
+    output = training_result_to_json(result)
+
+    assert output['params']['train_ratio'] == 1.0
+    assert output['params']['k_folds'] == 1

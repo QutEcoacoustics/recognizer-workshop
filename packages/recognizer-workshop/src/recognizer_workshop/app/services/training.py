@@ -1,12 +1,16 @@
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, replace
 import math
 import logging
-from typing import Any, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Optional, Sequence
 
 import numpy as np
 from recognizer_workshop.perch_hoplite_custom_modifications import classifier
 from perch_hoplite.agile import classifier_data
 from perch_hoplite.db import interface as hoplite_interface
+from recognizer_workshop.app.services.json_utils import to_json_safe
+
+if TYPE_CHECKING:
+    from recognizer_workshop.app.services.regularization_tuning import RegularizationTuningResult
 
 log = logging.getLogger(__name__)
 
@@ -24,15 +28,141 @@ class TrainClassifierParams:
     l1_strength: float = 0.0
     l2_strength: float = 0.0
     regularize_bias: bool = False
+    k_folds: int = 4
+    auto_tune_regularization: bool = False
+    tuning_trials: int = 10
+    tuning_folds: int = 4
+
+
+@dataclass(frozen=True)
+class EvalMetrics:
+    train_ratio: float
+    top1_acc: float
+    roc_auc: float
+    roc_auc_individual: Any
+    cmap: float
+    cmap_individual: Any
+    micro_precision: float
+    macro_precision: float
+    micro_recall: float
+    macro_recall: float
+    micro_f1: float
+    macro_f1: float
+    validation_loss: float
+    per_class_confusion: Any
+
+    @classmethod
+    def from_dict(cls, values: dict[str, Any]) -> 'EvalMetrics':
+        return cls(**values)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def average(cls, metrics: Sequence['EvalMetrics']) -> 'EvalMetrics':
+        if not metrics:
+            raise ValueError('Cannot average an empty metrics sequence.')
+
+        def average_values(values):
+            array_values = np.asarray(values, dtype=float)
+            finite = np.isfinite(array_values)
+            if not finite.any():
+                return float('nan')
+            return float(np.nanmean(array_values))
+
+        def average_arrays(values):
+            stacked = np.stack(values)
+            with np.errstate(invalid='ignore'):
+                return np.nanmean(stacked, axis=0)
+
+        def average_confusions(values):
+            if not all(value is not None for value in values):
+                return None
+            if not all(len(value) == len(values[0]) for value in values):
+                return None
+            averaged = []
+            for class_index in range(len(values[0])):
+                first = values[0][class_index]
+                result = {
+                    'class_index': first['class_index'],
+                    'class_label': first['class_label'],
+                }
+                for key, value in first.items():
+                    if key in result:
+                        continue
+                    result[key] = average_arrays(
+                        [np.asarray(metrics[class_index][key], dtype=float) for metrics in values]
+                    ).tolist()
+                    if np.asarray(result[key]).ndim == 0:
+                        result[key] = float(result[key])
+                averaged.append(result)
+            return averaged
+
+        first = metrics[0]
+        return cls(
+            train_ratio=average_values([metric.train_ratio for metric in metrics]),
+            top1_acc=average_values([metric.top1_acc for metric in metrics]),
+            roc_auc=average_values([metric.roc_auc for metric in metrics]),
+            roc_auc_individual=average_arrays([metric.roc_auc_individual for metric in metrics]),
+            cmap=average_values([metric.cmap for metric in metrics]),
+            cmap_individual=average_arrays([metric.cmap_individual for metric in metrics]),
+            micro_precision=average_values([metric.micro_precision for metric in metrics]),
+            macro_precision=average_values([metric.macro_precision for metric in metrics]),
+            micro_recall=average_values([metric.micro_recall for metric in metrics]),
+            macro_recall=average_values([metric.macro_recall for metric in metrics]),
+            micro_f1=average_values([metric.micro_f1 for metric in metrics]),
+            macro_f1=average_values([metric.macro_f1 for metric in metrics]),
+            validation_loss=average_values([metric.validation_loss for metric in metrics]),
+            per_class_confusion=average_confusions(
+                [metric.per_class_confusion for metric in metrics]
+            ) if first.per_class_confusion is not None else None,
+        )
+
+    def __str__(self) -> str:
+        labels = (
+            ('top1_acc', 'top-1'),
+            ('roc_auc', 'roc_auc'),
+            ('cmap', 'cmap'),
+            ('micro_precision', 'micro_p'),
+            ('macro_precision', 'macro_p'),
+            ('micro_recall', 'micro_r'),
+            ('macro_recall', 'macro_r'),
+            ('micro_f1', 'micro_f1'),
+            ('macro_f1', 'macro_f1'),
+        )
+        lines = [f'{label:<8} {getattr(self, key):.3f}' for key, label in labels]
+        lines.append(f'{"val_loss":<8} {self.validation_loss:.3f}')
+        lines.append(f'{"train_ratio":<8} {self.train_ratio:.3f}')
+        return '\n'.join(lines)
+
+
+@dataclass(frozen=True)
+class CrossValidationResult:
+    metrics: EvalMetrics
+    fold_metrics: tuple[EvalMetrics, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'metrics': self.metrics.to_dict(),
+            'fold_metrics': [metrics.to_dict() for metrics in self.fold_metrics],
+        }
 
 
 @dataclass(frozen=True)
 class TrainingResult:
     classifier_model: Any
-    eval_scores: Optional[dict[str, Any]]
+    eval_scores: Optional[EvalMetrics | dict[str, Any]]
     training_info: Optional[dict[str, Any]]
     classifier_name: Optional[str] = None
     version_name: Optional[str] = None
+    train_params: Optional[TrainClassifierParams] = None
+
+
+@dataclass(frozen=True)
+class PreparedDataSplit:
+    train_ids: np.ndarray
+    eval_ids: np.ndarray
+    training_info: dict[str, Any]
 
 
 def calculate_balanced_weak_negatives_batch_size(
@@ -281,14 +411,13 @@ def build_oversampled_train_ids(
 
 
 
-def train_classifier(
+def get_oversampled_data_split(
     db,
     target_labels: Sequence[str],
     params: TrainClassifierParams,
     balance_dataset: bool = True,
-) -> TrainingResult:
-    """Train a linear classifier and return model + metrics."""
-    # 1. Initialize data manager to generate the definitive train/test split first
+) -> PreparedDataSplit:
+    """Prepare one train/eval split, including optional oversampling."""
     data_manager = classifier_data.AgileDataManager(
         target_labels=tuple(target_labels),
         db=db,
@@ -298,14 +427,20 @@ def train_classifier(
         weak_negatives_batch_size=params.weak_negatives_batch_size,
         rng=np.random.default_rng(seed=params.seed),
     )
+    train_ids, eval_ids = data_manager.get_train_test_split()
 
-    original_train_ids, original_eval_ids = data_manager.get_train_test_split()
-    
+    if params.train_ratio >= 1.0:
+        original_train_ids = np.unique(np.concatenate([train_ids, eval_ids]))
+        original_eval_ids = np.array([], dtype=np.int64)
+    else:
+        original_train_ids = np.asarray(train_ids).copy()
+        original_eval_ids = np.asarray(eval_ids).copy()
+
     oversampling_applied = False
     oversampled_used_count = 0
     auto_oversample_factors = None
+    prepared_train_ids = original_train_ids
 
-    # 2. Oversample specifically on the training split
     if balance_dataset:
         auto_oversample_factors = calculate_oversample_factors(
             db=db,
@@ -320,15 +455,70 @@ def train_classifier(
             train_ids=original_train_ids,
             seed=params.seed,
         )
-
         if len(oversampled_train_ids) > 0:
-            # Overwrite the split function to serve the directly oversampled array
-            def _oversampled_split():
-                return oversampled_train_ids, original_eval_ids
-            
-            data_manager.get_train_test_split = _oversampled_split
+            prepared_train_ids = oversampled_train_ids
             oversampling_applied = True
             oversampled_used_count = int(len(oversampled_train_ids))
+
+    training_info = {
+        'balance_dataset_enabled': bool(balance_dataset),
+        'oversampling_applied': oversampling_applied,
+        'oversampled_train_ids_requested_count': oversampled_used_count,
+        'oversampled_train_ids_used_count': oversampled_used_count,
+        'excluded_eval_from_oversampled_count': 0,
+        'original_train_ids_count': int(len(original_train_ids)),
+        'eval_ids_count': int(len(original_eval_ids)),
+    }
+    if auto_oversample_factors is not None:
+        training_info['oversample_factors'] = auto_oversample_factors
+        train_set = set(original_train_ids.tolist())
+        training_info['per_label_oversample_breakdown'] = {
+            label: {
+                'train_pos_count': sum(
+                    1 for embedding_id in db.get_embeddings_by_label(
+                        label, hoplite_interface.LabelType.POSITIVE, None
+                    ) if embedding_id in train_set
+                ),
+                'train_neg_count': sum(
+                    1 for embedding_id in db.get_embeddings_by_label(
+                        label, hoplite_interface.LabelType.NEGATIVE, None
+                    ) if embedding_id in train_set
+                ),
+                'pos_factor': auto_oversample_factors[label]['pos_factor'],
+                'neg_factor': auto_oversample_factors[label]['neg_factor'],
+            }
+            for label in target_labels
+        }
+
+    return PreparedDataSplit(
+        train_ids=prepared_train_ids,
+        eval_ids=original_eval_ids,
+        training_info=training_info,
+    )
+
+
+def _train_single_model(
+    db,
+    target_labels: Sequence[str],
+    params: TrainClassifierParams,
+    split: PreparedDataSplit,
+    evaluate: bool,
+) -> TrainingResult:
+    """Train once using an already prepared split."""
+    data_manager = classifier_data.AgileDataManager(
+        target_labels=tuple(target_labels),
+        db=db,
+        train_ratio=1.0,
+        min_eval_examples=1,
+        batch_size=params.batch_size,
+        weak_negatives_batch_size=params.weak_negatives_batch_size,
+        rng=np.random.default_rng(seed=params.seed),
+    )
+
+    def _provided_split():
+        return split.train_ids, split.eval_ids
+
+    data_manager.get_train_test_split = _provided_split
 
     train_kwargs = {
         'data_manager': data_manager,
@@ -347,106 +537,197 @@ def train_classifier(
         **train_kwargs,
     )
 
-    confusion_metrics = calculate_confusion_and_prf_metrics(
-        eval_scores.get('eval_preds'),
-        eval_scores.get('eval_labels'),
-        class_names=target_labels,
-        threshold=params.f1_threshold,
-    )
     output_scores = dict(eval_scores)
-    output_scores.update(confusion_metrics)
-
-    top1 = _require_metric(output_scores, 'top1_acc')
-    rocauc = _require_metric(output_scores, 'roc_auc')
-    cmap = _require_metric(output_scores, 'cmap')
-    micro_precision = _require_metric(output_scores, 'micro_precision')
-    macro_precision = _require_metric(output_scores, 'macro_precision')
-    micro_recall = _require_metric(output_scores, 'micro_recall')
-    macro_recall = _require_metric(output_scores, 'macro_recall')
-    micro_f1 = _require_metric(output_scores, 'micro_f1')
-    macro_f1 = _require_metric(output_scores, 'macro_f1')
+    if evaluate:
+        confusion_metrics = calculate_confusion_and_prf_metrics(
+            eval_scores.get('eval_preds'),
+            eval_scores.get('eval_labels'),
+            class_names=target_labels,
+            threshold=params.f1_threshold,
+        )
+        output_scores.update(confusion_metrics)
+        for key in ('eval_ids', 'eval_preds', 'eval_labels'):
+            output_scores.pop(key, None)
+        output_scores['train_ratio'] = params.train_ratio
 
     log.info('%s', '\n' + '-' * 80)
-    log.info('top-1      %.3f', top1)
-    log.info('roc_auc    %.3f', rocauc)
-    log.info('cmap       %.3f', cmap)
-    log.info('micro_p    %.3f', micro_precision)
-    log.info('macro_p    %.3f', macro_precision)
-    log.info('micro_r    %.3f', micro_recall)
-    log.info('macro_r    %.3f', macro_recall)
-    log.info('micro_f1   %.3f', micro_f1)
-    log.info('macro_f1   %.3f', macro_f1)
-    log.info('weak_neg_batch %s', params.weak_negatives_batch_size)
+    if evaluate:
+        metrics = EvalMetrics.from_dict(output_scores)
+        log.info('%s', metrics)
+    else:
+        metrics = None
+    log.info(
+        'training params: l1=%.8g l2=%.8g train_ratio=%.3f weak_neg_batch=%s',
+        params.l1_strength,
+        params.l2_strength,
+        params.train_ratio,
+        params.weak_negatives_batch_size,
+    )
 
     training_info = {
         'resolved_weak_negatives_batch_size': params.weak_negatives_batch_size,
-        'balance_dataset_enabled': bool(balance_dataset),
-        'oversampling_applied': oversampling_applied,
-        'oversampled_train_ids_requested_count': oversampled_used_count,
-        'oversampled_train_ids_used_count': oversampled_used_count,
-        'excluded_eval_from_oversampled_count': 0, # Metric preserved for UI compatibility, but structurally eliminated
-        'original_train_ids_count': int(len(original_train_ids)),
-        'eval_ids_count': int(len(original_eval_ids)),
+        **split.training_info,
         'l1_strength': params.l1_strength,
         'l2_strength': params.l2_strength,
         'regularize_bias': params.regularize_bias,
     }
-    
-    if auto_oversample_factors is not None:
-        training_info['oversample_factors'] = auto_oversample_factors
-        # Output breakdown strictly against the training split to verify logic
-        train_set = set(original_train_ids.tolist())
-        breakdown = {}
-        for label in target_labels:
-            if label in auto_oversample_factors:
-                pos_ids = db.get_embeddings_by_label(label, hoplite_interface.LabelType.POSITIVE, None)
-                neg_ids = db.get_embeddings_by_label(label, hoplite_interface.LabelType.NEGATIVE, None)
-                breakdown[label] = {
-                    'train_pos_count': sum(1 for x in pos_ids if x in train_set),
-                    'train_neg_count': sum(1 for x in neg_ids if x in train_set),
-                    'pos_factor': auto_oversample_factors[label]['pos_factor'],
-                    'neg_factor': auto_oversample_factors[label]['neg_factor'],
-                }
-        training_info['per_label_oversample_breakdown'] = breakdown
 
     return TrainingResult(
         classifier_model=linear_classifier,
-        eval_scores=output_scores,
+        eval_scores=metrics,
         training_info=training_info,
+        train_params=params,
+    )
+
+
+def train_classifier(
+    db,
+    target_labels: Sequence[str],
+    params: TrainClassifierParams,
+    balance_dataset: bool = True,
+    classifier_name: str | None = None,
+    regularization_state_path=None,
+) -> TrainingResult:
+    """Coordinate tuning, validation, and final one-pass model training."""
+    if params.auto_tune_regularization:
+        fold_count = params.tuning_folds
+    else:
+        fold_count = max(params.k_folds, 1)
+
+    fold_splits = tuple(
+        get_oversampled_data_split(
+            db=db,
+            target_labels=target_labels,
+            params=replace(params, seed=params.seed + fold_index),
+            balance_dataset=balance_dataset,
+        )
+        for fold_index in range(fold_count)
+    )
+
+    if params.auto_tune_regularization:
+        from recognizer_workshop.app.services.regularization_tuning import tune_regularization
+
+        tuning: RegularizationTuningResult = tune_regularization(
+            db=db,
+            target_labels=target_labels,
+            params=params,
+            fold_splits=fold_splits,
+            classifier_name=classifier_name,
+            state_path=regularization_state_path,
+        )
+        selected_params = tuning.best_params
+        metrics = tuning.best_metrics
+        evaluation_info = {
+            'cross_validation_folds': len(fold_splits),
+            'cross_validation_metrics': tuning.best_metrics.to_dict(),
+            'regularization_tuning': tuning.to_dict(),
+        }
+    else:
+        cross_validation = cross_validate_classifier(
+            db=db,
+            target_labels=target_labels,
+            params=params,
+            fold_splits=fold_splits,
+        )
+        selected_params = params
+        metrics = cross_validation.metrics
+        evaluation_info = {
+            'cross_validation_folds': len(fold_splits),
+            'cross_validation_metrics': cross_validation.metrics.to_dict(),
+            'cross_validation_fold_metrics': [
+                fold_metrics.to_dict()
+                for fold_metrics in cross_validation.fold_metrics
+            ],
+        }
+
+    final_params = replace(
+        selected_params,
+        auto_tune_regularization=False,
+        k_folds=1,
+        train_ratio=1.0,
+    )
+    final_split = get_oversampled_data_split(
+        db=db,
+        target_labels=target_labels,
+        params=final_params,
+        balance_dataset=balance_dataset,
+    )
+    final_result = _train_single_model(
+        db=db,
+        target_labels=target_labels,
+        params=final_params,
+        split=final_split,
+        evaluate=False,
+    )
+    training_info = dict(final_result.training_info or {})
+    training_info.update(evaluation_info)
+    return TrainingResult(
+        classifier_model=final_result.classifier_model,
+        eval_scores=metrics,
+        training_info=training_info,
+        train_params=final_result.train_params,
+    )
+
+
+def get_all_labeled_ids(db, target_labels: Sequence[str]) -> np.ndarray:
+    labeled_ids = []
+    for label in target_labels:
+        labeled_ids.extend(db.get_embeddings_by_label(label, hoplite_interface.LabelType.POSITIVE, None))
+        labeled_ids.extend(db.get_embeddings_by_label(label, hoplite_interface.LabelType.NEGATIVE, None))
+    if not labeled_ids:
+        return np.array([], dtype=np.int64)
+    return np.unique(np.asarray(labeled_ids, dtype=np.int64))
+
+
+def cross_validate_classifier(
+    db,
+    target_labels: Sequence[str],
+    params: TrainClassifierParams,
+    fold_splits: Sequence[PreparedDataSplit],
+) -> CrossValidationResult:
+    """Evaluate one parameter set against one fixed collection of splits."""
+    if not fold_splits:
+        raise ValueError('At least one fold split is required.')
+
+    fold_metrics = []
+    for split in fold_splits:
+        result = _train_single_model(
+            db=db,
+            target_labels=target_labels,
+            params=replace(params, k_folds=1, auto_tune_regularization=False),
+            split=split,
+            evaluate=True,
+        )
+        fold_metrics.append(result.eval_scores)
+
+    return CrossValidationResult(
+        metrics=EvalMetrics.average(fold_metrics),
+        fold_metrics=tuple(fold_metrics),
     )
 
 
 def training_result_to_json(result: TrainingResult) -> dict[str, Any]:
     """Create a JSON-safe dict for UI consumption from TrainingResult."""
 
-    def _to_json_safe(value: Any) -> Any:
-        if isinstance(value, np.ndarray):
-            return _to_json_safe(value.tolist())
-        if isinstance(value, float):
-            return None if not math.isfinite(value) else value
-        if isinstance(value, (np.floating, np.integer)):
-            scalar = value.item()
-            if isinstance(scalar, float) and not math.isfinite(scalar):
-                return None
-            return scalar
-        if isinstance(value, dict):
-            return {str(k): _to_json_safe(v) for k, v in value.items()}
-        if isinstance(value, (list, tuple)):
-            return [_to_json_safe(v) for v in value]
-        return value
-
     metrics = None
     if result.eval_scores is not None:
-        metrics = dict(result.eval_scores)
+        metrics = (
+            result.eval_scores.to_dict()
+            if isinstance(result.eval_scores, EvalMetrics)
+            else dict(result.eval_scores)
+        )
         # Large raw arrays are not needed by the UI table rendering.
         metrics.pop('eval_preds', None)
         metrics.pop('eval_labels', None)
-        metrics = _to_json_safe(metrics)
+        metrics = to_json_safe(metrics)
 
-    return {
+    result_json = {
         'metrics': metrics,
-        'info': _to_json_safe(result.training_info) if result.training_info is not None else None,
+        'info': to_json_safe(result.training_info) if result.training_info is not None else None,
     }
+    if result.train_params is not None:
+        result_json['params'] = to_json_safe(asdict(result.train_params))
+    return result_json
 
 
 def _require_metric(scores: dict[str, Any], key: str) -> float:
@@ -467,8 +748,7 @@ def calculate_confusion_and_prf_metrics(
     def _safe_div(num: float, denom: float) -> float:
         return float(num / denom) if denom > 0 else float('nan')
 
-    if logits is None or labels is None:
-        return {
+    missing_metrics = {
             'per_class_confusion': [],
             'micro_precision': float('nan'),
             'macro_precision': float('nan'),
@@ -477,20 +757,15 @@ def calculate_confusion_and_prf_metrics(
             'micro_f1': float('nan'),
             'macro_f1': float('nan'),
         }
+
+    if logits is None or labels is None:
+        return missing_metrics
 
     logits = np.asarray(logits)
     labels = np.asarray(labels)
 
     if logits.size == 0 or labels.size == 0:
-        return {
-            'per_class_confusion': [],
-            'micro_precision': float('nan'),
-            'macro_precision': float('nan'),
-            'micro_recall': float('nan'),
-            'macro_recall': float('nan'),
-            'micro_f1': float('nan'),
-            'macro_f1': float('nan'),
-        }
+        return missing_metrics
 
     if logits.ndim != 2 or labels.ndim != 2:
         raise ValueError('Expected eval_preds and eval_labels to be 2D arrays [n_examples, n_classes].')

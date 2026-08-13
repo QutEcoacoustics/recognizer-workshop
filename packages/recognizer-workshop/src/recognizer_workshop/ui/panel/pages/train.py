@@ -73,6 +73,22 @@ def build(vm):
     learning_rate = pn.widgets.FloatInput(name="Learning Rate", value=1e-3, step=1e-4, sizing_mode="fixed", width=100)
     l1_strength = pn.widgets.FloatInput(name="L1 Regularization", value=0.0, start=0.0, step=1e-4, sizing_mode="fixed", width=140)
     l2_strength = pn.widgets.FloatInput(name="L2 Regularization", value=0.0, start=0.0, step=1e-4, sizing_mode="fixed", width=140)
+    auto_tune_regularization = pn.widgets.Checkbox(
+        name="Auto tune L1/L2",
+        value=True,
+        sizing_mode="fixed",
+        width=130,
+    )
+    btn_reset_regularization_tuning = pn.widgets.Button(
+        name="",
+        icon="refresh",
+        button_type="light",
+        width=32,
+        height=32,
+        margin=(0, 0, 0, 4),
+        align="end",
+        description="Reset saved regularization tuning state",
+    )
     num_steps     = pn.widgets.IntInput(name="Num Steps", value=101, start=1, sizing_mode="fixed", width=100)
     batch_size    = pn.widgets.IntInput(name="Batch Size", value=32, start=1, sizing_mode="fixed", width=100)
     train_ratio   = pn.widgets.FloatInput(name="Train Ratio", value=0.9, start=0.1, end=0.99, step=0.01, sizing_mode="fixed", width=100)
@@ -80,6 +96,17 @@ def build(vm):
     weak_neg_batch_size = pn.widgets.IntInput(name="Weak Neg Batch Size", value=16, start=0, sizing_mode="fixed", width=140)
     btn_auto_set_weak_negs = pn.widgets.Button(name="Auto Set", button_type="default", sizing_mode="fixed", width=100)
     balance_dataset = pn.widgets.Checkbox(name="Balance", value=True)
+
+    def _update_regularization_controls():
+        disabled = auto_tune_regularization.value
+        l1_strength.disabled = disabled
+        l2_strength.disabled = disabled
+
+    auto_tune_regularization.param.watch(
+        lambda _event: _update_regularization_controls(),
+        'value',
+    )
+    _update_regularization_controls()
 
     btn_train = pn.widgets.Button(name="Train recognizer", button_type="success", sizing_mode="fixed", width=150)
     btn_train.height = 40
@@ -342,6 +369,7 @@ def build(vm):
                 learning_rate=learning_rate.value,
                 l1_strength=l1_strength.value,
                 l2_strength=l2_strength.value,
+                auto_tune_regularization=auto_tune_regularization.value,
                 weak_neg_weight=weak_neg_weight.value,
                 num_steps=num_steps.value,
                 train_ratio=train_ratio.value,
@@ -355,6 +383,13 @@ def build(vm):
             progress_bar.value = 0
             with patch_tqdm(progress_bar):
                 train_result = await asyncio.to_thread(run_training)
+
+            trained_params = train_result.get('params', {})
+            if isinstance(trained_params, dict):
+                if trained_params.get('l1_strength') is not None:
+                    l1_strength.value = trained_params['l1_strength']
+                if trained_params.get('l2_strength') is not None:
+                    l2_strength.value = trained_params['l2_strength']
 
             vm.notify(f"Recognizer saved: {train_result.get('version_dir')}", "success")
             _refresh_saved_classifiers_selector_from_engine()
@@ -410,8 +445,36 @@ def build(vm):
         except Exception as e:
             vm.notify(f"Could not auto-set weak negatives batch size: {e}", "error")
 
+    def _reset_regularization_tuning(_):
+        if not vm.eng:
+            vm.notify("Initialize first.", "error")
+            return
+        try:
+            reset_params = training_service.TrainClassifierParams(
+                learning_rate=float(learning_rate.value),
+                weak_neg_weight=float(weak_neg_weight.value),
+                num_steps=int(num_steps.value),
+                train_ratio=float(train_ratio.value),
+                batch_size=int(batch_size.value),
+                weak_negatives_batch_size=int(weak_neg_batch_size.value),
+            )
+            removed = vm.eng.reset_regularization_tuning(
+                classifier_name=sanitize_classifier_name(recognizer_name_field.value or "classifier"),
+                params=reset_params,
+                balance_dataset=balance_dataset.value,
+            )
+            message = (
+                "Saved regularization tuning state cleared."
+                if removed
+                else "No saved regularization tuning state found."
+            )
+            vm.notify(message, "info")
+        except OSError as e:
+            vm.notify(f"Could not clear regularization tuning state: {e}", "error")
+
     btn_train.on_click(_train)
     btn_auto_set_weak_negs.on_click(_auto_set_weak_negs)
+    btn_reset_regularization_tuning.on_click(_reset_regularization_tuning)
     _update_recognizer_name_validation(recognizer_name_field.value)
 
     @pn.depends(vm.obs.ensure("engine_state").param.version, watch=True)
@@ -431,7 +494,17 @@ def build(vm):
     hyperparameters = pn.Card(
         pn.Column(
             pn.Row("Algorithm Parameters", pn.Spacer(), algorithm_params_help_btn, sizing_mode="stretch_width"),
-            pn.Row(learning_rate, l1_strength, l2_strength, num_steps, batch_size, sizing_mode="stretch_width"),
+            pn.Row(
+                learning_rate,
+                num_steps,
+                batch_size,
+                l1_strength,
+                l2_strength,
+                auto_tune_regularization,
+                btn_reset_regularization_tuning,
+                sizing_mode="stretch_width",
+                align="start",
+            ),
             pn.Row("Labeled Data Parameters", pn.Spacer(), labeled_data_params_help_btn, sizing_mode="stretch_width"),
             pn.Row(train_ratio, weak_neg_weight, weak_neg_batch_size, btn_auto_set_weak_negs, balance_dataset, sizing_mode="stretch_width"),
             sizing_mode="stretch_width",

@@ -92,7 +92,24 @@ def train_linear_classifier(
       "beta": lin_model.get_weights()[0],
       "beta_bias": lin_model.get_weights()[1],
   }
-  eval_scores = eval_classifier(params, data_manager, eval_ids)
+  if len(eval_ids) > 0:
+    eval_scores = eval_classifier(params, data_manager, eval_ids)
+    validation_losses = []
+    for batch in data_manager.batched_example_iterator(
+        eval_ids, add_weak_negatives=False, repeat=False
+    ):
+      logits = lin_model(batch.embedding, training=False)
+      batch_loss = loss_fn(
+          batch.multihot, logits, batch.is_labeled_mask, weak_neg_weight
+      )
+      validation_losses.append(float(batch_loss.numpy()))
+    eval_scores["validation_loss"] = float(np.mean(validation_losses))
+  else:
+    eval_scores = {
+        "eval_preds": np.empty((0, num_classes), dtype=np.float32),
+        "eval_labels": np.empty((0, num_classes), dtype=np.float32),
+        "validation_loss": float("nan"),
+    }
   model_config = data_manager.db.get_metadata("model_config")
   linear_classifier = LinearClassifier(
       beta=params["beta"],

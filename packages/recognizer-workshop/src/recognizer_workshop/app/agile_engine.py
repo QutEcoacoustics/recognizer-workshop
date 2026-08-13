@@ -616,6 +616,26 @@ class agile_state:
         self.db.commit()
 
 
+    def reset_regularization_tuning(
+        self,
+        classifier_name: str,
+        params: training_service.TrainClassifierParams,
+        balance_dataset: bool,
+    ) -> bool:
+        """Remove tuning state for one classifier and training recipe."""
+        if not self.config or not self.config.models_folder:
+            return False
+
+        from recognizer_workshop.app.services.regularization_tuning import delete_tuning_state
+
+        return delete_tuning_state(
+            path=Path(self.config.models_folder) / ".regularization_tuning.json",
+            classifier_name=classifier_name,
+            target_labels=self.get_target_labels(),
+            params=params,
+            balance_dataset=balance_dataset,
+        )
+
     def train_classifier(self,
                         classifier_name: str,
                         learning_rate = 1e-3,
@@ -627,6 +647,9 @@ class agile_state:
                         l1_strength: float = 0.0,
                         l2_strength: float = 0.0,
                         regularize_bias: bool = False,
+                        k_folds: int = 1,
+                        auto_tune_regularization: bool = False,
+                        tuning_trials: int = 10,
                         balance_dataset: bool = True):
         target_labels = self.get_target_labels()
         resolved_weak_negatives_batch_size = max(int(weak_negatives_batch_size), 0)
@@ -641,6 +664,9 @@ class agile_state:
             l1_strength=l1_strength,
             l2_strength=l2_strength,
             regularize_bias=regularize_bias,
+            k_folds=k_folds,
+            auto_tune_regularization=auto_tune_regularization,
+            tuning_trials=tuning_trials,
         )
         log.info('Training for target labels: %s', target_labels)
 
@@ -649,6 +675,12 @@ class agile_state:
             target_labels=target_labels,
             params=params,
             balance_dataset=balance_dataset,
+            classifier_name=classifier_name,
+            regularization_state_path=(
+                Path(self.config.models_folder) / ".regularization_tuning.json"
+                if self.config.models_folder
+                else None
+            ),
         )
 
         self.train_result = result
