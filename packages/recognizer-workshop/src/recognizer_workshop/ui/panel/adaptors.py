@@ -12,6 +12,7 @@ import param
 from perch_hoplite.db import interface as hoplite_interface
 
 from recognizer_workshop.app.agile_engine import AgileConfig, agile_state, LabelName
+from recognizer_workshop.app.app_settings import app_settings
 from recognizer_workshop.perch_hoplite_custom_modifications.embedding_display import QueryDisplay
 from recognizer_workshop.ui.panel.components.native.embedding_display import PanelQuerySelector, PanelEmbeddingDisplay, PanelEmbeddingDisplayGroup
 
@@ -202,6 +203,7 @@ class PanelUI(param.Parameterized):
                     value=str(label.call_type) if label.call_type else "", 
                     placeholder="(optional) e.g., song",
                     sizing_mode="stretch_width",
+                    visible=bool(app_settings.enable_call_types),
                 )
                 remove_btn = pn.widgets.Button(
                     name="Remove",
