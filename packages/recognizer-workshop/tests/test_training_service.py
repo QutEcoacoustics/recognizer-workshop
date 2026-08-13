@@ -3,6 +3,7 @@ from pathlib import Path
 import json
 
 import numpy as np
+import pytest
 
 from perch_hoplite.db import interface
 from perch_hoplite.db.tests import test_utils as db_test_utils
@@ -83,7 +84,7 @@ def test_train_classifier_uses_explicit_weak_negative_batch_size(monkeypatch, tm
         batch_size=10,
         weak_neg_weight=0.2,
         weak_negatives_batch_size=7,
-        train_ratio=1.0,
+        train_ratio=0.9,
         num_steps=3,
     )
     captured = {}
@@ -231,6 +232,24 @@ def test_build_oversampled_train_ids_deduplicates_overlapping_labels(tmp_path):
     )
 
     np.testing.assert_array_equal(oversampled_ids, np.asarray(embedding_ids))
+
+
+def test_train_single_model_rejects_evaluation_without_eval_ids(tmp_path):
+    db = _make_labeled_db(tmp_path, positive_count=2, negative_count=1)
+    split = training.PreparedDataSplit(
+        train_ids=np.asarray(list(db.get_embedding_ids())),
+        eval_ids=np.array([], dtype=np.int64),
+        data_info={},
+    )
+
+    with pytest.raises(ValueError, match='no evaluation IDs'):
+        training._train_single_model(
+            db=db,
+            target_labels=('alpha',),
+            params=training.TrainClassifierParams(train_ratio=1.0),
+            split=split,
+            evaluate=True,
+        )
 
 
 def test_train_classifier_balance_flow_uses_isolated_splits(monkeypatch, tmp_path):

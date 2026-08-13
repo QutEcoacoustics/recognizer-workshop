@@ -390,7 +390,7 @@ def build(vm):
             with patch_tqdm(progress_bar):
                 train_result = await asyncio.to_thread(run_training)
 
-            trained_params = train_result.get('params', {})
+            trained_params = train_result.get('final_model', {}).get('params', {})
             if isinstance(trained_params, dict):
                 if trained_params.get('l1_strength') is not None:
                     l1_strength.value = trained_params['l1_strength']

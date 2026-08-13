@@ -70,7 +70,7 @@ def build(vm):
                 for count in label_counts.values()
             )
         cap_note.object = (
-            f"_Note: only a maximum of {max_examples} will be added per label._"
+            f"_Note: only a maximum of {max_examples} examples per label/type will be added._"
             if needs_cap else ""
         )
         cap_note.visible = needs_cap

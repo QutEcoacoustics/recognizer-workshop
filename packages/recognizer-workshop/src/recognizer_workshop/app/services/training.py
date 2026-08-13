@@ -573,6 +573,9 @@ def _train_single_model(
     evaluate: bool,
 ) -> tuple[Any, EvalMetrics | None]:
     """Train once using an already prepared split."""
+    if evaluate and len(split.eval_ids) == 0:
+        raise ValueError('Cannot evaluate a training split with no evaluation IDs.')
+
     data_manager = classifier_data.AgileDataManager(
         target_labels=tuple(target_labels),
         db=db,
