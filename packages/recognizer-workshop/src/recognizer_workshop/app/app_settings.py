@@ -15,7 +15,9 @@ class AppSettings:
 
             # which workbenches to display as options for the user to use
             "enabled_workbenches": ["ecosounds", "a2o"], 
-            "default_workbench": "ecosounds"
+            "default_workbench": "ecosounds",
+            "max_fetched_label_examples_per_type": 100,
+            "enable_call_types": False,
         }
         self.load_config()
 

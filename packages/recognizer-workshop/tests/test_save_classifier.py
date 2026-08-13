@@ -30,8 +30,7 @@ def engine_with_classifier(tmp_path):
     eng = agile_state(config)
     eng.train_result = TrainingResult(
         classifier_model=_make_linear_classifier(),
-        eval_scores={},
-        training_info={},
+        info={},
     )
     return eng, tmp_path
 

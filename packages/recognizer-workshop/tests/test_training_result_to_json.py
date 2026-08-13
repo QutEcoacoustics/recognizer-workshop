@@ -2,11 +2,18 @@
 training_result_to_json in this branch."""
 
 import math
+import json
+from dataclasses import asdict
 
 import numpy as np
 import pytest
 
-from recognizer_workshop.app.services.training import TrainingResult, training_result_to_json
+from recognizer_workshop.app.services.training import (
+    TrainClassifierParams,
+    TrainingResult,
+    training_result_to_json,
+)
+from recognizer_workshop.app.services.json_utils import to_json_safe
 from ml_collections import config_dict
 from perch_hoplite.agile.classifier import LinearClassifier
 
@@ -17,7 +24,10 @@ def _make_result(eval_scores=None, training_info=None) -> TrainingResult:
     beta_bias = rng.standard_normal((1,)).astype(np.float32)
     model_config = config_dict.ConfigDict({"model_name": "test"})
     clf = LinearClassifier(beta=beta, beta_bias=beta_bias, classes=("a",), embedding_model_config=model_config)
-    return TrainingResult(classifier_model=clf, eval_scores=eval_scores, training_info=training_info)
+    return TrainingResult(
+        classifier_model=clf,
+        info={'metrics': eval_scores, 'info': training_info},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -117,3 +127,66 @@ class TestNonFiniteNormalisation:
         # Should not raise
         serialised = json.dumps(out)
         assert serialised is not None
+
+
+def test_to_json_safe_handles_nested_numpy_values_and_non_finite_numbers():
+    value = {
+        'array': np.array([0.5, np.nan]),
+        'numpy_float': np.float64(np.inf),
+        'tuple': (np.int64(3), float('-inf')),
+    }
+
+    result = to_json_safe(value)
+
+    assert result == {
+        'array': [0.5, None],
+        'numpy_float': None,
+        'tuple': [3, None],
+    }
+    json.dumps(result, allow_nan=False)
+
+
+def test_training_params_are_serialized_when_present():
+    result = _make_result()
+    result = TrainingResult(
+        classifier_model=result.classifier_model,
+        info={'params': asdict(TrainClassifierParams(train_ratio=1.0, k_folds=1))},
+    )
+
+    output = training_result_to_json(result)
+
+    assert output['params']['train_ratio'] == 1.0
+    assert output['params']['k_folds'] == 1
+
+
+def test_structured_training_info_serializes_evaluation_and_final_model():
+    result = _make_result()
+    metrics = {
+        'top1_acc': 0.9,
+        'train_ratio': 0.9,
+    }
+    result = TrainingResult(
+        classifier_model=result.classifier_model,
+        info={
+            'evaluation': {
+            'average_metrics': metrics,
+            'average_data_counts': {'train': {}, 'test': {}},
+            'folds': [],
+            'params': {'train_ratio': 0.9},
+            },
+            'final_model': {
+                'data_info': {
+                    'data_counts': {'train': {}, 'test': {}},
+                    'balancing_debug': {'balance_dataset_enabled': True},
+                },
+                'params': asdict(TrainClassifierParams(train_ratio=1.0)),
+            },
+        },
+    )
+
+    output = training_result_to_json(result)
+
+    assert output['evaluation']['average_metrics'] == metrics
+    assert output['evaluation']['average_data_counts'] == {'train': {}, 'test': {}}
+    assert output['final_model']['data_info']['balancing_debug']['balance_dataset_enabled'] is True
+    assert output['final_model']['params']['train_ratio'] == 1.0

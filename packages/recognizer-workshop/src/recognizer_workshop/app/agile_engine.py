@@ -1,4 +1,5 @@
 import json
+import copy
 import functools
 from pathlib import Path
 import numpy as np
@@ -25,7 +26,7 @@ from recognizer_workshop.app.agile_config import AgileConfig
 from recognizer_workshop.app.app_settings import app_settings  # noqa: F401 — triggers baw_settings override
 from recognizer_workshop.app.services.events.upload_detections import upload_detections
 from recognizer_workshop.app.services.db_labels.fetch_baw_labels import labels_from_event_taggings
-from recognizer_workshop.app.services.db_labels.add_db_labels import add_labels_to_db
+from recognizer_workshop.app.services.db_labels.add_db_labels import add_labels_to_db, cap_fetched_label_examples
 from recognizer_workshop.app.services.db_labels.db_labels_info import get_label_counts
 from recognizer_workshop.app.services.db_labels.dataclasses import LabelName
 from recognizer_workshop.app.services import training as training_service
@@ -44,7 +45,6 @@ from recognizer_workshop.app.services.embed import embed_worker
 from concurrent.futures import ProcessPoolExecutor
 
 log = logging.getLogger(__name__)
-
 
 def sanitize_classifier_name(name: str) -> str:
     """Return a filesystem-safe, lowercase classifier name.
@@ -616,6 +616,24 @@ class agile_state:
         self.db.commit()
 
 
+    def reset_regularization_tuning(
+        self,
+        classifier_name: str,
+        params: training_service.TrainClassifierParams,
+    ) -> bool:
+        """Remove tuning state for one classifier and training recipe."""
+        if not self.config or not self.config.models_folder:
+            return False
+
+        from recognizer_workshop.app.services.regularization_tuning import delete_tuning_state
+
+        return delete_tuning_state(
+            path=Path(self.config.models_folder) / ".regularization_tuning.json",
+            classifier_name=classifier_name,
+            target_labels=self.get_target_labels(),
+            params=params,
+        )
+
     def train_classifier(self,
                         classifier_name: str,
                         learning_rate = 1e-3,
@@ -624,6 +642,12 @@ class agile_state:
                         train_ratio = 0.9,
                         batch_size = 128,
                         weak_negatives_batch_size = 128,
+                        l1_strength: float = 0.0,
+                        l2_strength: float = 0.0,
+                        regularize_bias: bool = False,
+                        k_folds: int = 1,
+                        auto_tune_regularization: bool = False,
+                        tuning_trials: int = 10,
                         balance_dataset: bool = True):
         target_labels = self.get_target_labels()
         resolved_weak_negatives_batch_size = max(int(weak_negatives_batch_size), 0)
@@ -635,6 +659,13 @@ class agile_state:
             train_ratio=train_ratio,
             batch_size=batch_size,
             weak_negatives_batch_size=resolved_weak_negatives_batch_size,
+            l1_strength=l1_strength,
+            l2_strength=l2_strength,
+            regularize_bias=regularize_bias,
+            k_folds=k_folds,
+            auto_tune_regularization=auto_tune_regularization,
+            tuning_trials=tuning_trials,
+            balance_dataset=balance_dataset,
         )
         log.info('Training for target labels: %s', target_labels)
 
@@ -642,7 +673,12 @@ class agile_state:
             db=self.db,
             target_labels=target_labels,
             params=params,
-            balance_dataset=balance_dataset,
+            classifier_name=classifier_name,
+            regularization_state_path=(
+                Path(self.config.models_folder) / ".regularization_tuning.json"
+                if self.config.models_folder
+                else None
+            ),
         )
 
         self.train_result = result
@@ -906,7 +942,12 @@ class agile_state:
             if not self.has_fetched_labels_ready:
                 raise ValueError("No fetched labels are ready to commit.")
 
-            outcomes = self.commit_labels(self.fetched_label_result_sets, progress_callback=progress_callback)
+            max_examples = app_settings.max_fetched_label_examples_per_type
+            if isinstance(max_examples, int) and not isinstance(max_examples, bool) and max_examples > 0:
+                capped_result_sets = cap_fetched_label_examples(self.fetched_label_result_sets, max_examples)
+            else:
+                capped_result_sets = self.fetched_label_result_sets
+            outcomes = self.commit_labels(capped_result_sets, progress_callback=progress_callback)
             self.fetched_label_outcomes = outcomes
 
             added_count = sum(
@@ -1028,7 +1069,7 @@ class agile_state:
 
         Directory structure:
             <models_folder>/<classifier_name>/<YYYYMMDD_HHMMSS>/recognizer.json
-            <models_folder>/<classifier_name>/<YYYYMMDD_HHMMSS>/metrics.json
+            <models_folder>/<classifier_name>/<YYYYMMDD_HHMMSS>/info.json
 
         Returns the version directory path.
         """
@@ -1056,8 +1097,8 @@ class agile_state:
         except (OSError, ValueError) as exc:
             log.warning('Could not inject classifier_name into %s: %s', recognizer_path, exc)
 
-        metrics_path = version_dir / "metrics.json"
-        with metrics_path.open('w', encoding='utf-8') as f:
+        info_path = version_dir / "info.json"
+        with info_path.open('w', encoding='utf-8') as f:
             json.dump(train_result, f, indent=2, default=str)
 
         return version_dir

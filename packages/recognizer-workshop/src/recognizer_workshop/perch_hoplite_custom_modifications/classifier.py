@@ -1,15 +1,123 @@
 import logging
 import numpy as np
 import tqdm
+import tensorflow as tf
 from etils import epath
 
-from perch_hoplite.agile.classifier import LinearClassifier, CsvWorkerState, batched_embedding_iterator
+from perch_hoplite.agile.classifier import (
+  LinearClassifier,
+  CsvWorkerState,
+  batched_embedding_iterator,
+  bce_loss,
+  hinge_loss,
+  eval_classifier,
+)
 from perch_hoplite.db import interface as db_interface
 from typing import Any, Iterator, Sequence
 from concurrent import futures
 
 import logging
 log = logging.getLogger(__name__)
+
+
+def train_linear_classifier(
+    data_manager,
+    learning_rate: float,
+    weak_neg_weight: float,
+    num_train_steps: int,
+    loss: str = "bce",
+    l1_strength: float = 0.0,
+    l2_strength: float = 0.0,
+    regularize_bias: bool = False,
+) -> tuple[LinearClassifier, dict[str, Any]]:
+  """Train perch-hoplite's linear classifier with optional weight penalties."""
+  if l1_strength < 0 or l2_strength < 0:
+    raise ValueError("Regularization strengths must be non-negative.")
+
+  embedding_dim = data_manager.db.embedding_dimension()
+  num_classes = len(data_manager.get_target_labels())
+  lin_model = tf.keras.Sequential([
+      tf.keras.Input(shape=[embedding_dim]),
+      tf.keras.layers.Dense(num_classes),
+  ])
+  optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+  lin_model.compile(optimizer=optimizer, loss="binary_crossentropy")
+
+  if loss == "hinge":
+    loss_fn = hinge_loss
+  elif loss == "bce":
+    loss_fn = bce_loss
+  else:
+    raise ValueError(f"Unknown loss: {loss}")
+
+  @tf.function
+  def train_step(y_true, embeddings, is_labeled_mask):
+    with tf.GradientTape() as tape:
+      logits = lin_model(embeddings, training=True)
+      total_loss = loss_fn(y_true, logits, is_labeled_mask, weak_neg_weight)
+      kernel = lin_model.trainable_variables[0]
+      penalty = (
+          l1_strength * tf.reduce_sum(tf.abs(kernel))
+          + l2_strength * tf.reduce_sum(tf.square(kernel))
+      )
+      if regularize_bias:
+        bias = lin_model.trainable_variables[1]
+        penalty += (
+            l1_strength * tf.reduce_sum(tf.abs(bias))
+            + l2_strength * tf.reduce_sum(tf.square(bias))
+        )
+      total_loss = tf.reduce_mean(total_loss) + penalty
+    gradients = tape.gradient(total_loss, lin_model.trainable_variables)
+    optimizer.apply_gradients(zip(gradients, lin_model.trainable_variables))
+    return total_loss
+
+  train_ids, eval_ids = data_manager.get_train_test_split()
+  train_iter = data_manager.batched_example_iterator(
+      train_ids, add_weak_negatives=True, repeat=True
+  )
+  progress = tqdm.tqdm(enumerate(train_iter), total=num_train_steps)
+  update_steps = set(b * (num_train_steps // 100) for b in range(100))
+
+  for step, batch in enumerate(train_iter):
+    if step >= num_train_steps:
+      break
+    step_loss = train_step(batch.multihot, batch.embedding, batch.is_labeled_mask)
+    if step in update_steps and num_train_steps >= 100:
+      progress.update(n=num_train_steps // 100)
+      progress.set_description(f"Loss {step_loss:.8f}")
+  progress.clear()
+  progress.close()
+
+  params = {
+      "beta": lin_model.get_weights()[0],
+      "beta_bias": lin_model.get_weights()[1],
+  }
+  if len(eval_ids) > 0:
+    eval_scores = eval_classifier(params, data_manager, eval_ids)
+    validation_losses = []
+    for batch in data_manager.batched_example_iterator(
+        eval_ids, add_weak_negatives=False, repeat=False
+    ):
+      logits = lin_model(batch.embedding, training=False)
+      batch_loss = loss_fn(
+          batch.multihot, logits, batch.is_labeled_mask, weak_neg_weight
+      )
+      validation_losses.append(float(batch_loss.numpy()))
+    eval_scores["validation_loss"] = float(np.mean(validation_losses))
+  else:
+    eval_scores = {
+        "eval_preds": np.empty((0, num_classes), dtype=np.float32),
+        "eval_labels": np.empty((0, num_classes), dtype=np.float32),
+        "validation_loss": float("nan"),
+    }
+  model_config = data_manager.db.get_metadata("model_config")
+  linear_classifier = LinearClassifier(
+      beta=params["beta"],
+      beta_bias=params["beta_bias"],
+      classes=data_manager.get_target_labels(),
+      embedding_model_config=model_config,
+  )
+  return linear_classifier, eval_scores
 
 
 def csv_worker_initializer_factory(row_func: Any = None) -> None:

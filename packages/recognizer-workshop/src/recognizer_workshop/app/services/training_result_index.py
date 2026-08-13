@@ -2,7 +2,7 @@
 
 Directory layout expected:
     <models_folder>/<classifier_name>/<version_name>/recognizer.json
-    <models_folder>/<classifier_name>/<version_name>/metrics.json (optional)
+    <models_folder>/<classifier_name>/<version_name>/info.json (optional)
 
 Ordering is always by directory modified time (newest first) for both classifiers
 and versions. Version folder names are not required to be parseable dates;
@@ -23,7 +23,8 @@ from perch_hoplite.agile.classifier import LinearClassifier
 from recognizer_workshop.app.services import training as training_service
 
 RECOGNIZER_FILENAME = "recognizer.json"
-METRICS_FILENAME = "metrics.json"
+INFO_FILENAME = "info.json"
+LEGACY_METRICS_FILENAME = "metrics.json"
 
 
 def _parse_version_datetime(version_name: str) -> Optional[datetime]:
@@ -46,8 +47,13 @@ class SavedTrainingResultsItem:
         return self.version_dir / RECOGNIZER_FILENAME
 
     @property
+    def info_path(self) -> Path:
+        return self.version_dir / INFO_FILENAME
+
+    @property
     def metrics_path(self) -> Path:
-        return self.version_dir / METRICS_FILENAME
+        """Compatibility path for legacy metrics.json consumers."""
+        return self.info_path if self.info_path.exists() else self.version_dir / LEGACY_METRICS_FILENAME
 
     @property
     def has_metrics(self) -> bool:
@@ -168,14 +174,12 @@ class SavedTrainingResultsIndex:
 def load_training_result_from_classifier_entry(entry: SavedTrainingResultsItem) -> training_service.TrainingResult:
     """Load a TrainingResult from a saved on-disk classifier entry."""
     classifier_model = LinearClassifier.load(str(entry.recognizer_path))
-    eval_scores = None
-    training_info = None
+    info = {}
     if entry.has_metrics:
         try:
             with entry.metrics_path.open('r', encoding='utf-8') as f:
                 metrics_json = json.load(f)
-            eval_scores = metrics_json.get('metrics')
-            training_info = metrics_json.get('info')
+            info = metrics_json
         except (OSError, ValueError) as exc:
             import logging as _logging
             _logging.getLogger(__name__).warning(
@@ -185,10 +189,7 @@ def load_training_result_from_classifier_entry(entry: SavedTrainingResultsItem) 
 
     return training_service.TrainingResult(
         classifier_model=classifier_model,
-        eval_scores=eval_scores,
-        training_info=training_info,
-        classifier_name=entry.classifier_name,
-        version_name=entry.version_name,
+        info=info,
     )
 
 
