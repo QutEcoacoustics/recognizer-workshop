@@ -108,6 +108,7 @@ class agile_state:
         self.labels_commit_error = None
         self.saved_training_results_index: Optional[SavedTrainingResultsIndex] = None
         self.train_result_load_error: Optional[str] = None
+        self.last_inference_warning: Optional[str] = None
         mp_context = multiprocessing.get_context('spawn')
         self._embed_runner = ProcessPoolExecutor(
             max_workers=1,
@@ -1224,6 +1225,7 @@ class agile_state:
         with output_metadata_path.open('w', encoding='utf-8') as f:
             json.dump(metadata, f, indent=2)
 
+        self.last_inference_warning = None
         inference_service_run_inference(classifier,
                         self.db,
                         output_csv_path,
@@ -1231,7 +1233,8 @@ class agile_state:
                         threshold=threshold,
                         labels=labels,
                         subset=subset,
-                        exclude_labeled=exclude_labeled)
+                        exclude_labeled=exclude_labeled,
+                        warning_callback=lambda message: setattr(self, 'last_inference_warning', message))
         log.info(f'Inference results written to {output_csv_path}')
         return output_csv_path
     

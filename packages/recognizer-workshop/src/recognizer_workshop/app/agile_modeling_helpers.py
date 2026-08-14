@@ -9,7 +9,6 @@ from perch_hoplite.db import interface as hoplite_interface
 from baw_helpers import baw_api as baw_api
 from baw_helpers import baw_helpers
 
-from recognizer_workshop.app.services.verification import sample_for_verification
 
 
 log = logging.getLogger(__name__)
@@ -218,29 +217,12 @@ def make_inference_subset(inference_csv, subset_csv, limit=100):
         limit (int): The number of random rows to include in the subset.
     """
 
-    df = pd.read_csv(inference_csv)
+    from recognizer_workshop.app.services.inference.inference import create_inference_subset
 
-    # for each unique label in the 'label' column:
-    all_indices = []
-    labels = df['label'].unique()
-    for label in labels:
-
-        # subset of the dataframe with that label
-        label_df = df[df['label'] == label]
-        sampled_indices, _, _, _ = sample_for_verification.sample_for_validation(
-            label_df['score'].values,
-            pos_target_y=0.05,
-            neg_target_y=0.05,
-            sample_size=limit
-        )
-
-        # add the sampled indices to the all_indices list
-        all_indices.extend(label_df.index[sampled_indices].tolist())
-        
-
-    subset_df = df.loc[all_indices].reset_index(drop=True)
-    subset_df.to_csv(subset_csv, index=False)
-
-    log.info(f"Successfully created a random subset of {len(subset_df)} rows ({limit} for each of {len(labels)} labels) from '{inference_csv}'.")
-    log.info(f"Output saved to '{subset_csv}'")
+    return create_inference_subset(
+        inference_csv=inference_csv,
+        subset_csv=subset_csv,
+        limit=limit,
+        mode='random',
+    )
 

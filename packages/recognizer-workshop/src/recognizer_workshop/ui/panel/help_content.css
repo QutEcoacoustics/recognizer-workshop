@@ -78,17 +78,20 @@
     margin-top: 25px;
 }
 
-.help-subsection h4 {
+.help-subsection h4,
+.help-subsection-alt h4 {
     margin-bottom: 10px;
     font-size: 1.1em;
 }
 
-.help-subsection ul {
+.help-subsection ul,
+.help-subsection-alt ul {
     margin: 10px 0;
     padding-left: 20px;
 }
 
-.help-subsection li {
+.help-subsection li,
+.help-subsection-alt li {
     margin-bottom: 5px;
 }
 

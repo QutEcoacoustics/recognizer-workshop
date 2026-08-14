@@ -1,3 +1,4 @@
+import csv
 import logging
 import numpy as np
 import tqdm
@@ -125,14 +126,14 @@ def csv_worker_initializer_factory(row_func: Any = None) -> None:
   Initialize the CSV worker.
   row_func: optional function. will return extra column headings if called with no arguments.
   """
-  csv_header = 'idx,dataset_name,source_id,offset,label,score'
+  csv_header = ['idx', 'dataset_name', 'source_id', 'offset', 'label', 'score']
   extras = row_func() if row_func is not None else []
-  csv_header = ','.join([csv_header] + extras)
+  csv_header.extend(extras)
 
   def csv_worker_initializer(state: CsvWorkerState) -> None:
     state.get_thread_db()
-    with epath.Path(state.csv_filepath).open('w') as f:
-      f.write(f'{csv_header}\n')
+    with open(state.csv_filepath, 'w', newline='') as f:
+      csv.writer(f, lineterminator='\n').writerow(csv_header)
   
   return csv_worker_initializer
 
@@ -148,7 +149,8 @@ def csv_worker_fn(
     state: The state of the worker.
   """
   db = state.get_thread_db()
-  with epath.Path(state.csv_filepath).open('a') as f:
+  with open(state.csv_filepath, 'a', newline='') as f:
+    writer = csv.writer(f, lineterminator='\n')
     for idx, logit in zip(embedding_ids, logits):
       source = db.get_embedding_source(idx)
       for a in np.argwhere(logit > state.threshold):
@@ -163,7 +165,7 @@ def csv_worker_fn(
         ]
         if state.row_func is not None:
           row += state.row_func(row)
-        f.write(','.join(map(str, row)) + '\n')
+        writer.writerow(row)
 
 
 def write_inference_csv(

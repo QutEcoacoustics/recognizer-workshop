@@ -245,6 +245,8 @@
                 <li><strong>Weak Negatives Batch Size:</strong> How many of these randomly chosen examples to include for each batch (on top of the number in the strongly labeled batch).</li>
             </ul>
 
+            <p>Download the recognizer and publish it: Suggested format: <a href="https://github.com/ecoacoustics/recognizer-template" target="_blank" rel="noopener noreferrer">https://github.com/ecoacoustics/recognizer-template</a></p>
+
             <h5>Training Metrics</h5>
             <p>Metrics measuring performance on the testing split. Here is what each value means:</p>
             <h6>Aggregate metrics:</h6>
@@ -270,13 +272,14 @@
                 <li><strong>ROC AUC (Per Class) (roc_auc_individual):</strong> A separate ROC AUC value for each target class.</li>
                 <li><strong>CMAP (Per Class) (cmap_individual):</strong> A separate average precision value for each target class.</li>
                 <li><strong>TP (True Positives):</strong> Items where the class is present and the model predicted present.</li>
-                <li><strong>FP (False Positives):</strong> Items where the class is absent but the model predicted present.</li>
-                <li><strong>FN (False Negatives):</strong> Items where the class is present but the model predicted absent.</li>
-                <li><strong>TN (True Negatives):</strong> Items where the class is absent and the model predicted absent.</li>
+                <li><strong>FP (False Positives):</strong> Items where the class is absent but the model predicted present</li>
+                <li><strong>FN (False Negatives):</strong> Items where the class is present but the model predicted absent (includes *'implied negatives').</li>
+                <li><strong>TN (True Negatives):</strong> Items where the class is absent and the model predicted absent (includes *'implied negatives'). </li>
                 <li><strong>Support:</strong> Number of true positive examples for that class in the evaluation set.</li>
                 <li><strong>Precision:</strong> For that class only, $TP / (TP + FP)$.</li>
                 <li><strong>Recall:</strong> For that class only, $TP / (TP + FN)$.</li>
                 <li><strong>F1:</strong> For that class only, harmonic mean of precision and recall: $2TP / (2TP + FP + FN)$.</li>
+                <li>* Implied negatives: for multiclass recognizers, items labelled as positive for class A but not labelled at all for class B are assumed to be negative for class B for the purpose of these metrics</li>
             </ul>
         </div>
         
@@ -318,7 +321,6 @@
         <div id="help-inference-configuration" class="help-subsection">
             <h4>Configuration</h4>
             <ul>
-                <li>Output filename: where to save the inference results</li>
                 <li>Threshold: only include results with a score above this number (default 0)</li>
                 <li>Subset Proportion: The fraction of the database to perform inference on</li>
                 <li>Labels: Which of your target labels to include</li>
@@ -327,10 +329,26 @@
         
         
         <div id="help-export-results" class="help-subsection-alt">
-            <h4>📤 Export Results</h4>
+            <h4>📤 Download Results</h4>
             <ul>
                 <li>Download the csv of detections</li>
-                <li>If needed, upload to Ecosounds Workbench using the <em>import annotations</em> button in your project</li>
+                <li>To avoid very large downloads of detections, you can download a subset
+                    <ul>
+                        <li>Max: only the specified number of highest scoring per class</li>
+                        <li>Random: the specified number per class chosen randomly</li>
+                    </ul>
+                </li>
+                
+                <li>Optionally, upload the events to Ecosounds:
+                    <ul>
+                        <li>First, create a provenance for the events you are importing: <a href="https://www.ecosounds.org/provenances/new" target="_blank" rel="noopener noreferrer">https://www.ecosounds.org/provenances/new</a>. 
+                            The provenance is just a descriptive record as a way to keep track of where events came from and how they were generated. 
+                        </li>
+                        <li>Go to your project</li>
+                        <li>Click the "Import annotations" button</li>
+                        <li>Upload the csv file you downloaded from the inference page</li>
+                    </ul>
+                    </li>
             </ul>
         </div>
     </div>
