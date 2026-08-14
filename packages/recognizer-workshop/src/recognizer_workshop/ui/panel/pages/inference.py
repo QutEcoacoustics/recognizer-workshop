@@ -5,13 +5,15 @@ import tempfile
 import pandas as pd
 import panel as pn
 
-from recognizer_workshop.app.agile_modeling_helpers import make_inference_subset
+from recognizer_workshop.app.services.inference.inference import create_inference_subset
 
 import logging
 
 from recognizer_workshop.app.inference.inference_result import InferenceResultItem
 
 log = logging.getLogger(__name__)
+
+MAX_DOWNLOAD_ROWS = 10_000
 
 def build(vm):
     def _ensure_tabulator():
@@ -24,9 +26,9 @@ def build(vm):
     inference_help_btn = vm.help_system.create_help_button("help-inference-overview", "Help: Inference")
 
     # --- Widgets ---
-    threshold = pn.widgets.FloatInput(name="Threshold", value=0.0, step=0.1)
+    threshold = pn.widgets.FloatInput(name="Score Threshold", value=0.0, step=0.1)
     subset = pn.widgets.FloatInput(
-        name="Subset proportion (0..1)", value=0.001, start=0.001, end=1.0, step=0.05
+        name="Subset proportion (0..1)", value=1.0, start=0.001, end=1.0, step=0.05
     )
     target_label_selector = pn.widgets.CheckBoxGroup(
         name="Labels", options=[], value=[], inline=False, sizing_mode="stretch_width"
@@ -39,6 +41,13 @@ def build(vm):
     inference_results_selector = pn.widgets.Select(name="Inference Run", options=[], sizing_mode="stretch_width")
     download_subset = pn.widgets.Checkbox(name="Download subset", value=False)
     subset_limit = pn.widgets.IntInput(name="Subset limit per label", value=80, start=1, step=10, visible=False)
+    subset_mode = pn.widgets.RadioButtonGroup(
+        name="Subset mode",
+        options=["Random", "Max score"],
+        value="Random",
+        button_type="light",
+        visible=False,
+    )
     btn_subset = pn.widgets.FileDownload(
         filename="inference_results_subset.csv",
         label="Download results",
@@ -47,6 +56,10 @@ def build(vm):
         width=180,
         height=40,
         embed=False,
+    )
+    download_limit_note = pn.pane.Markdown(
+        "**Max download: 10k rows.**",
+        sizing_mode="fixed",
     )
     project_id = pn.widgets.IntInput(name="Project ID (optional)", value=0, start=0)
     btn_upload = pn.widgets.Button(name="Upload detections", button_type="success")
@@ -113,6 +126,9 @@ def build(vm):
         if 'error' in info:
             return pn.pane.Markdown(f"Error reading file: {info['error']}")
 
+        if info.get('total_row_count') == 0:
+            return pn.pane.Markdown("**No detections.**")
+
         preview_row_count = len(info['preview_df'])
 
         info_text = f"**Rows:** {info['total_row_count']:,} "
@@ -143,12 +159,6 @@ def build(vm):
             sizing_mode='stretch_width'
         )
 
-    def _subset_filename_for_download(output_path: Path, total_rows: int) -> str:
-        limit = int(subset_limit.value)
-        if limit >= total_rows:
-            return output_path.name
-        return f"{output_path.stem}.subset.{limit}.csv"
-
     def _prepare_subset_download():
         if not vm.eng:
             raise ValueError("Initialize first.")
@@ -162,17 +172,29 @@ def build(vm):
             raise FileNotFoundError("Selected inference result no longer exists.")
 
         total_rows = selected_item.get_num_rows()
-        if not download_subset.value or int(subset_limit.value) >= total_rows:
+        requested_limit = int(subset_limit.value) if download_subset.value else total_rows
+        effective_limit = min(requested_limit, MAX_DOWNLOAD_ROWS)
+        needs_subset = requested_limit < total_rows or total_rows > MAX_DOWNLOAD_ROWS
+        mode = "max" if subset_mode.value == "Max score" else "random"
+
+        if not needs_subset:
             btn_subset.filename = original_csv.name
             return io.BytesIO(original_csv.read_bytes())
 
-        btn_subset.filename = _subset_filename_for_download(original_csv, total_rows)
+        if requested_limit > MAX_DOWNLOAD_ROWS:
+            vm.notify(
+                f"Download limited to {MAX_DOWNLOAD_ROWS:,} rows; a {mode} subset was selected.",
+                "warning",
+            )
+
+        btn_subset.filename = f"{original_csv.stem}.subset.{effective_limit}.csv"
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir) / "subset.csv"
-            make_inference_subset(
+            create_inference_subset(
                 inference_csv=original_csv,
                 subset_csv=temp_path,
-                limit=int(subset_limit.value),
+                limit=effective_limit,
+                mode=mode,
             )
             return io.BytesIO(temp_path.read_bytes())
 
@@ -216,10 +238,15 @@ def build(vm):
         ]
 
         section2_content.append(
-            pn.Row(download_subset, subset_limit, btn_subset, sizing_mode="stretch_width")
+            pn.Column(
+                pn.Row(download_subset, subset_limit, subset_mode, btn_subset, sizing_mode="stretch_width"),
+                download_limit_note,
+                sizing_mode="stretch_width",
+            )
         )
 
         subset_limit.visible = download_subset.value
+        subset_mode.visible = download_subset.value
 
         section2.objects = section2_content
 
@@ -251,6 +278,9 @@ def build(vm):
                 exclude_labeled=True,
             )
             vm.notify(f"Inference complete! Saved to: {out}", "success")
+            inference_warning = getattr(vm.eng, "last_inference_warning", None)
+            if inference_warning:
+                vm.notify(inference_warning, "warning")
 
             # Refresh the selector, which will show the new result
             _refresh_inference_selector(select_newest=True)
@@ -303,6 +333,7 @@ def build(vm):
 
     def _on_download_subset_change(event):
         subset_limit.visible = event.new
+        subset_mode.visible = event.new
 
     download_subset.param.watch(_on_download_subset_change, "value")
 

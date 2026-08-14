@@ -60,6 +60,13 @@ class InferenceResultItem:
         try:
             
             df_preview, row_count = self.get_preview(preview_limit)
+            if row_count == 0:
+                return {
+                    'total_row_count': 0,
+                    'columns': [],
+                    'preview_df': df_preview,
+                    'unique_labels': [],
+                }
             return {
                 'total_row_count': row_count,
                 'columns': df_preview.columns.tolist() or [],
