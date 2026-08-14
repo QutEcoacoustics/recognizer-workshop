@@ -5,7 +5,10 @@ import tempfile
 import pandas as pd
 import panel as pn
 
-from recognizer_workshop.app.services.inference.inference import create_inference_subset
+from recognizer_workshop.app.services.inference.inference import (
+    cap_inference_rows,
+    create_inference_subset,
+)
 
 import logging
 
@@ -172,31 +175,45 @@ def build(vm):
             raise FileNotFoundError("Selected inference result no longer exists.")
 
         total_rows = selected_item.get_num_rows()
-        requested_limit = int(subset_limit.value) if download_subset.value else total_rows
-        effective_limit = min(requested_limit, MAX_DOWNLOAD_ROWS)
-        needs_subset = requested_limit < total_rows or total_rows > MAX_DOWNLOAD_ROWS
         mode = "max" if subset_mode.value == "Max score" else "random"
 
-        if not needs_subset:
+        if not download_subset.value and total_rows <= MAX_DOWNLOAD_ROWS:
             btn_subset.filename = original_csv.name
             return io.BytesIO(original_csv.read_bytes())
 
-        if requested_limit > MAX_DOWNLOAD_ROWS:
-            vm.notify(
-                f"Download limited to {MAX_DOWNLOAD_ROWS:,} rows; a {mode} subset was selected.",
-                "warning",
-            )
-
-        btn_subset.filename = f"{original_csv.stem}.subset.{effective_limit}.csv"
         with tempfile.TemporaryDirectory() as temp_dir:
-            temp_path = Path(temp_dir) / "subset.csv"
-            create_inference_subset(
-                inference_csv=original_csv,
-                subset_csv=temp_path,
-                limit=effective_limit,
-                mode=mode,
+            source_path = original_csv
+            if download_subset.value:
+                requested_limit = int(subset_limit.value)
+                subset_path = Path(temp_dir) / "requested_subset.csv"
+                create_inference_subset(
+                    inference_csv=original_csv,
+                    subset_csv=subset_path,
+                    limit=requested_limit,
+                    mode=mode,
+                )
+                source_path = subset_path
+
+            source_rows = total_rows if source_path == original_csv else sum(
+                1 for _ in source_path.open("rb")
+            ) - 1
+            if source_rows > MAX_DOWNLOAD_ROWS:
+                capped_path = Path(temp_dir) / "capped_subset.csv"
+                cap_inference_rows(
+                    inference_csv=source_path,
+                    subset_csv=capped_path,
+                    limit=MAX_DOWNLOAD_ROWS,
+                )
+                source_path = capped_path
+                vm.notify(
+                    f"Download limited to {MAX_DOWNLOAD_ROWS:,} rows; a random subset was selected.",
+                    "warning",
+                )
+
+            btn_subset.filename = f"{original_csv.stem}.subset.{MAX_DOWNLOAD_ROWS}.csv" if source_rows > MAX_DOWNLOAD_ROWS else (
+                f"{original_csv.stem}.subset.csv" if download_subset.value else original_csv.name
             )
-            return io.BytesIO(temp_path.read_bytes())
+            return io.BytesIO(source_path.read_bytes())
 
     btn_subset.callback = _prepare_subset_download
 

@@ -9,7 +9,10 @@ import pandas as pd
 
 from recognizer_workshop.app.agile_modeling_helpers import make_inference_subset
 from recognizer_workshop.app.services.inference import inference as inference_service
-from recognizer_workshop.app.services.inference.inference import create_inference_subset
+from recognizer_workshop.app.services.inference.inference import (
+    cap_inference_rows,
+    create_inference_subset,
+)
 from recognizer_workshop.app.inference.inference_result import InferenceResultItem
 from recognizer_workshop.perch_hoplite_custom_modifications import classifier as classifier_mod
 
@@ -59,6 +62,53 @@ def test_create_inference_subset_max_selects_highest_scores_per_label(tmp_path: 
     assert subset.groupby("label").size().to_dict() == {"alpha": 2, "beta": 2}
     assert subset[subset["label"] == "alpha"]["idx"].tolist() == [2, 3]
     assert subset[subset["label"] == "beta"]["idx"].tolist() == [5, 4]
+
+
+def test_create_inference_subset_random_caps_each_label(tmp_path: Path):
+    inference_csv = tmp_path / "inference.csv"
+    subset_csv = tmp_path / "inference.random.csv"
+    frame = pd.DataFrame(
+        [
+            {"idx": index, "label": label, "score": float(index)}
+            for label in ("alpha", "beta", "gamma")
+            for index in range(1, 7)
+        ]
+    )
+    frame.to_csv(inference_csv, index=False)
+
+    row_count = create_inference_subset(
+        inference_csv,
+        subset_csv,
+        limit=2,
+        mode="random",
+    )
+
+    subset = pd.read_csv(subset_csv)
+    assert row_count == 6
+    assert subset.groupby("label").size().to_dict() == {
+        "alpha": 2,
+        "beta": 2,
+        "gamma": 2,
+    }
+
+
+def test_cap_inference_rows_limits_total_rows(tmp_path: Path):
+    inference_csv = tmp_path / "inference.csv"
+    capped_csv = tmp_path / "capped.csv"
+    frame = pd.DataFrame(
+        [
+            {"idx": index, "label": "alpha" if index % 2 else "beta", "score": float(index)}
+            for index in range(20)
+        ]
+    )
+    frame.to_csv(inference_csv, index=False)
+
+    row_count = cap_inference_rows(inference_csv, capped_csv, limit=7)
+
+    capped = pd.read_csv(capped_csv)
+    assert row_count == 7
+    assert len(capped) == 7
+    assert list(capped.columns) == list(frame.columns)
 
 
 def test_empty_inference_result_reports_no_detections(tmp_path: Path):
