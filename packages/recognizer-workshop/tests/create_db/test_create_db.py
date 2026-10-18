@@ -1,4 +1,5 @@
 
+import base64
 import io
 from pathlib import Path
 from typing import Iterable
@@ -84,6 +85,73 @@ def test_iter_parquet_dataframes_local_skip(tmp_path):
     assert list(dfs[0].columns[:3]) == ["source", "channel", "offset"]
 
 
+def test_serialized_parquet_is_decoded_and_ingested_as_float16(tmp_path):
+    data_dir = tmp_path / "parquet"
+    data_dir.mkdir()
+    source = "https://api.ecosounds.org/audio_recordings/123/original"
+    expected_embeddings = np.array(
+        [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]],
+        dtype=np.float32,
+    )
+    df = pd.DataFrame({
+        "source": [source, source],
+        "channel": [0, 0],
+        "offset": [0.0, 5.0],
+        "embeddings": [
+            base64.b64encode(vector.tobytes()).decode("ascii")
+            for vector in expected_embeddings
+        ],
+    })
+    _write_parquet(df, data_dir / "file_123.parquet")
+
+    db, model_config = create_empty_db(
+        db_path=tmp_path / "db",
+        parquet_source=str(data_dir),
+        config=None,
+    )
+    assert model_config.embedding_dim == expected_embeddings.shape[1]
+
+    add_parquet_to_db(
+        db=db,
+        parquet_source=str(data_dir),
+        source_map_fn=lambda value: value,
+    )
+
+    assert db.count_embeddings() == len(expected_embeddings)
+    stored = db.get_embedding(db.get_embedding_ids()[0])
+    assert stored.dtype == np.float16
+    np.testing.assert_array_equal(stored, expected_embeddings[0].astype(np.float16))
+
+
+def test_numeric_embeddings_column_remains_a_numeric_feature(tmp_path):
+    data_dir = tmp_path / "parquet"
+    data_dir.mkdir()
+    df = pd.DataFrame({
+        "source": ["https://api.ecosounds.org/audio_recordings/123/original"],
+        "channel": [0],
+        "offset": [0.0],
+        "embeddings": [1.25],
+    })
+    _write_parquet(df, data_dir / "file_123.parquet")
+
+    db, model_config = create_empty_db(
+        db_path=tmp_path / "db",
+        parquet_source=str(data_dir),
+        config=None,
+    )
+    assert model_config.embedding_dim == 1
+
+    add_parquet_to_db(
+        db=db,
+        parquet_source=str(data_dir),
+        source_map_fn=lambda value: value,
+    )
+
+    assert db.count_embeddings() == 1
+    np.testing.assert_array_equal(
+        db.get_embedding(db.get_embedding_ids()[0]),
+        np.array([1.25], dtype=np.float16),
+    )
 # def make_fake_api(
 #     *,
 #     n_rows: int = 3,
