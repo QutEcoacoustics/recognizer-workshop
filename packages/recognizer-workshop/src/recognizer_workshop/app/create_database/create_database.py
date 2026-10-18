@@ -1,8 +1,9 @@
+import base64
 import logging
 import sys
 import threading
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 from etils import epath
 import functools
 from ml_collections import config_dict
@@ -20,6 +21,9 @@ import pyarrow.dataset as ds
 import pyarrow.parquet as pq
 import pyarrow.compute as pc
 from concurrent.futures import ThreadPoolExecutor
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 from perch_hoplite.agile.convert_legacy import load_embedding_config
 
@@ -587,6 +591,29 @@ def _load_embedding_config(config: str | Path | dict | None):
     raise TypeError(f"Unsupported config type: {type(config).__name__}")
 
 
+def _is_serialized_embedding(value):
+    return isinstance(value, (str, bytes, bytearray, memoryview))
+
+
+def _has_serialized_embeddings(df):
+    return 'embeddings' in df.columns and any(
+        _is_serialized_embedding(value) for value in df['embeddings']
+    )
+
+
+def _decode_serialized_embedding(value, row_index=None):
+    row_context = f' at dataframe row {row_index}' if row_index is not None else ''
+    try:
+        embedding_bytes = base64.b64decode(value, validate=True)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f'Invalid base64 embedding{row_context}.') from exc
+
+    if not embedding_bytes or len(embedding_bytes) % np.dtype(np.float32).itemsize:
+        raise ValueError(f'Invalid float32 embedding size{row_context}.')
+
+    return np.frombuffer(embedding_bytes, dtype=np.float32)
+
+
 def create_empty_db(    
     db_path: str,
     parquet_source: str | Path | list,
@@ -601,8 +628,14 @@ def create_empty_db(
     first_item = next(iter_parquet_dataframes(parquet_source, api_client=api_client, prefetch=0), None)
     if first_item is None:
         raise ValueError("No parquet dataframes available to infer embedding dimension.")
-    meta_cols = [c for c in first_item.columns if c in PARQUET_METADATA_COLUMNS]
-    emb_dim = first_item.shape[1] - len(meta_cols)
+    if _has_serialized_embeddings(first_item):
+        first_embedding = next(
+            value for value in first_item['embeddings'] if _is_serialized_embedding(value)
+        )
+        emb_dim = _decode_serialized_embedding(first_embedding).size
+    else:
+        meta_cols = [c for c in first_item.columns if c in PARQUET_METADATA_COLUMNS]
+        emb_dim = first_item.shape[1] - len(meta_cols)
     if emb_dim <= 0:
         raise ValueError(f"Could not infer embedding dim (got {emb_dim}).")
     
@@ -831,12 +864,16 @@ def add_df_to_db(df,
                  dataset_name='search_set'):
     if source_map_fn is None:
         source_map_fn = lambda x: x
+    serialized_embeddings = _has_serialized_embeddings(df)
     num_inserted = 0
     for i, row in df.iterrows():
         row_offset = np.array(row['offset'])
         row_source = source_map_fn(row['source'])
-        # todo: check if it's fine to hardcode to float16 or should we be getting this from the config?
-        row_embedding = np.array(row[3:], dtype=np.float16) # Skip 'source', 'channel', and 'offset'
+        if serialized_embeddings:
+            row_embedding = _decode_serialized_embedding(row['embeddings'], i).astype(np.float16)
+        else:
+            # todo: check if it's fine to hardcode to float16 or should we be getting this from the config?
+            row_embedding = np.array(row[3:], dtype=np.float16) # Skip 'source', 'channel', and 'offset'
         source = interface.EmbeddingSource(dataset_name, row_source, row_offset)
         db.insert_embedding(row_embedding, source)
         num_inserted += 1
