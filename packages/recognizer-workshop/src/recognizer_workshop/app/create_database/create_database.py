@@ -873,7 +873,7 @@ def add_df_to_db(df,
             row_embedding = _decode_serialized_embedding(row['embeddings'], i).astype(np.float16)
         else:
             # todo: check if it's fine to hardcode to float16 or should we be getting this from the config?
-            row_embedding = np.array(row[3:], dtype=np.float16) # Skip 'source', 'channel', and 'offset'
+            row_embedding = np.array(row[len(PARQUET_METADATA_COLUMNS):], dtype=np.float16)
         source = interface.EmbeddingSource(dataset_name, row_source, row_offset)
         db.insert_embedding(row_embedding, source)
         num_inserted += 1

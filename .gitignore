@@ -1,6 +1,7 @@
 # Environment variables / Secrets
 .env
 .dev.env
+recognizer-workshop.code-workspace
 
 
 local_scripts/*

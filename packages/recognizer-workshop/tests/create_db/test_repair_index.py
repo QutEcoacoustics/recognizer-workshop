@@ -6,13 +6,18 @@ saves the original vectors, deletes the index, rebuilds it, and verifies
 that every embedding vector matches the original.
 """
 
+import base64
+import io
 import os
 from pathlib import Path
 
 import numpy as np
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 from perch_hoplite.db import sqlite_usearch_impl
+import recognizer_workshop.app.create_database.repair_index as repair_index_module
 
 from recognizer_workshop.app.create_database.repair_index import (
     repair_index,
@@ -62,6 +67,66 @@ class TestGetAridsFromSources:
         ]
         items = _get_arids_from_sources(urls)
         assert len(items) == 1
+
+
+@pytest.mark.parametrize("embedding_format", ["serialized", "columns"])
+def test_repair_index_restores_embedding_formats(
+    embedding_format,
+    test_db_path,
+    mock_api_client,
+    monkeypatch,
+):
+    db = sqlite_usearch_impl.SQLiteUsearchDB.create(test_db_path)
+    source_offsets = _get_source_embedding_map(db)
+    source_url, offsets = next(iter(source_offsets.items()))
+    expected_offset, expected_id = next(iter(offsets.items()))
+    expected_embedding = np.linspace(0.01, 0.02, db.embedding_dim, dtype=np.float32)
+
+    parquet_columns = {
+        "source": [source_url],
+        "channel": [0],
+        "offset": [expected_offset],
+    }
+    if embedding_format == "serialized":
+        parquet_columns["embeddings"] = [
+            base64.b64encode(expected_embedding.tobytes()).decode("ascii")
+        ]
+    else:
+        parquet_columns.update({
+            f"f{feature_index:04d}": [value]
+            for feature_index, value in enumerate(expected_embedding)
+        })
+
+    parquet_buffer = io.BytesIO()
+    pq.write_table(pa.table(parquet_columns), parquet_buffer)
+    parquet_buffer.seek(0)
+    mock_api_client.analysis_result_file.return_value = parquet_buffer
+
+    def identity_source(source_value, domain):
+        _ = domain
+        return source_value
+
+    monkeypatch.setattr(
+        repair_index_module,
+        "convert_source_to_original_url",
+        identity_source,
+    )
+
+    domain = _get_arids_from_sources([source_url])[0]["domain"]
+    index_path = Path(test_db_path) / "usearch.index"
+    del db
+    index_path.unlink()
+    db = sqlite_usearch_impl.SQLiteUsearchDB.create(test_db_path)
+
+    stats = repair_index(db, {domain: mock_api_client})
+
+    assert stats["embeddings_added"] == 1
+    assert stats["errors"] == 0
+    assert db.ui.contains(expected_id)
+    np.testing.assert_array_equal(
+        db.ui.get(expected_id),
+        expected_embedding.astype(np.float16),
+    )
 
 
 # ---------------------------------------------------------------------------
