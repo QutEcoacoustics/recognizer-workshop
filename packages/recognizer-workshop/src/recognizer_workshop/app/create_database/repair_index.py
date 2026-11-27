@@ -26,6 +26,9 @@ from baw_helpers.baw_api import AuthenticationError
 from recognizer_workshop.app.create_database.create_database import (
     BAW_ANALYSIS_JOB_ID,
     DEFAULT_BAW_ANALYSIS_NAME,
+    PARQUET_METADATA_COLUMNS,
+    _decode_serialized_embedding,
+    _has_serialized_embeddings,
     convert_source_to_original_url,
 )
 
@@ -212,8 +215,9 @@ def repair_index(
             try:
                 df = fut.result()
                 files_processed += 1
+                serialized_embeddings = _has_serialized_embeddings(df)
 
-                for _, row in df.iterrows():
+                for row_index, row in df.iterrows():
                     # Convert parquet source value to the URL format stored in SQLite
                     # using the domain-specific source_map_fn
                     row_source = source_map_fns[item['domain']](row['source'])
@@ -232,8 +236,13 @@ def repair_index(
                         embeddings_skipped += 1
                         continue
 
-                    # Extract embedding vector (columns after source, channel, offset)
-                    embedding = np.array(row.iloc[3:], dtype=np.float16)
+                    if serialized_embeddings:
+                        embedding = _decode_serialized_embedding(row['embeddings'], row_index).astype(np.float16)
+                    else:
+                        embedding = np.array(
+                            row.iloc[len(PARQUET_METADATA_COLUMNS):],
+                            dtype=np.float16,
+                        )
                     db.ui.add(embedding_id, embedding.astype(db.embedding_dtype))
                     embeddings_added += 1
 
