@@ -624,10 +624,21 @@ def create_empty_db(
     ):
     """Creates a hoplite database from a folder of parquet files"""
 
-    # Peek at one parquet file to get the embedding dimension.
-    first_item = next(iter_parquet_dataframes(parquet_source, api_client=api_client, prefetch=0), None)
+    # Peek at one non-empty parquet file to get the embedding dimension.
+    first_item = next(
+        (
+            item
+            for item in iter_parquet_dataframes(
+                parquet_source,
+                api_client=api_client,
+                prefetch=0,
+            )
+            if not item.empty
+        ),
+        None,
+    )
     if first_item is None:
-        raise ValueError("No parquet dataframes available to infer embedding dimension.")
+        raise ValueError("No non-empty parquet dataframes available to infer embedding dimension.")
     if _has_serialized_embeddings(first_item):
         first_embedding = next(
             value for value in first_item['embeddings'] if _is_serialized_embedding(value)

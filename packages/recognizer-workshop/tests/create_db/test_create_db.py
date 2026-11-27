@@ -85,6 +85,66 @@ def test_iter_parquet_dataframes_local_skip(tmp_path):
     assert list(dfs[0].columns[:3]) == ["source", "channel", "offset"]
 
 
+def test_create_empty_db_infers_dimension_from_first_non_empty_fragment(tmp_path):
+    data_dir = tmp_path / "parquet"
+    data_dir.mkdir()
+    serialized_columns = {
+        "source": pd.Series(dtype="string"),
+        "channel": pd.Series(dtype="int64"),
+        "offset": pd.Series(dtype="float64"),
+        "embeddings": pd.Series(dtype="string"),
+    }
+    _write_parquet(
+        pd.DataFrame(serialized_columns),
+        data_dir / "a_empty_111.parquet",
+    )
+
+    expected_embedding = np.array([0.1, 0.2, 0.3], dtype=np.float32)
+    _write_parquet(
+        pd.DataFrame({
+            "source": ["https://api.ecosounds.org/audio_recordings/222/original"],
+            "channel": [0],
+            "offset": [0.0],
+            "embeddings": [
+                base64.b64encode(expected_embedding.tobytes()).decode("ascii")
+            ],
+        }),
+        data_dir / "b_populated_222.parquet",
+    )
+
+    _, model_config = create_empty_db(
+        db_path=tmp_path / "db",
+        parquet_source=str(data_dir),
+        config=None,
+    )
+
+    assert model_config.embedding_dim == expected_embedding.size
+
+
+def test_create_empty_db_rejects_only_empty_fragments(tmp_path):
+    data_dir = tmp_path / "parquet"
+    data_dir.mkdir()
+    _write_parquet(
+        pd.DataFrame({
+            "source": pd.Series(dtype="string"),
+            "channel": pd.Series(dtype="int64"),
+            "offset": pd.Series(dtype="float64"),
+            "embeddings": pd.Series(dtype="string"),
+        }),
+        data_dir / "empty.parquet",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="No non-empty parquet dataframes available",
+    ):
+        create_empty_db(
+            db_path=tmp_path / "db",
+            parquet_source=str(data_dir),
+            config=None,
+        )
+
+
 def test_serialized_parquet_is_decoded_and_ingested_as_float16(tmp_path):
     data_dir = tmp_path / "parquet"
     data_dir.mkdir()
